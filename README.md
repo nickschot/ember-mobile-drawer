@@ -39,7 +39,24 @@ import { MobileDrawer } from 'ember-mobile-drawer';
 
 `<MobileDrawer>` is currently a placeholder that renders its block. The API is documented here as it lands.
 
-Only the imports documented in this README are public API. Modules under `-private` are internal: the package's `exports` blocks them, and they can change in any release.
+### Public imports
+
+These are the package's public API:
+
+- `ember-mobile-drawer`: the components and types
+- `ember-mobile-drawer/components/mobile-drawer`: the `<MobileDrawer>` component as a default export
+- `ember-mobile-drawer/template-registry`: the Glint template registry, for apps that use loose-mode (`.hbs`) templates
+- `ember-mobile-drawer/styles.css`: the base stylesheet (see [Styles](#styles))
+
+Test helpers (`ember-mobile-drawer/test-support`) will be added later.
+
+The package's `exports` also lists a few entries that are for tools, not for imports in your app:
+
+- `ember-mobile-drawer/addon-main.js`: the entry point ember-cli loads
+- `ember-mobile-drawer/_app_/components/mobile-drawer`: the app re-export Embroider uses to merge the component into your app
+- `ember-mobile-drawer/package.json`
+
+Every other path is blocked, including modules under `-private`, which are internal and can change in any release.
 
 ## Styles
 
