@@ -68,3 +68,17 @@ body {
 .demo-drawer[data-placement="left"] > .mobile-drawer__tray > * {
   margin-left: auto;
 }
+
+.demo-grabber {
+  width: 2.5rem;
+  height: 0.3rem;
+  margin: 0 auto 0.75rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentcolor 25%, transparent);
+}
+
+/* A bigger target when it is the only place to drag from. */
+.demo-grabber[data-active] {
+  padding: 0.6rem 0;
+  background-clip: content-box;
+}
