@@ -53,14 +53,27 @@
  *                             right:  translate3d( Npx, 0, 0)
  *                           where trayLength is the tray's untransformed
  *                           height (bottom/top) or width (left/right). Use a
- *                           fractional size (getBoundingClientRect with the
- *                           transform cleared), not the rounded offsetHeight/
+ *                           fractional size from getComputedStyle (its px
+ *                           height/width), not the rounded offsetHeight/
  *                           offsetWidth, so no sliver stays visible when
- *                           closed. Before the first inline transform is
- *                           written the tray sits fully off screen (closed).
+ *                           closed, and not getBoundingClientRect, which
+ *                           includes transforms (the tray's own and those of
+ *                           its ancestors, e.g. a scaled preview). Before the
+ *                           first inline transform is written the tray sits
+ *                           fully off screen (closed).
  *                           The tray's length is its content size, capped at
  *                           the root; the component may set an explicit
  *                           height/width when a snap point needs more.
+ *                           The content then sits against the tray's leading
+ *                           edge, the one that comes into view first: the top
+ *                           of a bottom drawer, the bottom of a top drawer,
+ *                           the right of a left drawer and the left of a
+ *                           right drawer. For top and left the tray is a flex
+ *                           container and the content gets an auto start
+ *                           margin; the margin drops to 0 when the content
+ *                           overflows, so it still scrolls from its start.
+ *                           Override `display` on the tray or `margin` on the
+ *                           content from app CSS to align it differently.
  *                           At the closed position the tray's box-shadow still
  *                           paints a little into the viewport. That is
  *                           intentional: set [data-closed] as soon as the
@@ -72,9 +85,10 @@
  *                           The base styles set no padding on the tray, so
  *                           apps can pad it freely.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
- *                           carries the safe-area padding (see below). Apps
- *                           should not set padding on it; pad the tray or
- *                           their own elements instead. For a `content` snap
+ *                           carries the safe-area padding (see below) and,
+ *                           for top and left, the auto start margin (see the
+ *                           tray). Apps should not set padding on it; pad the
+ *                           tray or their own elements instead. For a `content` snap
  *                           point, measure the tray's natural (untransformed)
  *                           size rather than this element, so tray padding
  *                           and borders are included.
@@ -210,6 +224,8 @@
   }
 
   :where(.mobile-drawer[data-placement="top"] > .mobile-drawer__tray) {
+    display: flex;
+    flex-direction: column;
     inset: 0 0 auto;
     max-height: calc(100% - env(safe-area-inset-bottom, 0px));
     max-width: none;
@@ -224,11 +240,14 @@
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
+    margin-top: auto;
     padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0
       env(safe-area-inset-left, 0px);
   }
 
   :where(.mobile-drawer[data-placement="left"] > .mobile-drawer__tray) {
+    display: flex;
+    flex-direction: row;
     inset: 0 auto 0 0;
     max-height: none;
     max-width: calc(100% - env(safe-area-inset-right, 0px));
@@ -243,6 +262,7 @@
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
+    margin-left: auto;
     padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px)
       env(safe-area-inset-left, 0px);
   }

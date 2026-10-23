@@ -411,6 +411,74 @@ module('Integration | Component | mobile-drawer', function (hooks) {
     assert.strictEqual(clock.pendingFrames, 0, 'without animating');
   });
 
+  for (const placement of ['top', 'left'] as const) {
+    /** The content's visible extent along the axis, relative to the container. */
+    const visibleContent = () => {
+      const element = el('[data-test-container]');
+      const container = element.getBoundingClientRect();
+      const content = el('[data-test-content]').getBoundingClientRect();
+      // Undo the scaling of the test container.
+      const scale = container.width / element.offsetWidth;
+      const extent =
+        placement === 'top'
+          ? [content.top - container.top, content.bottom - container.top]
+          : [content.left - container.left, content.right - container.left];
+      return extent.map((value) => Math.round(value / scale));
+    };
+
+    test(`${placement}: a content snap point shows the content at the leading edge and survives resizes`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      state.active = 1; // content
+      await renderDrawer(state);
+
+      const size = placement === 'top' ? 'height' : 'width';
+      const [natural, container] = placement === 'top' ? [80, 600] : [100, 400];
+      assert.strictEqual(
+        tray().style[size],
+        `${container}px`,
+        'the tray is sized for the largest snap point',
+      );
+      assert.strictEqual(
+        translation(),
+        expectedTranslation(placement, container, natural),
+        "'content' resolves to the content's natural size",
+      );
+      assert.deepEqual(visibleContent(), [0, natural], 'content is in view');
+
+      // The container grows: the snap point and the content stay put.
+      if (placement === 'top') {
+        state.height = 800;
+      } else {
+        el('[data-test-container]').style.width = '500px';
+      }
+      const before = translation();
+      await settled();
+      await waitUntil(() => translation() !== before);
+      const grown = placement === 'top' ? 800 : 500;
+      assert.strictEqual(
+        translation(),
+        expectedTranslation(placement, grown, natural),
+        'still at the content snap point after a container resize',
+      );
+      assert.deepEqual(visibleContent(), [0, natural], 'content still in view');
+      assert.strictEqual(clock.pendingFrames, 0, 'without animating');
+
+      // The content grows: the content snap point follows it.
+      const resized = translation();
+      el('[data-test-content]').style[size] = '150px';
+      await settled();
+      await waitUntil(() => translation() !== resized);
+      assert.strictEqual(
+        translation(),
+        expectedTranslation(placement, grown, 150),
+        'the content snap point follows the content size',
+      );
+      assert.deepEqual(visibleContent(), [0, 150], 'all content in view');
+      assert.strictEqual(clock.pendingFrames, 0, 'without animating');
+    });
+  }
+
   test('a resize during an animation retargets it', async function (assert) {
     const state = new State();
     await renderDrawer(state);

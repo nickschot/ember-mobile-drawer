@@ -241,6 +241,86 @@ module('Integration | styles.css', function (hooks) {
       );
     });
 
+    test(`${placement}: content sits against the leading edge of a larger tray`, async function (assert) {
+      await renderDrawer(placement);
+
+      const tray = el('[data-test-tray]');
+      tray.style.transform = 'none';
+      const vertical = placement === 'bottom' || placement === 'top';
+      // As the component does when a snap point is larger than the content.
+      tray.style[vertical ? 'height' : 'width'] = '300px';
+
+      const trayRect = tray.getBoundingClientRect();
+      const contentRect = el('[data-test-content]').getBoundingClientRect();
+      // The edge that comes into view first, i.e. the one facing the root.
+      const leading = OPPOSITE[placement];
+
+      assert.strictEqual(
+        contentRect[leading],
+        trayRect[leading],
+        `content touches the tray's ${leading} edge`,
+      );
+      assert.notStrictEqual(
+        contentRect[placement],
+        trayRect[placement],
+        `content leaves the ${placement} edge empty`,
+      );
+      if (vertical) {
+        assert.strictEqual(
+          el('[data-test-content-wrapper]').getBoundingClientRect().width,
+          trayRect.width,
+          'the content element spans the width',
+        );
+      }
+    });
+
+    test(`${placement}: overflowing content scrolls from its start`, async function (assert) {
+      await renderDrawer(placement);
+
+      const tray = el('[data-test-tray]');
+      tray.style.transform = 'none';
+      el('[data-test-content]').style.cssText = 'width: 5000px; height: 5000px';
+      const trayRect = tray.getBoundingClientRect();
+      const contentRect = el(
+        '[data-test-content-wrapper]',
+      ).getBoundingClientRect();
+
+      assert.strictEqual(tray.scrollTop, 0);
+      assert.strictEqual(tray.scrollLeft, 0);
+      assert.strictEqual(contentRect.top, trayRect.top, 'starts at the top');
+      assert.strictEqual(contentRect.left, trayRect.left, 'starts at the left');
+
+      // Content pushed out past the start (e.g. by justify-content) would be
+      // cut off rather than scrollable.
+      assert.true(tray.scrollHeight >= 5000, 'all of its height scrolls');
+      assert.true(tray.scrollWidth >= 5000, 'all of its width scrolls');
+    });
+
+    test(`${placement}: unlayered app styles can change the content alignment`, async function (assert) {
+      await renderDrawer(placement);
+      const style = addAppStyles(`
+        .mobile-drawer__tray { display: block; }
+        .mobile-drawer__content { margin: 0; }
+      `);
+
+      try {
+        const tray = el('[data-test-tray]');
+        tray.style.transform = 'none';
+        tray.style.height = '300px';
+        tray.style.width = '300px';
+        const trayRect = tray.getBoundingClientRect();
+        const contentRect = el(
+          '[data-test-content-wrapper]',
+        ).getBoundingClientRect();
+
+        assert.strictEqual(getComputedStyle(tray).display, 'block');
+        assert.strictEqual(contentRect.top, trayRect.top, 'at the top');
+        assert.strictEqual(contentRect.left, trayRect.left, 'at the left');
+      } finally {
+        style.remove();
+      }
+    });
+
     test(`${placement}: the transform origin is the drawer's edge`, async function (assert) {
       await renderDrawer(placement);
 
