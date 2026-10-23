@@ -64,9 +64,27 @@ Arguments:
 - `@placement`: `'bottom'` (default), `'top'`, `'left'` or `'right'`.
 - `@snapPoints`: where the drawer can rest, as the distance it is opened: px (`240`), a percentage of the space it can open into (`'50%'`) or `'content'` (the drawer's natural size). Include `0` to let it close. Default `[0, 'content']`.
 - `@activeSnapPoint`: the index into `@snapPoints` the drawer should be at. Changing it animates the drawer there. Leave it out to let the drawer keep track of its snap point itself (it then starts at index `0`, or stays where it was if you stop passing it). Update it together with `@snapPoints`: an index that doesn't exist is clamped to the nearest valid one, with a warning in development.
-- `@onSnapPointChange`: called with the new index when the drawer wants to move (through `snapTo`, `open` or `close`). When `@activeSnapPoint` is set, the drawer only moves once you pass the new index back in.
+- `@onSnapPointChange`: called with the new index when the drawer wants to move (through `snapTo`, `open`, `close` or a drag). When `@activeSnapPoint` is set, the drawer only moves once you pass the new index back in.
+- `@handleOnly`: only start a drag on elements with the yielded `handle` modifier. Default `false`: the whole tray drags.
 
-The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
+The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), the `handle` modifier, and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
+
+### Dragging
+
+The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. Past fully open the resistance is stiff: the tray moves off its edge by at most 24px, with the backdrop showing in the gap. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
+
+When `@activeSnapPoint` is set, letting go calls `@onSnapPointChange` with the snap point the drag ended on. Until you pass that index back in, the drawer heads back to the current `@activeSnapPoint`; if you never do, it stays there.
+
+To drag only from a grabber, for example because the content scrolls, use `@handleOnly` and the `handle` modifier:
+
+```gts
+<MobileDrawer @handleOnly={{true}} as |drawer|>
+  <div class="grabber" {{drawer.handle}}></div>
+  <ul class="long-list">...</ul>
+</MobileDrawer>
+```
+
+Without `@handleOnly` the `handle` modifier does nothing, so you can keep it on your grabber either way. The element that drags gets `touch-action: pan-x` (for `bottom` and `top`) or `pan-y` (for `left` and `right`). Scrolling content along the drawer's axis inside a draggable tray isn't supported yet.
 
 ### Public imports
 
