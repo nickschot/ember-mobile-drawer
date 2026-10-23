@@ -39,10 +39,10 @@ export default {
       files: compatFiles,
     },
     {
-      name: 'ember-lts-6.4',
+      name: 'ember-lts-6.12',
       npm: {
         devDependencies: {
-          'ember-source': 'npm:ember-source@~6.4.0',
+          'ember-source': 'npm:ember-source@~6.12.0',
         },
       },
     },
