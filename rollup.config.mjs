@@ -35,6 +35,8 @@ export default {
     // import it (or a shared chunk) and is not importable on its own.
     // `-private/**` is internal and deliberately left out; package.json#exports
     // also maps `./-private/*` to null so consumers can't resolve it.
+    // Adding an entry point is a public API change: also update
+    // package.json#exports and the allow-list in scripts/check-exports.mjs.
     // See https://github.com/embroider-build/embroider/blob/main/docs/v2-faq.md#how-can-i-define-the-public-exports-of-my-addon
     addon.publicEntrypoints([
       'index.js',
