@@ -14,6 +14,9 @@ importers:
       decorator-transforms:
         specifier: ^2.2.2
         version: 2.4.0(@babel/core@7.29.7)
+      ember-gesture-modifiers:
+        specifier: ^6.1.0
+        version: 6.1.0(@babel/core@7.29.7)(@ember/test-helpers@5.7.0(@babel/core@7.29.7))(ember-source@6.12.1(@glimmer/component@2.2.0)(rsvp@4.8.5))
     devDependencies:
       '@babel/core':
         specifier: ^7.25.2
@@ -2550,6 +2553,18 @@ packages:
 
   ember-estree@0.9.0:
     resolution: {integrity: sha512-CExL0d6FbbffZaQkD0+zA5PaIgle3fbpzapuLVQ+QZfI2KLalnhuof0e85Zvfy/fh8+q9liw7dqUhQX4gibMBA==}
+
+  ember-gesture-modifiers@6.1.0:
+    resolution: {integrity: sha512-LY92LRkO+wDiqeIjni3IXn1xV8lIUJzIm7Ywh7+sGeKpxy2qBtSlnyyFIAxBjCfD1RrM3wGSh3WKA41y+LS5lw==}
+    peerDependencies:
+      '@ember/test-helpers': '>=3.0.0'
+      ember-source: '>= 3.28.0'
+    peerDependenciesMeta:
+      '@ember/test-helpers':
+        optional: true
+
+  ember-modifier@4.3.0:
+    resolution: {integrity: sha512-O0rirSLQbGg0VJ/NqoQ4uN1bh2iAekZC/Ykma+FkjCM2ofrO38u+d8n3+AK6uVWeMJmogGX2KL+Is5fofoInJg==}
 
   ember-page-title@9.0.3:
     resolution: {integrity: sha512-fedRHUsvq8tIZgOii8jTrfAyeq+la/9H5eAzhNNwEyzo7nDMmqK2SxsyBUGXprd8fOacsPabLlzlucMi/4mUpA==}
@@ -8020,6 +8035,26 @@ snapshots:
       '@glimmer/syntax': 0.97.0
       content-tag: 4.2.1
       oxc-parser: 0.130.0
+
+  ember-gesture-modifiers@6.1.0(@babel/core@7.29.7)(@ember/test-helpers@5.7.0(@babel/core@7.29.7))(ember-source@6.12.1(@glimmer/component@2.2.0)(rsvp@4.8.5)):
+    dependencies:
+      '@embroider/addon-shim': 1.10.3
+      decorator-transforms: 2.4.0(@babel/core@7.29.7)
+      ember-modifier: 4.3.0(@babel/core@7.29.7)
+      ember-source: 6.12.1(@glimmer/component@2.2.0)(rsvp@4.8.5)
+    optionalDependencies:
+      '@ember/test-helpers': 5.7.0(@babel/core@7.29.7)
+    transitivePeerDependencies:
+      - '@babel/core'
+      - supports-color
+
+  ember-modifier@4.3.0(@babel/core@7.29.7):
+    dependencies:
+      '@embroider/addon-shim': 1.10.3
+      decorator-transforms: 2.4.0(@babel/core@7.29.7)
+    transitivePeerDependencies:
+      - '@babel/core'
+      - supports-color
 
   ember-page-title@9.0.3:
     dependencies:

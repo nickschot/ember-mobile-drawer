@@ -1,3 +1,5 @@
+import type { ModifierLike } from '@glint/template';
+
 export type { SnapPoint } from './-private/snap-points/index.ts';
 
 /**
@@ -31,7 +33,25 @@ export interface MobileDrawerApi {
    * moving to.
    */
   activeSnapPoint: number;
-  /** Whether the user is dragging the drawer. Always `false` for now. */
+  /**
+   * Makes an element a drag handle when the drawer has `@handleOnly={{true}}`:
+   * dragging then only starts on handles, so the rest of the tray keeps its
+   * native touch behaviour (e.g. scrolling). Without `@handleOnly` the whole
+   * tray drags and this modifier does nothing, so a handle can be marked up
+   * either way.
+   *
+   * ```gts
+   * <MobileDrawer @handleOnly={{true}} as |drawer|>
+   *   <div class="grabber" {{drawer.handle}}></div>
+   * </MobileDrawer>
+   * ```
+   */
+  handle: ModifierLike<{ Element: HTMLElement }>;
+  /**
+   * Whether the user is dragging the drawer: from the moment a pan along the
+   * drawer's axis is recognised until the finger lifts. Dragging works with
+   * touch and pen input.
+   */
   isDragging: boolean;
   /** Whether the drawer is animating towards a snap point. */
   isAnimating: boolean;
