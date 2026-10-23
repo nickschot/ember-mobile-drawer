@@ -290,15 +290,10 @@ module('Integration | styles.css', function (hooks) {
       assert.strictEqual(contentRect.top, trayRect.top, 'starts at the top');
       assert.strictEqual(contentRect.left, trayRect.left, 'starts at the left');
 
-      tray.scrollTop = tray.scrollHeight;
-      tray.scrollLeft = tray.scrollWidth;
-      const scrolled = el('[data-test-content]').getBoundingClientRect();
-      assert.true(
-        placement === 'bottom' || placement === 'top'
-          ? Math.round(scrolled.bottom) === Math.round(trayRect.bottom)
-          : Math.round(scrolled.right) === Math.round(trayRect.right),
-        'scrolls to its end along the drawer axis',
-      );
+      // Content pushed out past the start (e.g. by justify-content) would be
+      // cut off rather than scrollable.
+      assert.true(tray.scrollHeight >= 5000, 'all of its height scrolls');
+      assert.true(tray.scrollWidth >= 5000, 'all of its width scrolls');
     });
 
     test(`${placement}: unlayered app styles can change the content alignment`, async function (assert) {
