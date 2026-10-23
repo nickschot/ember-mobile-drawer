@@ -2,6 +2,7 @@ import { babel } from '@rollup/plugin-babel';
 import { Addon } from '@embroider/addon-dev/rollup';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const addon = new Addon({
   srcDir: 'src',
@@ -9,6 +10,11 @@ const addon = new Addon({
 });
 
 const rootDirectory = dirname(fileURLToPath(import.meta.url));
+// Stylesheets that apps import directly (e.g. `ember-mobile-drawer/styles.css`).
+// They are not imported by any module, so `keepAssets` below would not emit
+// them. Paths are relative to `src/` and end up at the same path in `dist/`.
+const standaloneStylesheets = ['styles.css'];
+
 const babelConfig = resolve(rootDirectory, './babel.publish.config.cjs');
 const tsConfig = resolve(rootDirectory, './tsconfig.publish.json');
 
@@ -69,6 +75,22 @@ export default {
     // addons are allowed to contain imports of .css files, which we want rollup
     // to leave alone and keep in the published output.
     addon.keepAssets(['**/*.css']),
+
+    // Copy the standalone stylesheets into dist/ as-is.
+    {
+      name: 'standalone-stylesheets',
+      buildStart() {
+        for (const fileName of standaloneStylesheets) {
+          const path = resolve(rootDirectory, 'src', fileName);
+          this.addWatchFile(path);
+          this.emitFile({
+            type: 'asset',
+            fileName,
+            source: readFileSync(path),
+          });
+        }
+      },
+    },
 
     // Remove leftover build artifacts when starting a new build.
     addon.clean(),
