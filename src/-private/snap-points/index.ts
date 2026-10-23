@@ -412,3 +412,112 @@ export function rubberBand(
   }
   return offset;
 }
+
+/**
+ * The inverse of {@link rubberBand}: the raw offset that `rubberBand` turns
+ * into `offset`, so a drag that catches a rubber-banded drawer can continue
+ * from where it is shown. `rubberBand(unRubberBand(x, ...), ...)` is `x`
+ * (within floating point error) for every `x` less than
+ * `MAX_BAND_FRACTION * dimension` outside the range.
+ *
+ * `rubberBand` only approaches `dimension`, and near it the inverse grows
+ * without bound. So an overshoot is first clamped to
+ * `MAX_BAND_FRACTION * dimension`, which keeps the result finite and
+ * moderate: at most `999 * dimension / factor` outside the range. With a
+ * `factor` or `dimension` of `0` nothing can be outside the range, so the
+ * offset is clamped to it.
+ *
+ * @throws RangeError for the same input as {@link rubberBand}.
+ */
+export function unRubberBand(
+  offset: number,
+  min: number,
+  max: number,
+  options: RubberBandOptions,
+): number {
+  // Validates the input the same way.
+  rubberBand(offset, min, max, options);
+  const { dimension, factor = DEFAULT_RUBBER_BAND_FACTOR } = options;
+
+  const unresist = (overshoot: number): number => {
+    if (factor <= 0 || dimension <= 0) return 0;
+    const fraction = Math.min(overshoot / dimension, MAX_BAND_FRACTION);
+    return (dimension / factor) * (1 / (1 - fraction) - 1);
+  };
+
+  if (offset < min) {
+    return min - unresist(min - offset);
+  }
+  if (offset > max) {
+    return max + unresist(offset - max);
+  }
+  return offset;
+}
+
+/**
+ * The largest fraction of the rubber-band `dimension` that
+ * {@link unRubberBand} inverts; larger overshoots are clamped to it.
+ */
+export const MAX_BAND_FRACTION = 0.999;
+
+/** The rubber-bands below the first and above the last snap point. */
+export interface DragBands {
+  below: RubberBandOptions;
+  above: RubberBandOptions;
+}
+
+/**
+ * Where a drag puts the drawer when it started at `start` (the offset shown
+ * when the finger caught it) and the finger has since moved `delta` px
+ * (positive opens).
+ *
+ * From inside `[min, max]` this is `rubberBand(start + delta)`. A drag that
+ * catches the drawer outside the range (e.g. springing back from a
+ * rubber-band, or a spring overshoot) continues from where it is shown,
+ * without a jump:
+ *
+ * - towards the range, the drawer follows the finger 1:1 until it is back in
+ *   the range, and from there as from inside;
+ * - further away from the range, only the band that is left resists: the
+ *   increase of the band from where it is. An overshoot at or past the
+ *   band's limit (possible after a spring overshoot when the tray is longer
+ *   than the largest snap point) then barely moves, but never jumps.
+ *
+ * @throws RangeError for non-finite input, or band options
+ *   {@link rubberBand} rejects.
+ */
+export function dragOffset(
+  start: number,
+  delta: number,
+  min: number,
+  max: number,
+  bands: DragBands,
+): number {
+  assertFinite('start', start);
+  assertFinite('delta', delta);
+  const { below, above } = bands;
+  const raw = start + delta;
+
+  if (start > max && delta > 0) {
+    // Further out: the band's increase from its (un-banded) position.
+    const from = unRubberBand(start, min, max, above);
+    return (
+      start +
+      rubberBand(from + delta, min, max, above) -
+      rubberBand(from, min, max, above)
+    );
+  }
+  if (start < min && delta < 0) {
+    const from = unRubberBand(start, min, max, below);
+    return (
+      start +
+      rubberBand(from + delta, min, max, below) -
+      rubberBand(from, min, max, below)
+    );
+  }
+  // Towards the range: 1:1 while still outside it.
+  if ((start > max && raw > max) || (start < min && raw < min)) {
+    return raw;
+  }
+  return rubberBand(raw, min, max, raw > max ? above : below);
+}
