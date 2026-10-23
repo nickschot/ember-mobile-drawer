@@ -5,16 +5,66 @@
 * This CSS is meant for the demo-app only, and will not be included in the published assets for this library.
 */
 
-/* Keep the preview controls usable above the drawer overlay. */
-.styles-preview-controls {
-  position: relative;
-  z-index: 1001;
-  display: flex;
-  gap: 1rem;
-  background: Canvas;
+body {
+  margin: 0;
+  padding: 1rem;
+  font-family: system-ui, sans-serif;
 }
 
-.styles-preview-content {
+.demo-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 30rem;
+}
+
+.demo-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.demo-drawer {
+  --mobile-drawer-radius: 12px;
+}
+
+.demo-drawer-content {
   padding: 1rem;
-  min-width: 15rem;
+}
+
+.demo-drawer-content[data-placement="left"],
+.demo-drawer-content[data-placement="right"] {
+  width: 16rem;
+}
+
+.demo-drawer-content h2 {
+  margin-top: 0;
+}
+
+.demo-drawer-content [aria-pressed="true"] {
+  font-weight: bold;
+}
+
+/*
+ * When a snap point makes the tray larger than its content, keep the content
+ * at the tray's leading edge, so a top or left drawer shows it while only
+ * partly open. Auto margins (unlike justify-content) keep overflowing content
+ * scrollable.
+ */
+.demo-drawer[data-placement="top"] > .mobile-drawer__tray {
+  display: flex;
+  flex-direction: column;
+}
+
+.demo-drawer[data-placement="top"] > .mobile-drawer__tray > * {
+  margin-top: auto;
+}
+
+.demo-drawer[data-placement="left"] > .mobile-drawer__tray {
+  display: flex;
+}
+
+.demo-drawer[data-placement="left"] > .mobile-drawer__tray > * {
+  margin-left: auto;
 }
