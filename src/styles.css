@@ -64,6 +64,16 @@
  *                           The tray's length is its content size, capped at
  *                           the root; the component may set an explicit
  *                           height/width when a snap point needs more.
+ *                           The content then sits against the tray's leading
+ *                           edge, the one that comes into view first: the top
+ *                           of a bottom drawer, the bottom of a top drawer,
+ *                           the right of a left drawer and the left of a
+ *                           right drawer. For top and left the tray is a flex
+ *                           container and the content gets an auto start
+ *                           margin; the margin drops to 0 when the content
+ *                           overflows, so it still scrolls from its start.
+ *                           Override `display` on the tray or `margin` on the
+ *                           content from app CSS to align it differently.
  *                           At the closed position the tray's box-shadow still
  *                           paints a little into the viewport. That is
  *                           intentional: set [data-closed] as soon as the
@@ -75,12 +85,13 @@
  *                           The base styles set no padding on the tray, so
  *                           apps can pad it freely.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
- *                           carries the safe-area padding (see below). Apps
- *                           should not set padding on it; pad the tray or
- *                           their own elements instead. For a `content` snap
- *                           point, measure the tray's natural (untransformed)
- *                           size rather than this element, so tray padding
- *                           and borders are included.
+ *                           carries the safe-area padding (see below) and,
+ *                           for top and left, the auto start margin (see the
+ *                           tray). Apps should not set padding on it; pad the
+ *                           tray or their own elements instead. For a
+ *                           `content` snap point, measure the tray's natural
+ *                           (untransformed) size rather than this element,
+ *                           so tray padding and borders are included.
  *
  * Custom properties (set them on the root, any ancestor or :root)
  * ---------------------------------------------------------------
@@ -122,9 +133,11 @@
  * override the base styles. Without that declaration the order in which the
  * layers are first seen (i.e. import order) decides. Unlayered resets that
  * set padding on `*` or `div` also remove the insets, because unlayered CSS
- * always wins. Within the layer, any app selector beats the
- * zero-specificity base rules. Cascade layers need Safari/iOS 15.4+,
- * Chrome 99+ or Firefox 97+; older browsers ignore the whole file.
+ * always wins. In the same way, an unlayered `* { margin: 0 }` reset undoes
+ * the leading-edge alignment of top and left drawers. Put such resets in a
+ * layer before `ember-mobile-drawer`. Within the layer, any app selector
+ * beats the zero-specificity base rules. Cascade layers need Safari/iOS
+ * 15.4+, Chrome 99+ or Firefox 97+; older browsers ignore the whole file.
  *
  * Themes (for example `ember-mobile-drawer/themes/ios.css`) go in the same
  * `ember-mobile-drawer` layer, so app CSS still wins over them. Theme rules
@@ -213,6 +226,8 @@
   }
 
   :where(.mobile-drawer[data-placement="top"] > .mobile-drawer__tray) {
+    display: flex;
+    flex-direction: column;
     inset: 0 0 auto;
     max-height: calc(100% - env(safe-area-inset-bottom, 0px));
     max-width: none;
@@ -227,11 +242,17 @@
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
+    margin-top: auto;
     padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0
       env(safe-area-inset-left, 0px);
   }
 
   :where(.mobile-drawer[data-placement="left"] > .mobile-drawer__tray) {
+    display: flex;
+    flex-direction: row;
+    /* Not stretched, so tall content grows the content element and its
+       bottom safe-area padding stays at the end of the scroll range. */
+    align-items: flex-start;
     inset: 0 auto 0 0;
     max-height: none;
     max-width: calc(100% - env(safe-area-inset-right, 0px));
@@ -246,6 +267,7 @@
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
+    margin-left: auto;
     padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px)
       env(safe-area-inset-left, 0px);
   }
