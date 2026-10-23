@@ -4,3 +4,17 @@
 *
 * This CSS is meant for the demo-app only, and will not be included in the published assets for this library.
 */
+
+/* Keep the preview controls usable above the drawer overlay. */
+.styles-preview-controls {
+  position: relative;
+  z-index: 1001;
+  display: flex;
+  gap: 1rem;
+  background: Canvas;
+}
+
+.styles-preview-content {
+  padding: 1rem;
+  min-width: 15rem;
+}
