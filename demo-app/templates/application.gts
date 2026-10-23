@@ -1,11 +1,10 @@
 import { pageTitle } from 'ember-page-title';
-
-const greeting = 'hello';
+import { MobileDrawer } from '#src/index.ts';
 
 <template>
-  {{pageTitle "Demo App"}}
+  {{pageTitle "ember-mobile-drawer"}}
 
-  <h1>Welcome to ember!</h1>
+  <h1>ember-mobile-drawer</h1>
 
-  {{greeting}}, world!
+  <MobileDrawer>Drawer content</MobileDrawer>
 </template>
