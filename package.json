@@ -24,6 +24,7 @@
       "default": "./dist/index.js"
     },
     "./addon-main.js": "./addon-main.cjs",
+    "./-private/*": null,
     "./*.css": "./dist/*.css",
     "./*": {
       "types": "./declarations/*.d.ts",

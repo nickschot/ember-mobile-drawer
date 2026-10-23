@@ -21,17 +21,26 @@ const tsConfig = resolve(rootDirectory, './tsconfig.publish.json');
 export default {
   // This provides defaults that work well alongside `publicEntrypoints` below.
   // You can augment this if you need to.
-  output: addon.output(),
+  output: {
+    ...addon.output(),
+    // Shared chunks for internal modules (imported by more than one public
+    // entry point) go under `dist/-private/`, which package.json#exports
+    // blocks, so their hashed file names never become importable paths.
+    chunkFileNames: '-private/[name]-[hash].js',
+  },
 
   plugins: [
     // These are the modules that users should be able to import from your
-    // addon. Anything not listed here may get optimized away.
-    // By default all your JavaScript modules (**/*.js) will be importable.
-    // But you are encouraged to tweak this to only cover the modules that make
-    // up your addon's public API. Also make sure your package.json#exports
-    // is aligned to the config here.
+    // addon. Anything not listed here is bundled into the public modules that
+    // import it (or a shared chunk) and is not importable on its own.
+    // `-private/**` is internal and deliberately left out; package.json#exports
+    // also maps `./-private/*` to null so consumers can't resolve it.
     // See https://github.com/embroider-build/embroider/blob/main/docs/v2-faq.md#how-can-i-define-the-public-exports-of-my-addon
-    addon.publicEntrypoints(['**/*.js', 'index.js', 'template-registry.js']),
+    addon.publicEntrypoints([
+      'index.js',
+      'template-registry.js',
+      'components/**/*.js',
+    ]),
 
     // These are the modules that should get reexported into the traditional
     // "app" tree. Things in here should also be in publicEntrypoints above, but
