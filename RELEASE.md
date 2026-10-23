@@ -25,3 +25,12 @@ When reviewing merged PR's the labels to be used are:
 ## Release
 
 Once the prep work is completed, the actual release is straight forward: you just need to merge the open [Plan Release](https://github.com/nickschot/ember-mobile-drawer/pulls?q=is%3Apr+is%3Aopen+%22Prepare+Release%22+in%3Atitle) PR
+
+## One-time maintainer setup
+
+1. **Initial tag (done).** release-plan needs at least one git tag to compute the changelog. An initial `v0.0.0` tag exists on the initial commit.
+2. **Allow Actions to create pull requests (done).** In the repository, go to Settings → Actions → General and enable "Allow GitHub Actions to create and approve pull requests". Without it the Plan Release workflow fails when it tries to open the release PR.
+3. **First publish.** The package does not exist on npm yet, so trusted publishing cannot be set up in advance. The maintainer publishes the first release once, manually with their own npm credentials.
+4. **npm trusted publishing.** After the first publish, add a trusted publisher for the package on npmjs.com: GitHub Actions, owner `nickschot`, repository `ember-mobile-drawer`, workflow `publish.yml`, no environment. Later releases are then published by `publish.yml` via OIDC, without an npm token.
+
+Note that release-plan does not plan a release until every PR merged since the last release has a release-plan label (`breaking`, `enhancement`, `bug`, `documentation` or `internal`).
