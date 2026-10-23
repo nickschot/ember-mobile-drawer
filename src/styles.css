@@ -52,7 +52,12 @@
  *                             left:   translate3d(-Npx, 0, 0)
  *                             right:  translate3d( Npx, 0, 0)
  *                           where trayLength is the tray's untransformed
- *                           height (bottom/top) or width (left/right). Use a
+ *                           height (bottom/top) or width (left/right). N is
+ *                           negative while the user drags the drawer past
+ *                           fully open (rubber-banding) and while it springs
+ *                           back from there: the tray then leaves its edge
+ *                           and the backdrop shows in the gap. The band is
+ *                           stiff there, so the gap stays under 24px. Use a
  *                           fractional size from getComputedStyle (its px
  *                           height/width), not the rounded offsetHeight/
  *                           offsetWidth, so no sliver stays visible when
