@@ -252,6 +252,14 @@ export function projectOffset(
 export interface SelectSnapPointOptions {
   /** See {@link projectOffset}. Defaults to {@link DEFAULT_DECELERATION_RATE}. */
   decelerationRate?: number;
+  /**
+   * Speed in px/s, `>= 0`, at or above which a release always moves at least
+   * to the next snap point in the direction of the velocity (when there is
+   * one), even when the projection lands nearer to a snap point behind it.
+   * Without it, a quick but short flick that starts far from the next snap
+   * point can settle against the direction the finger moved. Off by default.
+   */
+  flingVelocity?: number;
 }
 
 /**
@@ -261,6 +269,11 @@ export interface SelectSnapPointOptions {
  *
  * When the projected position is exactly halfway between two snap points the
  * one in the direction of the velocity wins (or the lower one when at rest).
+ *
+ * With {@link SelectSnapPointOptions.flingVelocity}, a release at least that
+ * fast never settles against its direction: if the nearest snap point is not
+ * beyond `offset` in the direction of the velocity, the first snap point that
+ * is beyond it is picked instead.
  *
  * @param resolved Snap points from {@link resolveSnapPoints}; must not be empty.
  * @param offset Offset in px at release.
@@ -281,6 +294,15 @@ export function selectSnapPoint(
       'ember-mobile-drawer: cannot select from zero snap points.',
     );
   }
+  const { flingVelocity } = options;
+  if (
+    flingVelocity !== undefined &&
+    !(Number.isFinite(flingVelocity) && flingVelocity >= 0)
+  ) {
+    throw new RangeError(
+      `ember-mobile-drawer: flingVelocity must be a finite number >= 0, got ${describe(flingVelocity)}.`,
+    );
+  }
   const projected = projectOffset(offset, velocity, options.decelerationRate);
 
   let best = first;
@@ -295,6 +317,20 @@ export function selectSnapPoint(
       best = snapPoint;
       bestDistance = distance;
     }
+  }
+
+  if (
+    flingVelocity !== undefined &&
+    velocity !== 0 &&
+    Math.abs(velocity) >= flingVelocity
+  ) {
+    const forward =
+      velocity > 0
+        ? resolved.find((snapPoint) => snapPoint.offset > offset)
+        : resolved.findLast((snapPoint) => snapPoint.offset < offset);
+    const backwards =
+      velocity > 0 ? best.offset <= offset : best.offset >= offset;
+    if (forward && backwards) best = forward;
   }
   return best;
 }
