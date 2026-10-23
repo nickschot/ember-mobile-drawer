@@ -95,6 +95,7 @@
     "publint": "^0.3.16",
     "qunit": "^2.24.1",
     "qunit-dom": "^3.4.0",
+    "release-plan": "^0.18.0",
     "rollup": "^4.22.5",
     "testem": "^3.15.1",
     "typescript": "~5.8.3",
@@ -104,6 +105,7 @@
   "peerDependencies": {
     "ember-source": ">= 5.12"
   },
+  "packageManager": "pnpm@10.34.6",
   "ember": {
     "edition": "octane"
   },
@@ -114,6 +116,5 @@
     "app-js": {
       "./components/mobile-drawer.js": "./dist/_app_/components/mobile-drawer.js"
     }
-  },
-  "packageManager": "pnpm@10.34.6"
+  }
 }
