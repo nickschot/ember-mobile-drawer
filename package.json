@@ -47,7 +47,7 @@
     "lint:hbs:fix": "ember-template-lint . --fix --no-error-on-unmatched-pattern",
     "lint:js": "eslint .",
     "lint:js:fix": "eslint . --fix",
-    "lint:publish": "pnpm build && publint run --level error",
+    "lint:publish": "pnpm build && publint run --level error && node scripts/check-exports.mjs",
     "lint:types": "ember-tsc --noEmit",
     "prepack": "rollup --config",
     "start": "vite dev",
