@@ -39,6 +39,8 @@ import { MobileDrawer } from 'ember-mobile-drawer';
 
 `<MobileDrawer>` is currently a placeholder that renders its block. The API is documented here as it lands.
 
+Only the imports documented in this README are public API. Modules under `-private` are internal: the package's `exports` blocks them, and they can change in any release.
+
 ## Styles
 
 The drawer ships a small base stylesheet that only handles layout: positioning for each placement, overflow and safe-area insets. Import it once, for example in your `app/app.ts`:
