@@ -18,12 +18,14 @@ const isPlacement = (value: unknown): value is Placement =>
 
 /**
  * Lets the drawer be tried out. The initial state can be set from the URL,
- * e.g. `/?placement=left&preset=0&snap=1`, which is handy for screenshots.
+ * e.g. `/?placement=left&preset=0&snap=1&handle=1`, which is handy for
+ * screenshots.
  */
 export default class DrawerDemo extends Component {
   @tracked placement: Placement = 'bottom';
   @tracked preset = 0;
   @tracked active = 0;
+  @tracked handleOnly = false;
 
   constructor(owner: Owner, args: object) {
     super(owner, args);
@@ -34,7 +36,12 @@ export default class DrawerDemo extends Component {
     if (SNAP_POINT_PRESETS[preset]) this.preset = preset;
     const snap = Number(params.get('snap'));
     if (snap >= 0 && snap < this.snapPoints.length) this.active = snap;
+    this.handleOnly = params.get('handle') === '1';
   }
+
+  setHandleOnly = (event: Event) => {
+    this.handleOnly = (event.target as HTMLInputElement).checked;
+  };
 
   get snapPoints(): SnapPoint[] {
     return SNAP_POINT_PRESETS[this.preset]!.snapPoints;
@@ -69,16 +76,24 @@ export default class DrawerDemo extends Component {
       @snapPoints={{this.snapPoints}}
       @activeSnapPoint={{this.active}}
       @onSnapPointChange={{this.onSnapPointChange}}
+      @handleOnly={{this.handleOnly}}
       class="demo-drawer"
       as |drawer|
     >
       <div class="demo-drawer-content" data-placement={{this.placement}}>
+        <div
+          class="demo-grabber"
+          data-placement={{this.placement}}
+          data-active={{if this.handleOnly "true"}}
+          {{drawer.handle}}
+        ></div>
         <h2>Drawer ({{this.placement}})</h2>
         <p>
           Snap point
           {{drawer.activeSnapPoint}}
           · progress
           {{drawer.progress}}
+          {{#if drawer.isDragging}}· dragging{{/if}}
           {{#if drawer.isAnimating}}· animating{{/if}}
         </p>
         <div class="demo-buttons">
@@ -97,8 +112,13 @@ export default class DrawerDemo extends Component {
           <button type="button" {{on "click" drawer.close}}>Close</button>
         </div>
         <p>
-          No gestures yet: use the buttons. The buttons in here use the yielded
-          snapTo, open and close actions.
+          Drag the drawer with touch or a pen
+          {{#if this.handleOnly}}
+            by the grabber
+          {{/if}}
+          (on a desktop, turn on device emulation in the browser's developer
+          tools). The buttons in here use the yielded snapTo, open and close
+          actions.
         </p>
       </div>
     </MobileDrawer>
@@ -126,6 +146,14 @@ export default class DrawerDemo extends Component {
             >[{{preset.label}}]</option>
           {{/each}}
         </select>
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={{this.handleOnly}}
+          {{on "change" this.setHandleOnly}}
+        />
+        Drag by the grabber only (@handleOnly)
       </label>
       <div class="demo-buttons">
         Set @activeSnapPoint:
