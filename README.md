@@ -30,14 +30,43 @@ ember install ember-mobile-drawer
 ## Usage
 
 ```gts
-import { MobileDrawer } from 'ember-mobile-drawer';
+import Component from '@glimmer/component';
+import { tracked } from '@glimmer/tracking';
+import { on } from '@ember/modifier';
+import { fn } from '@ember/helper';
+import { MobileDrawer, type SnapPoint } from 'ember-mobile-drawer';
 
-<template>
-  <MobileDrawer>Drawer content</MobileDrawer>
-</template>
+export default class Example extends Component {
+  snapPoints: SnapPoint[] = [0, '50%', '100%'];
+  @tracked active = 0;
+
+  setActive = (index: number) => (this.active = index);
+
+  <template>
+    <button type="button" {{on "click" (fn this.setActive 1)}}>Open</button>
+
+    <MobileDrawer
+      @placement="bottom"
+      @snapPoints={{this.snapPoints}}
+      @activeSnapPoint={{this.active}}
+      @onSnapPointChange={{this.setActive}}
+      as |drawer|
+    >
+      <button type="button" {{on "click" drawer.open}}>Expand</button>
+      <button type="button" {{on "click" drawer.close}}>Close</button>
+    </MobileDrawer>
+  </template>
+}
 ```
 
-`<MobileDrawer>` is currently a placeholder that renders its block. The API is documented here as it lands.
+Arguments:
+
+- `@placement`: `'bottom'` (default), `'top'`, `'left'` or `'right'`.
+- `@snapPoints`: where the drawer can rest, as the distance it is opened: px (`240`), a percentage of the space it can open into (`'50%'`) or `'content'` (the drawer's natural size). Include `0` to let it close. Default `[0, 'content']`.
+- `@activeSnapPoint`: the index into `@snapPoints` the drawer should be at. Changing it animates the drawer there. Leave it out to let the drawer keep track of its snap point itself (it then starts at index `0`, or stays where it was if you stop passing it). Update it together with `@snapPoints`: an index that doesn't exist is clamped to the nearest valid one, with a warning in development.
+- `@onSnapPointChange`: called with the new index when the drawer wants to move (through `snapTo`, `open` or `close`). When `@activeSnapPoint` is set, the drawer only moves once you pass the new index back in.
+
+The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
 
 Only the imports documented in this README are public API. Modules under `-private` are internal: the package's `exports` blocks them, and they can change in any release.
 
