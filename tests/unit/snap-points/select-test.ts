@@ -172,3 +172,49 @@ module('Unit | snap-points | selectSnapPoint', function () {
     assert.throws(() => offsetOf(700, 0, 1), isRangeError, 'rate 1');
   });
 });
+
+module('Unit | snap-points | selectSnapPoint with flingVelocity', function () {
+  const select = (offset: number, velocity: number, flingVelocity?: number) =>
+    selectSnapPoint(resolved, offset, velocity, { flingVelocity }).offset;
+
+  test('without it, a short flick can settle against its direction', function (assert) {
+    // Projected to ~95 and ~715.
+    assert.strictEqual(select(20, 150), 0, 'opening flick closes');
+    assert.strictEqual(select(790, -150), 800, 'closing flick opens');
+  });
+
+  test('a flick at or above it moves at least one snap point its way', function (assert) {
+    assert.strictEqual(select(20, 150, 150), 200, 'opening');
+    assert.strictEqual(select(790, -150, 100), 400, 'closing');
+    assert.strictEqual(select(400, 1, 0), 800, 'from a snap point');
+  });
+
+  test('a release below it uses the projection only', function (assert) {
+    assert.strictEqual(select(20, 150, 400), 0);
+    assert.strictEqual(select(790, -150, 400), 800);
+    assert.strictEqual(select(20, 0, 0), 0, 'at rest');
+  });
+
+  test('a projection that already goes its way is kept', function (assert) {
+    assert.strictEqual(select(210, 1500, 100), 800, 'still skips');
+    assert.strictEqual(select(220, 400, 100), 400);
+  });
+
+  test('past the last snap point it stays there', function (assert) {
+    assert.strictEqual(select(800, 500, 100), 800);
+    assert.strictEqual(select(850, 500, 100), 800, 'rubber-banded');
+    assert.strictEqual(select(-20, -500, 100), 0, 'below the first');
+  });
+
+  test('throws a RangeError for an invalid value', function (assert) {
+    for (const value of [NaN, -1, Infinity]) {
+      assert.throws(
+        () => select(100, 0, value),
+        (error: Error) =>
+          error instanceof RangeError &&
+          /flingVelocity must be a finite number >= 0/.test(error.message),
+        String(value),
+      );
+    }
+  });
+});
