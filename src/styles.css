@@ -1,0 +1,268 @@
+/*
+ * ember-mobile-drawer base styles
+ *
+ * Import once in your app:  import 'ember-mobile-drawer/styles.css';
+ *
+ * Layout only. The drawer is a canvas: these rules position the drawer for
+ * each placement and expose a few custom properties with neutral defaults.
+ * Everything else (padding, typography, handles, ...) is up to the app or an
+ * optional theme.
+ *
+ * Markup contract (rendered by <MobileDrawer>)
+ * --------------------------------------------
+ *
+ *   <div class="mobile-drawer" data-placement="bottom" data-closed>
+ *     <div class="mobile-drawer__backdrop"></div>
+ *     <div class="mobile-drawer__tray">
+ *       <div class="mobile-drawer__content">...yielded content...</div>
+ *     </div>
+ *   </div>
+ *
+ * The backdrop and tray must be direct children of the root, and the content
+ * a direct child of the tray; the placement rules use the child combinator so
+ * nested drawers don't affect each other.
+ *
+ * .mobile-drawer            Root. A fixed overlay covering the viewport that
+ *                           does not capture pointer events itself, so a
+ *                           non-modal drawer leaves the page interactive.
+ *                           Set `position: absolute` on it to embed the drawer
+ *                           in a positioned container instead.
+ * [data-placement]          On the root: bottom | top | left | right.
+ *                           Missing or unknown values fall back to bottom.
+ *                           left and right are physical: they don't flip
+ *                           under dir="rtl" (logical start/end may come
+ *                           later).
+ * [data-closed]             On the root while the drawer is fully closed and
+ *                           at rest. Hides the whole drawer (also from
+ *                           assistive technology). Remove it before the first
+ *                           frame of an opening drag or animation.
+ * .mobile-drawer__backdrop  Optional. Fills the root behind the tray. Its
+ *                           opacity is the max opacity multiplied by
+ *                           `--mobile-drawer-progress` (0-1), which the
+ *                           component writes as an inline style on the
+ *                           backdrop element itself (not the root, so the
+ *                           tray content is not restyled every frame).
+ * .mobile-drawer__tray      The sheet and scroll container. At
+ *                           `transform: none` it rests flush against its
+ *                           edge, i.e. fully open. The component writes an
+ *                           inline `transform` every frame that moves it away
+ *                           from its edge by `trayLength - openDistance` px:
+ *                             bottom: translate3d(0,  Npx, 0)
+ *                             top:    translate3d(0, -Npx, 0)
+ *                             left:   translate3d(-Npx, 0, 0)
+ *                             right:  translate3d( Npx, 0, 0)
+ *                           where trayLength is the tray's untransformed
+ *                           height (bottom/top) or width (left/right). Use a
+ *                           fractional size (getBoundingClientRect with the
+ *                           transform cleared), not the rounded offsetHeight/
+ *                           offsetWidth, so no sliver stays visible when
+ *                           closed. Before the first inline transform is
+ *                           written the tray sits fully off screen (closed).
+ *                           The tray's length is its content size, capped at
+ *                           the root; the component may set an explicit
+ *                           height/width when a snap point needs more.
+ *                           At the closed position the tray's box-shadow still
+ *                           paints a little into the viewport. That is
+ *                           intentional: set [data-closed] as soon as the
+ *                           drawer comes to rest closed, which hides it. The
+ *                           closed offset is not padded by a shadow extent,
+ *                           because the extent depends on the (themeable)
+ *                           shadow and padding it would make the JS distance
+ *                           and the CSS default disagree.
+ *                           The base styles set no padding on the tray, so
+ *                           apps can pad it freely.
+ * .mobile-drawer__content   Wraps the yielded content inside the tray and
+ *                           carries the safe-area padding (see below). Apps
+ *                           should not set padding on it; pad the tray or
+ *                           their own elements instead. For a `content` snap
+ *                           point, measure the tray's natural (untransformed)
+ *                           size rather than this element, so tray padding
+ *                           and borders are included.
+ *
+ * Custom properties (set them on the root, any ancestor or :root)
+ * ---------------------------------------------------------------
+ *
+ *   --mobile-drawer-background        tray background      (Canvas)
+ *   --mobile-drawer-color             tray text colour     (CanvasText)
+ *   --mobile-drawer-radius            radius of the tray corners facing
+ *                                     away from its edge   (0)
+ *   --mobile-drawer-shadow            tray box-shadow      (subtle shadow)
+ *   --mobile-drawer-backdrop-color    backdrop colour      (black)
+ *   --mobile-drawer-backdrop-opacity  backdrop max opacity (0.4)
+ *   --mobile-drawer-z-index           root z-index         (1000)
+ *
+ * Defaults are given as var() fallbacks rather than declared on the root, so
+ * values set on any ancestor (including :root) take effect.
+ * `--mobile-drawer-progress` is internal: the component writes it on the
+ * backdrop element. Don't set it from app CSS.
+ *
+ * Safe areas: the content element pads with env(safe-area-inset-*) on every
+ * side that touches the viewport edge, and the tray never grows under the
+ * opposite inset. Because the insets live on the content element (inside the
+ * scroll container), app padding on the tray adds to them instead of
+ * replacing them, and the bottom inset scrolls with the content. This needs
+ * `viewport-fit=cover` in the viewport meta tag.
+ *
+ * Motion: there are no CSS transitions here; the drawer moves with JS springs.
+ * `prefers-reduced-motion` is handled by the component, not this file. Themes
+ * that add transitions should wrap them in a prefers-reduced-motion query.
+ *
+ * Cascade: every selector is wrapped in :where(), so all base rules have
+ * specificity 0,0,0, and the whole file lives in one cascade layer,
+ * `ember-mobile-drawer`. Unlayered app CSS always wins over it. Apps with
+ * layered CSS (e.g. Tailwind v4) should declare the drawer's layer after
+ * their resets and before their components and utilities:
+ *   @layer theme, base, ember-mobile-drawer, components, utilities;
+ * After the resets, so a reset such as Tailwind's preflight
+ * (`* { padding: 0 }`) doesn't remove the safe-area padding on
+ * `.mobile-drawer__content`; before components and utilities, so those still
+ * override the base styles. Without that declaration the order in which the
+ * layers are first seen (i.e. import order) decides. Unlayered resets that
+ * set padding on `*` or `div` also remove the insets, because unlayered CSS
+ * always wins. Within the layer, any app selector beats the
+ * zero-specificity base rules. Cascade layers need Safari/iOS 15.4+,
+ * Chrome 99+ or Firefox 97+; older browsers ignore the whole file.
+ *
+ * Themes (for example `ember-mobile-drawer/themes/ios.css`) go in the same
+ * `ember-mobile-drawer` layer, so app CSS still wins over them. Theme rules
+ * that set real properties must load after this file to win over the base
+ * rules by source order (a theme can `@import` this file first to guarantee
+ * that). Themes that only set custom properties on `:where(:root)` don't
+ * depend on order, because the base rules never declare those properties.
+ *   - Wrap all selectors in :where() and scope them to a theme class, e.g.
+ *     `:where(.<theme-class> > .mobile-drawer__tray)`.
+ *   - Set values only through the custom properties above, declared on
+ *     `:where(:root)` or on a :where()-wrapped theme class the app puts on an
+ *     ancestor. Never declare `--mobile-drawer-*` on `.mobile-drawer` (or the
+ *     tray) itself: a declaration on the element beats the value it would
+ *     inherit, so the app's `:root` values would stop working.
+ */
+
+@layer ember-mobile-drawer {
+  :where(.mobile-drawer) {
+    position: fixed;
+    inset: 0;
+    z-index: var(--mobile-drawer-z-index, 1000);
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  :where(.mobile-drawer[data-closed]) {
+    visibility: hidden;
+  }
+
+  :where(.mobile-drawer__backdrop) {
+    position: absolute;
+    inset: 0;
+    background: var(--mobile-drawer-backdrop-color, rgb(0 0 0));
+    opacity: calc(
+      var(--mobile-drawer-backdrop-opacity, 0.4) *
+        var(--mobile-drawer-progress, 0)
+    );
+    pointer-events: auto;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :where(.mobile-drawer__tray) {
+    position: absolute;
+    box-sizing: border-box;
+    overflow: auto;
+    overscroll-behavior: contain;
+    pointer-events: auto;
+    background: var(--mobile-drawer-background, Canvas);
+    color: var(--mobile-drawer-color, CanvasText);
+    box-shadow: var(--mobile-drawer-shadow, 0 0 12px rgb(0 0 0 / 0.2));
+  }
+
+  /*
+   * Promote the tray to its own layer only while the drawer can move, instead
+   * of keeping a layer around for every closed drawer on the page.
+   */
+  :where(.mobile-drawer:not([data-closed]) > .mobile-drawer__tray) {
+    will-change: transform;
+  }
+
+  /*
+   * Placements. All selectors have the same (zero) specificity, so the
+   * placement rules rely on coming after the bottom default.
+   */
+
+  /* bottom (default) */
+  :where(.mobile-drawer__tray),
+  :where(.mobile-drawer[data-placement="bottom"] > .mobile-drawer__tray) {
+    inset: auto 0 0;
+    max-height: calc(100% - env(safe-area-inset-top, 0px));
+    max-width: none;
+    border-radius: var(--mobile-drawer-radius, 0) var(--mobile-drawer-radius, 0)
+      0 0;
+    transform: translate3d(0, 100%, 0);
+    transform-origin: 50% 100%;
+  }
+
+  :where(.mobile-drawer__content),
+  :where(
+    .mobile-drawer[data-placement="bottom"]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+  ) {
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
+      env(safe-area-inset-left, 0px);
+  }
+
+  :where(.mobile-drawer[data-placement="top"] > .mobile-drawer__tray) {
+    inset: 0 0 auto;
+    max-height: calc(100% - env(safe-area-inset-bottom, 0px));
+    max-width: none;
+    border-radius: 0 0 var(--mobile-drawer-radius, 0)
+      var(--mobile-drawer-radius, 0);
+    transform: translate3d(0, -100%, 0);
+    transform-origin: 50% 0;
+  }
+
+  :where(
+    .mobile-drawer[data-placement="top"]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+  ) {
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0
+      env(safe-area-inset-left, 0px);
+  }
+
+  :where(.mobile-drawer[data-placement="left"] > .mobile-drawer__tray) {
+    inset: 0 auto 0 0;
+    max-height: none;
+    max-width: calc(100% - env(safe-area-inset-right, 0px));
+    border-radius: 0 var(--mobile-drawer-radius, 0)
+      var(--mobile-drawer-radius, 0) 0;
+    transform: translate3d(-100%, 0, 0);
+    transform-origin: 0 50%;
+  }
+
+  :where(
+    .mobile-drawer[data-placement="left"]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+  ) {
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px)
+      env(safe-area-inset-left, 0px);
+  }
+
+  :where(.mobile-drawer[data-placement="right"] > .mobile-drawer__tray) {
+    inset: 0 0 0 auto;
+    max-height: none;
+    max-width: calc(100% - env(safe-area-inset-left, 0px));
+    border-radius: var(--mobile-drawer-radius, 0) 0 0
+      var(--mobile-drawer-radius, 0);
+    transform: translate3d(100%, 0, 0);
+    transform-origin: 100% 50%;
+  }
+
+  :where(
+    .mobile-drawer[data-placement="right"]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+  ) {
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px) 0;
+  }
+}
