@@ -176,6 +176,25 @@ section > h2 {
 }
 
 /*
+ * A top drawer's page-facing edge is its bottom, so the grabber goes last
+ * and sticks to the bottom of the tray's visible area when the content
+ * scrolls. The background keeps scrolled content from showing through.
+ */
+.demo-drawer-content[data-placement="top"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.demo-grabber[data-placement="top"] {
+  order: 1;
+  position: sticky;
+  bottom: 0;
+  width: auto;
+  margin: 0.75rem -1rem 0;
+  background: var(--mobile-drawer-background, Canvas);
+}
+
+/*
  * The playground drawer leaves the page usable while it is open, so the
  * controls can be changed live. The base styles let the backdrop catch
  * pointer events; backdrop behaviour is settled in #25 and #26.
@@ -196,6 +215,22 @@ section > h2 {
   width: 2.5rem;
   height: 0.3rem;
   margin: 0 auto 0.75rem;
+  position: relative;
+}
+
+/*
+ * The grabber element is the touch target; the visible bar is drawn by
+ * ::before so it keeps its own size and rounded ends however big the target
+ * grows.
+ */
+.demo-grabber::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2.5rem;
+  height: 0.3rem;
+  transform: translate(-50%, -50%);
   border-radius: 999px;
   background: color-mix(in srgb, currentcolor 25%, transparent);
 }
@@ -214,6 +249,12 @@ section > h2 {
   transform: translateY(-50%);
 }
 
+.demo-grabber[data-placement="left"]::before,
+.demo-grabber[data-placement="right"]::before {
+  width: 0.3rem;
+  height: 2.5rem;
+}
+
 .demo-grabber[data-placement="left"] {
   right: 0.4rem;
 }
@@ -225,12 +266,18 @@ section > h2 {
 /* A bigger target when it is the only place to drag from. */
 .demo-grabber[data-active] {
   padding: 0.6rem 0;
-  background-clip: content-box;
+  /* The padding grows the box, not the bar's place in the layout. */
+  margin-block: -0.6rem calc(0.75rem - 0.6rem);
+}
+
+.demo-grabber[data-active][data-placement="top"] {
+  margin-block: calc(0.75rem - 0.6rem) -0.6rem;
 }
 
 .demo-grabber[data-active][data-placement="left"],
 .demo-grabber[data-active][data-placement="right"] {
   padding: 0 0.6rem;
+  margin: 0;
 }
 
 .demo-grabber[data-active][data-placement="left"] {
