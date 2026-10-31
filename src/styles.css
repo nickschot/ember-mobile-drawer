@@ -102,7 +102,14 @@
  *                           right drawer. For top and left the tray is a flex
  *                           container and the content gets an auto start
  *                           margin; the margin drops to 0 when the content
- *                           overflows, so it still scrolls from its start.
+ *                           overflows, so it still scrolls. The component
+ *                           keeps a bottom or top tray at its scroll start
+ *                           (scrollTop 0 for bottom, the end of the scroll
+ *                           range for top, whose leading edge is its bottom)
+ *                           while the drawer is below its highest snap point:
+ *                           it scrolls it back when the drawer leaves that
+ *                           snap point (with the tray's movement, or once
+ *                           closed for a close).
  *                           Override `display` on the tray or `margin` on the
  *                           content from app CSS to align it differently.
  *                           At the closed position the tray's box-shadow still
