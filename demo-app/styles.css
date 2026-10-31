@@ -7,25 +7,151 @@
 
 :root {
   color-scheme: light dark;
+
+  /*
+   * A page colour that contrasts with the tray (Canvas) in both schemes, so
+   * the drawer stays visible even when the backdrop dims the page. Plain
+   * values plus a media query rather than light-dark(), which needs Chrome
+   * 123, Firefox 120 or Safari 17.5.
+   */
+  --demo-page: #e8ecf4;
+  --demo-text: #111;
+  --demo-surface: #fff;
+  --demo-muted: #4a5468;
+  --demo-error: #b00020;
+  --demo-link: #1d4ed8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --demo-page: #44557a;
+    --demo-text: #f4f4f8;
+    --demo-surface: #2f3c58;
+    --demo-muted: #d3d9e6;
+    --demo-error: #ffb4c0;
+    --demo-link: #bcd2ff;
+  }
 }
 
 body {
-  /*
-   * A page colour that contrasts with the tray (Canvas) in both schemes, so
-   * the drawer stays visible even when the backdrop dims the page.
-   */
-  background: light-dark(#e8ecf4, #44557a);
-  color: light-dark(#111, #f4f4f8);
+  background: var(--demo-page);
+  color: var(--demo-text);
   margin: 0;
   padding: 1rem;
   font-family: system-ui, sans-serif;
+  line-height: 1.4;
+}
+
+a {
+  color: var(--demo-link);
+}
+
+.demo-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+}
+
+.demo-header p {
+  margin: 0 0 0.5rem;
+}
+
+main {
+  max-width: 30rem;
+}
+
+section > h2 {
+  margin: 1.5rem 0 0.75rem;
+}
+
+.demo-hint {
+  margin: 0;
+  color: var(--demo-muted);
+  font-size: 0.9rem;
+}
+
+.demo-error {
+  color: var(--demo-error);
 }
 
 .demo-controls {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  max-width: 30rem;
+  margin: 0 0 1rem;
+  border: 1px solid color-mix(in srgb, currentcolor 25%, transparent);
+  border-radius: 8px;
+  background: var(--demo-surface);
+}
+
+.demo-controls label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+/* Keep a checkbox next to its (wrapping) text. */
+.demo-controls label:has(> input[type="checkbox"]) {
+  flex-wrap: nowrap;
+}
+
+.demo-controls input[type="text"],
+.demo-controls input[type="range"] {
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.demo-snap-points {
+  font-family: ui-monospace, monospace;
+  font-size: 1rem;
+  padding: 0.3rem 0.4rem;
+}
+
+.demo-snap-points[aria-invalid="true"] {
+  outline: 2px solid var(--demo-error);
+}
+
+.demo-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.demo-controls:disabled {
+  opacity: 0.7;
+}
+
+.demo-code pre {
+  overflow-x: auto;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--demo-surface);
+  font-size: 0.8rem;
+}
+
+.demo-example {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem 1rem;
+  border-radius: 8px;
+  background: var(--demo-surface);
+}
+
+.demo-example h3 {
+  margin: 0 0 0.25rem;
+}
+
+.demo-example > .demo-hint {
+  margin-bottom: 0.75rem;
+}
+
+.demo-placeholder {
+  margin: 0;
+  padding: 1rem;
+  border: 2px dashed color-mix(in srgb, currentcolor 35%, transparent);
+  border-radius: 8px;
+  text-align: center;
 }
 
 .demo-buttons {
@@ -45,7 +171,17 @@ body {
 
 .demo-drawer-content[data-placement="left"],
 .demo-drawer-content[data-placement="right"] {
+  box-sizing: border-box;
   width: min(80vw, 16rem);
+}
+
+/*
+ * The playground drawer leaves the page usable while it is open, so the
+ * controls can be changed live. The base styles let the backdrop catch
+ * pointer events; backdrop behaviour is settled in #25 and #26.
+ */
+.demo-playground-drawer .mobile-drawer__backdrop {
+  pointer-events: none;
 }
 
 .demo-drawer-content h2 {
@@ -103,4 +239,74 @@ body {
 
 .demo-grabber[data-active][data-placement="right"] {
   left: -0.2rem;
+}
+
+/* Bottom sheet example */
+.example-sheet .mobile-drawer__tray {
+  max-height: 90%;
+}
+
+.example-sheet-header {
+  position: sticky;
+  top: 0;
+  padding: 0.25rem 1rem 0.5rem;
+  background: var(--mobile-drawer-background, Canvas);
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 15%, transparent);
+}
+
+.example-sheet-header .demo-grabber {
+  margin-bottom: 0.25rem;
+}
+
+.example-sheet-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.example-sheet-title h3 {
+  margin: 0;
+}
+
+.example-list {
+  margin: 0;
+  padding: 0 1rem;
+  list-style: none;
+}
+
+.example-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 10%, transparent);
+}
+
+/* Side drawer example */
+.example-nav {
+  box-sizing: border-box;
+  width: min(80vw, 16rem);
+  padding: 1rem;
+}
+
+.example-nav h3 {
+  margin: 0 0 0.5rem;
+}
+
+.example-nav ul {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.example-nav a {
+  display: block;
+  padding: 0.6rem 0.5rem;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.example-nav a[aria-current="page"] {
+  background: color-mix(in srgb, currentcolor 12%, transparent);
+  font-weight: bold;
 }

@@ -5,7 +5,7 @@ import { babel } from '@rollup/plugin-babel';
 // For scenario testing
 const isCompat = Boolean(process.env.ENABLE_COMPAT_BUILD);
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     ...(isCompat ? [classicEmberSupport()] : []),
     ember(),
@@ -16,9 +16,13 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
-      input: {
-        tests: 'tests/index.html',
-      },
+      // A production build is the demo app (`pnpm build:demo`, deployed to
+      // GitHub Pages with `--base=/ember-mobile-drawer/`). Other modes build
+      // the test app (`pnpm test` uses `--mode=development`).
+      input:
+        mode === 'production'
+          ? { main: 'index.html' }
+          : { tests: 'tests/index.html' },
     },
   },
-});
+}));

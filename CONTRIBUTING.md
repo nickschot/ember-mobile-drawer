@@ -25,6 +25,9 @@ Scenarios for other Ember versions are defined in `.try.mjs` and run in CI.
 
 - `pnpm start`
 - Visit the demo app (`demo-app/`) at [http://localhost:4200](http://localhost:4200).
+- `pnpm build:demo` – production build of the demo app into `dist-demo/`. Add `--base=/ember-mobile-drawer/` to build it the way it is deployed.
+
+The demo app is the playground. Every push to `main` deploys it to GitHub Pages at <https://nickschot.github.io/ember-mobile-drawer/> (`.github/workflows/pages.yml`); pull requests that touch it only build it.
 
 ### Building the addon
 
