@@ -3,16 +3,19 @@
  *
  * An iOS 26/27 ("Liquid Glass") look: a translucent, blurred sheet with a
  * light rim and a darkened edge, large rounded corners on the page-facing
- * side, a dimming backdrop and a grabber.
+ * side, a dimming backdrop and a grabber. When fully open ([data-expanded])
+ * the sheet becomes opaque, like an iOS sheet at full height.
  *
  * Import it after the base styles:
  *   import 'ember-mobile-drawer/styles.css';
  *   import 'ember-mobile-drawer/themes/ios.css';
  *
- * This file does not @import styles.css; apps import both. The only real
- * properties it sets are `backdrop-filter` on the tray (which the base styles
- * don't set) and the grabber's, so it doesn't depend on load order, but load
- * it after styles.css anyway.
+ * This file does not @import styles.css; apps import both, and this file
+ * must load after styles.css: the opaque full-height sheet sets `background`
+ * on the tray, which the base styles also set with the same (zero)
+ * specificity, so source order decides. The other real properties it sets
+ * (`backdrop-filter` and `transition` on the tray, and the grabber's) are not
+ * set by the base styles.
  *
  * Opt in by putting the theme class on an ancestor of the drawer, e.g.
  *   <body class="mobile-drawer-theme-ios">
@@ -32,10 +35,11 @@
  *                                    15px strip across the tray, sticky at
  *                                    its page-facing edge so it stays in
  *                                    view while the content scrolls. While
- *                                    the drawer is [data-expanded] it has an
- *                                    opaque sheet background, so scrolled
- *                                    content doesn't show through; otherwise
- *                                    it is transparent. Its ::before draws
+ *                                    the drawer is [data-expanded] it has
+ *                                    the opaque sheet's colour, so scrolled
+ *                                    content doesn't show through and no
+ *                                    band shows; otherwise it is
+ *                                    transparent. Its ::before draws
  *                                    the 36x5px bar, in the tray's text
  *                                    colour. Don't wrap it in another
  *                                    element: a sticky element only sticks
@@ -53,11 +57,23 @@
  * more` the sheet is solid and unblurred, like iOS with Reduce Transparency
  * or Increase Contrast.
  *
- * iOS Safari 26 toolbar: below its highest snap point, the glass sheet still
- * stops at the floating toolbar with a visible edge. Safari fills the
- * toolbar with a colour from the fixed element at the bottom edge, and for
- * an element with a backdrop-filter it uses its own material instead (see
- * "Safari 26 bars" in styles.css).
+ * Full height: while the drawer is [data-expanded] (at or heading to its
+ * highest snap point) the sheet is opaque and unblurred: the sheet colour
+ * (`--mobile-drawer-background`, the theme's or the app's) without its
+ * transparency. It keeps the theme's radius, which is the full-height
+ * radius; the sheet is edge-to-edge at every snap point. The glass fades to
+ * opaque in 0.25s, unless `prefers-reduced-motion: reduce`. This needs
+ * relative colours with a light-dark() origin (Safari 18+, Chrome 123+,
+ * Firefox 128+); elsewhere the full-height sheet stays as it is below the
+ * top.
+ *
+ * iOS Safari 26 toolbar: Safari fills the toolbar with a colour from the
+ * fixed element at the bottom edge, and for an element with a
+ * backdrop-filter it uses its own material instead (see "Safari 26 bars" in
+ * styles.css). So below its highest snap point the glass sheet still stops
+ * at the floating toolbar with a visible edge. At the highest snap point
+ * (after the fade, see "Full height") the sheet is opaque with no
+ * backdrop-filter, so Safari takes the sheet colour there.
  *
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
@@ -110,18 +126,9 @@
    * scrolled sheet: [data-expanded] goes away when the run starts, but the
    * tray only gets back to its scroll start in step with the run (or, for a
    * close, once closed), so for that moment the scrolled content shows
-   * under the bar. While the drawer is expanded
-   * ([data-expanded], at or heading to the highest snap point) the content
-   * scrolls under the strip, so it gets the sheet's background, made opaque
-   * so the content doesn't show through the glass tint: the opaque version
-   * of the glass tint is the solid sheet colour. (A backdrop-filter on the
-   * strip instead would cost a second blur, and in Chrome it doesn't blur
-   * the content scrolling under it.)
-   *
-   * The opaque colour needs relative colours with a light-dark() origin
-   * (the theme's background is a light-dark() value where light-dark() is
-   * supported). Where that doesn't work the expanded strip gets the sheet's
-   * background as is, translucent on the glass sheet.
+   * under the bar. While the drawer is expanded the content scrolls under
+   * the strip, so the strip gets the opaque sheet's colour (see "Full
+   * height" below).
    */
   :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
     display: block;
@@ -131,28 +138,6 @@
     z-index: 1;
     padding: 5px 0;
     background: transparent;
-  }
-
-  :where(
-    .mobile-drawer-theme-ios
-      .mobile-drawer[data-expanded]
-      > .mobile-drawer__tray
-      > .mobile-drawer__content
-      > .mobile-drawer-theme-ios__grabber
-  ) {
-    background: var(--mobile-drawer-background, Canvas);
-  }
-
-  @supports (color: rgb(from light-dark(red, red) r g b / 1)) {
-    :where(
-      .mobile-drawer-theme-ios
-        .mobile-drawer[data-expanded]
-        > .mobile-drawer__tray
-        > .mobile-drawer__content
-        > .mobile-drawer-theme-ios__grabber
-    ) {
-      background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
-    }
   }
 
   :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::before {
@@ -225,6 +210,104 @@
     :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
+    }
+  }
+
+  /*
+   * Full height: while the drawer is expanded ([data-expanded], at or
+   * heading to its highest snap point) the sheet is opaque, like an iOS
+   * sheet at full height: the sheet colour without its transparency (the
+   * opaque version of the glass tint is the solid sheet colour) and no blur.
+   * The grabber strip gets the same colour, so it covers the content that
+   * scrolls under it and doesn't show as a band. [data-expanded] doesn't
+   * change during a drag or while a touch holds the drawer, so small
+   * movements at the top don't switch it back and forth.
+   *
+   * The sheet keeps the theme's radius (--mobile-drawer-radius): that is
+   * the full-height radius. The sheet is edge-to-edge at every snap point.
+   *
+   * The opaque colour needs relative colours with a light-dark() origin
+   * (the theme's background is a light-dark() value where light-dark() is
+   * supported). Where that doesn't work the sheet stays as it is below the
+   * top, and the expanded strip gets the sheet's background as is,
+   * translucent on the glass sheet, so the content under it is at least
+   * tinted.
+   *
+   * These rules come last: the reduced transparency rules above must not
+   * put the blur back on the expanded sheet, and the tray background must
+   * win over the base styles' (same specificity, later in source order).
+   */
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-expanded]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  ) {
+    background: var(--mobile-drawer-background, Canvas);
+  }
+
+  @supports (color: rgb(from light-dark(red, red) r g b / 1)) {
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-expanded]
+        > .mobile-drawer__tray
+    ),
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-expanded]
+        > .mobile-drawer__tray
+        > .mobile-drawer__content
+        > .mobile-drawer-theme-ios__grabber
+    ) {
+      background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
+    }
+
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-expanded]
+        > .mobile-drawer__tray
+    ) {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+
+    /*
+     * The glass fades to opaque and back in 0.25s, while the tray moves to
+     * or from the top. Towards the top the blur stays on until the sheet is
+     * opaque, and the strip only gets its colour once the tray has it:
+     * before that, a strip that is already opaque would show as a band on
+     * the sheet that is still fading. No content is under the strip then
+     * (the tray is at its scroll start below the top). Away from the top the
+     * blur comes back and the strip turns transparent at once, and the sheet
+     * fades back to glass. A transition uses the values of the state it
+     * goes to, so each direction gets its own.
+     */
+    @media (prefers-reduced-motion: no-preference) {
+      :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
+        transition: background-color 0.25s ease;
+      }
+
+      :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-expanded]
+          > .mobile-drawer__tray
+      ) {
+        transition:
+          background-color 0.25s ease,
+          -webkit-backdrop-filter 0s linear 0.25s,
+          backdrop-filter 0s linear 0.25s;
+      }
+
+      :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-expanded]
+          > .mobile-drawer__tray
+          > .mobile-drawer__content
+          > .mobile-drawer-theme-ios__grabber
+      ) {
+        transition: background-color 0s linear 0.25s;
+      }
     }
   }
 }

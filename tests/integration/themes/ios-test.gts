@@ -100,6 +100,26 @@ function themeMediaRule(condition: string): CSSMediaRule {
   throw new Error(`No theme @media rule for ${condition}`);
 }
 
+/** Ends the theme's running CSS transitions, as if they had run. */
+function finishTransitions() {
+  for (const animation of document.getAnimations()) {
+    if (animation instanceof CSSTransition) animation.finish();
+  }
+}
+
+/**
+ * Whether a computed colour is fully transparent. A colour in a running
+ * transition can serialize in another colour space, e.g. `oklab(0 0 0 / 0)`.
+ */
+function isTransparent(color: string): boolean {
+  return color === 'transparent' || /[,/]\s*0\)$/.test(color);
+}
+
+/** The theme's transitions only run without reduced motion. */
+function transitionsRun(): boolean {
+  return matchMedia('(prefers-reduced-motion: no-preference)').matches;
+}
+
 const TALL_LINES = Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`);
 
 /**
@@ -234,6 +254,7 @@ module('Integration | themes/ios.css', function (hooks) {
       const style = applyReducedTransparency();
 
       try {
+        finishTransitions();
         const tray = getComputedStyle(el('[data-test-tray]'));
         assert.strictEqual(tray.backgroundColor, SOLID[scheme]);
         assert.strictEqual(tray.backdropFilter, 'none');
@@ -327,16 +348,48 @@ module('Integration | themes/ios.css', function (hooks) {
       assert.strictEqual(grabber.backdropFilter, 'none');
     });
 
-    test(`${scheme}: expanded, the grabber has the opaque sheet colour behind it`, async function (assert) {
+    test(`${scheme}: expanded, the sheet is opaque and unblurred, and the strip has the same colour`, async function (assert) {
       await renderDrawer({ scheme, tall: true, expanded: true });
 
-      const tray = getComputedStyle(el('[data-test-tray]'));
-      assert.strictEqual(tray.backgroundColor, GLASS[scheme].background);
+      const trayElement = el('[data-test-tray]');
+      const tray = getComputedStyle(trayElement);
+      // The glass tint without its transparency: the solid sheet colour.
+      assert.strictEqual(rgb(tray.backgroundColor), SOLID[scheme], 'opaque');
+      assert.strictEqual(tray.backdropFilter, 'none', 'no blur');
+      assert.strictEqual(tray.color, GLASS[scheme].color);
+      for (const [corner, value] of Object.entries(corners(trayElement))) {
+        assert.strictEqual(
+          value,
+          ROUNDED.bottom.includes(corner) ? '32px' : '0px',
+          `${corner} corner: the full-height radius`,
+        );
+      }
+
       const grabber = getComputedStyle(el('[data-test-grabber]'));
       assert.strictEqual(grabber.position, 'sticky');
-      // The glass tint without its transparency: the solid sheet colour.
-      assert.strictEqual(rgb(grabber.backgroundColor), SOLID[scheme]);
+      assert.strictEqual(
+        grabber.backgroundColor,
+        tray.backgroundColor,
+        'the strip has the sheet colour: no band',
+      );
       assert.strictEqual(grabber.backdropFilter, 'none', 'no second blur');
+    });
+
+    test(`${scheme}: expanded with reduced transparency, the solid sheet and the strip have the same colour`, async function (assert) {
+      await renderDrawer({ scheme, tall: true, expanded: true });
+      const style = applyReducedTransparency();
+
+      try {
+        const tray = getComputedStyle(el('[data-test-tray]'));
+        assert.strictEqual(rgb(tray.backgroundColor), SOLID[scheme]);
+        assert.strictEqual(tray.backdropFilter, 'none');
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-grabber]')).backgroundColor,
+          tray.backgroundColor,
+        );
+      } finally {
+        style.remove();
+      }
     });
 
     test(`${scheme}: on the solid sheet the grabber shows the solid sheet colour`, async function (assert) {
@@ -344,6 +397,8 @@ module('Integration | themes/ios.css', function (hooks) {
       const style = applyReducedTransparency();
 
       try {
+        // The sheet colour transitions from glass to solid.
+        finishTransitions();
         const tray = getComputedStyle(el('[data-test-tray]'));
         assert.strictEqual(tray.backgroundColor, SOLID[scheme]);
         assert.strictEqual(
@@ -353,6 +408,7 @@ module('Integration | themes/ios.css', function (hooks) {
         );
 
         el('[data-test-root]').setAttribute('data-expanded', '');
+        finishTransitions();
         assert.strictEqual(
           rgb(getComputedStyle(el('[data-test-grabber]')).backgroundColor),
           SOLID[scheme],
@@ -364,13 +420,16 @@ module('Integration | themes/ios.css', function (hooks) {
     });
   }
 
-  test("expanded, the grabber follows the app's sheet background, made opaque", async function (assert) {
+  test("expanded, the sheet and the grabber follow the app's sheet background, made opaque", async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     const style = addStyles(
       '.mobile-drawer-theme-ios { --mobile-drawer-background: rgb(10 20 30 / 0.5); }',
     );
 
     try {
+      finishTransitions();
+      const tray = getComputedStyle(el('[data-test-tray]'));
+      assert.strictEqual(rgb(tray.backgroundColor), 'rgb(10, 20, 30)');
       const grabber = getComputedStyle(el('[data-test-grabber]'));
       assert.strictEqual(rgb(grabber.backgroundColor), 'rgb(10, 20, 30)');
     } finally {
@@ -378,11 +437,73 @@ module('Integration | themes/ios.css', function (hooks) {
     }
   });
 
+  test('towards the top the glass fades to opaque before the strip and the blur change; away from it they change at once', async function (assert) {
+    if (!transitionsRun()) {
+      assert.true(true, 'reduced motion: no transitions');
+      return;
+    }
+    await renderDrawer({ tall: true });
+    const root = el('[data-test-root]');
+    const tray = el('[data-test-tray]');
+    const grabber = el('[data-test-grabber]');
+    // Reading the styles also gives the transitions a style to start from.
+    assert.strictEqual(
+      getComputedStyle(tray).backgroundColor,
+      GLASS.light.background,
+      'glass to start with',
+    );
+    assert.true(isTransparent(getComputedStyle(grabber).backgroundColor));
+
+    root.setAttribute('data-expanded', '');
+    assert.strictEqual(
+      getComputedStyle(tray).backdropFilter,
+      'blur(30px) saturate(1.8)',
+      'fading in: still blurred',
+    );
+    assert.true(
+      isTransparent(getComputedStyle(grabber).backgroundColor),
+      'fading in: the strip is still transparent, no band',
+    );
+    assert.true(
+      tray.getAnimations().length > 0,
+      'fading in: the sheet colour transitions',
+    );
+
+    finishTransitions();
+    assert.strictEqual(
+      rgb(getComputedStyle(tray).backgroundColor),
+      SOLID.light,
+    );
+    assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
+    assert.strictEqual(
+      rgb(getComputedStyle(grabber).backgroundColor),
+      SOLID.light,
+    );
+
+    root.removeAttribute('data-expanded');
+    assert.strictEqual(
+      getComputedStyle(tray).backdropFilter,
+      'blur(30px) saturate(1.8)',
+      'fading out: blurred at once',
+    );
+    assert.true(
+      isTransparent(getComputedStyle(grabber).backgroundColor),
+      'fading out: the strip is transparent at once',
+    );
+    finishTransitions();
+    assert.strictEqual(
+      getComputedStyle(tray).backgroundColor,
+      GLASS.light.background,
+      'glass again',
+    );
+  });
+
   test('the opaque grabber colour is only used where a light-dark() origin works', function (assert) {
     // A browser with relative colours that can't take light-dark() as the
-    // origin would make the declaration invalid at computed-value time, i.e.
-    // a transparent strip. The feature query must test that combination, so
-    // such a browser keeps the translucent sheet background instead.
+    // origin would make the declarations invalid at computed-value time, i.e.
+    // a transparent sheet and strip. The feature query must test that
+    // combination, so such a browser keeps the glass sheet and a translucent
+    // strip instead.
     const conditions: string[] = [];
     const visit = (rules: CSSRuleList) => {
       for (const rule of Array.from(rules)) {
@@ -423,6 +544,7 @@ module('Integration | themes/ios.css', function (hooks) {
     );
 
     try {
+      finishTransitions();
       const tray = getComputedStyle(el('[data-test-tray]'));
       assert.strictEqual(tray.borderTopLeftRadius, '3px', 'radius');
       assert.strictEqual(tray.backgroundColor, 'rgb(1, 2, 3)', 'background');
@@ -573,4 +695,44 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
     const overlap = contentOverlap(root);
     assert.true(overlap <= 0, `no content under the strip (${overlap}px)`);
   });
+
+  for (const placement of ['bottom', 'top'] as const) {
+    test(`${placement}: glass at a partial snap point, opaque with a strip in the same colour at the highest`, async function (assert) {
+      const state = new SheetState(placement);
+      const root = await renderSheet(state);
+      const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+      const strip = root.querySelector('.mobile-drawer-theme-ios__grabber')!;
+
+      state.active = 1;
+      await frames();
+      finishTransitions();
+      assert.dom(root).doesNotHaveAttribute('data-expanded');
+      assert.strictEqual(
+        getComputedStyle(tray).backgroundColor,
+        GLASS.light.background,
+        'partial: glass',
+      );
+      assert.strictEqual(
+        getComputedStyle(tray).backdropFilter,
+        'blur(30px) saturate(1.8)',
+      );
+
+      state.active = 2;
+      await frames();
+      finishTransitions();
+      assert.dom(root).hasAttribute('data-expanded');
+      const trayStyle = getComputedStyle(tray);
+      assert.strictEqual(
+        rgb(trayStyle.backgroundColor),
+        SOLID.light,
+        'highest: opaque',
+      );
+      assert.strictEqual(trayStyle.backdropFilter, 'none');
+      assert.strictEqual(
+        getComputedStyle(strip).backgroundColor,
+        trayStyle.backgroundColor,
+        'highest: the strip has the sheet colour',
+      );
+    });
+  }
 });
