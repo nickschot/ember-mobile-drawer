@@ -108,8 +108,9 @@
  *                           range for top, whose leading edge is its bottom)
  *                           while the drawer is below its highest snap point:
  *                           it scrolls it back when the drawer leaves that
- *                           snap point (with the tray's movement, or once
- *                           closed for a close).
+ *                           snap point (smoothly, or once closed for a
+ *                           close). At the highest snap point every tray
+ *                           opens at scrollTop 0.
  *                           Override `display` on the tray or `margin` on the
  *                           content from app CSS to align it differently.
  *                           At the closed position the tray's box-shadow still
