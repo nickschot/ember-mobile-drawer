@@ -10,7 +10,7 @@ Node and pnpm versions for local development are pinned in `.prototools`. Instal
 
 ### Linting
 
-- `pnpm lint` – runs all linters (eslint, ember-template-lint, prettier, type checking, publint and a check that only the public entry points resolve)
+- `pnpm lint` – runs all linters (eslint, ember-template-lint, prettier, type checking, publint, a check that only the public entry points resolve, and a type check of the packed package from a TypeScript consumer)
 - `pnpm lint:fix` – fixes what can be fixed automatically and formats the project
 
 ### Running tests
