@@ -201,9 +201,12 @@
  *     `contain: layout`), so a bar that the sheet touches takes the sheet's
  *     background. A tray with a backdrop-filter (e.g. the iOS theme's glass)
  *     gets Safari's own material there, so such a sheet still stops at the
- *     floating toolbar with a visible edge. (The iOS theme's sheet has that
- *     edge only below its highest snap point: at the highest snap point it
- *     is opaque with no backdrop-filter, so Safari takes the sheet colour.)
+ *     floating toolbar with a visible edge. Safari keeps the colour it took
+ *     when the sheet opened: the iOS theme's sheet is opaque with no
+ *     backdrop-filter at its highest snap point, but the toolbar only gets
+ *     the sheet colour when the sheet opens directly there. A sheet that
+ *     opens lower and is then dragged to the top keeps the first colour
+ *     and the edge until the drawer is closed.
  * Content can't paint under the bars, so the safe-area padding above is
  * still correct. Other browsers don't get these rules.
  *

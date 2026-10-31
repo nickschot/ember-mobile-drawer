@@ -82,7 +82,11 @@
  * styles.css). So below its highest snap point the glass sheet still stops
  * at the floating toolbar with a visible edge. At the highest snap point
  * (after the fade, see "Full height") the sheet is opaque with no
- * backdrop-filter, so Safari takes the sheet colour there.
+ * backdrop-filter, but Safari keeps the colour that it took when the sheet
+ * opened, until nothing fixed is at that edge. So the toolbar only gets the
+ * sheet colour when the sheet opens directly at its highest snap point. A
+ * sheet that opens lower and is then dragged to the top keeps the first
+ * colour, and the edge, until the drawer is closed.
  *
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
