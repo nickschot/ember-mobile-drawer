@@ -5,7 +5,17 @@
 * This CSS is meant for the demo-app only, and will not be included in the published assets for this library.
 */
 
+:root {
+  color-scheme: light dark;
+}
+
 body {
+  /*
+   * A page colour that contrasts with the tray (Canvas) in both schemes, so
+   * the drawer stays visible even when the backdrop dims the page.
+   */
+  background: light-dark(#e8ecf4, #44557a);
+  color: light-dark(#111, #f4f4f8);
   margin: 0;
   padding: 1rem;
   font-family: system-ui, sans-serif;
@@ -35,7 +45,7 @@ body {
 
 .demo-drawer-content[data-placement="left"],
 .demo-drawer-content[data-placement="right"] {
-  width: 16rem;
+  width: min(80vw, 16rem);
 }
 
 .demo-drawer-content h2 {
