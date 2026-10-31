@@ -86,7 +86,28 @@ To drag only from a grabber, for example because the content scrolls, use `@hand
 </MobileDrawer>
 ```
 
-Without `@handleOnly` the `handle` modifier does nothing, so you can keep it on your grabber either way. The element that drags gets `touch-action: pan-x` (for `bottom` and `top`) or `pan-y` (for `left` and `right`). Scrolling content along the drawer's axis inside a draggable tray isn't supported yet.
+Without `@handleOnly` the `handle` modifier does nothing, so you can keep it on your grabber either way. A handle gets `touch-action: pan-x` (for `bottom` and `top`) or `pan-y` (for `left` and `right`) and always drags.
+
+### Scrolling content
+
+The tray is a scroll container (`overflow: auto`), so content longer than the drawer scrolls. Without `@handleOnly`, each touch gesture on the tray either scrolls or drags the drawer. It is decided once the finger has moved 4px along the drawer's axis, and further along it than across it, and stays that way until the finger lifts. A swipe across the axis (a horizontal carousel in a bottom drawer, a list in a side drawer) is left to the browser, also when it starts with a slight lean along the axis; if a gesture that was going to drag turns sideways before the drag starts (10px), it is left to the browser too.
+
+- While the drawer is below its highest snap point, every gesture along the axis drags it, also on scrollable content. Dragging a half-open bottom drawer up expands it instead of scrolling.
+- At the highest snap point, a gesture scrolls if the content can scroll the way the finger pushes it, and drags the drawer otherwise. For a bottom drawer: with the content scrolled to the top, dragging down closes the drawer; anywhere else it scrolls. Top, left and right drawers work the same way along their own axis, so a top drawer closes by dragging up once its content is scrolled to the end.
+- A gesture that started as a scroll never turns into a drag, also when the content reaches its start (or its momentum carries it there) while the finger is still down. Lift the finger and drag again to move the drawer.
+
+The tray is the default scroll container. For scrolling elements inside it, add the `data-mobile-drawer-scroll` attribute so they take part, and give them `overscroll-behavior: contain` so their scrolling doesn't chain to the page:
+
+```gts
+<MobileDrawer as |drawer|>
+  <h2>Comments</h2>
+  <ul class="comments" data-mobile-drawer-scroll>...</ul>
+</MobileDrawer>
+```
+
+A gesture that starts inside a marked element (or the tray) scrolls if any of those between the touched element and the tray can scroll that way. Scrolling elements without the attribute don't count, so gestures on them drag the drawer like any other content. That includes a scrollable `<textarea>`: add `data-mobile-drawer-scroll` to it too. Scrolling across the drawer's axis (e.g. a horizontal carousel in a bottom drawer) is always left to the browser.
+
+How it works: the tray gets `touch-action: pan-x` (`pan-y` for `left` and `right`) while the drawer is below its highest snap point, so the browser never scrolls along the axis there. At the highest snap point it gets `touch-action: pan-x pan-y`, and a gesture that drags cancels its `touchmove` events, which needs a non-passive `touchmove` listener on the tray (handles don't get one). Only the finger that started on the tray counts; other fingers on the screen don't affect the decision. Pinch-zoom doesn't start on the tray. If you'd rather have plain native scrolling with a separate grabber, use `@handleOnly`.
 
 ### Public imports
 
