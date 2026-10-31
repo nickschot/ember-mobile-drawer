@@ -94,9 +94,17 @@
    * the strip's padding above and below it. (Unlike the old 5px margins, the
    * padding doesn't collapse with a neighbour's margin.)
    *
-   * Below the highest snap point the content can't scroll, so the strip is
-   * transparent: the tray's sheet background shows through it unchanged, and
-   * no band shows on the glass sheet. While the drawer is expanded
+   * Below the highest snap point the strip is transparent: the tray's sheet
+   * background shows through it unchanged, and no band shows on the glass
+   * sheet. That works because no content is under the strip there: the
+   * content can't scroll below the highest snap point, and the component
+   * keeps the tray at its scroll start there (the content start at the top
+   * of a bottom drawer, the content end at the bottom of a top drawer; see
+   * "Scrolling content" in the README). The exception is a run down from a
+   * scrolled sheet: [data-expanded] goes away when the run starts, but the
+   * tray only gets back to its scroll start in step with the run (or, for a
+   * close, once closed), so for that moment the scrolled content shows
+   * under the bar. While the drawer is expanded
    * ([data-expanded], at or heading to the highest snap point) the content
    * scrolls under the strip, so it gets the sheet's background, made opaque
    * so the content doesn't show through the glass tint: the opaque version

@@ -1,7 +1,10 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { render, find } from '@ember/test-helpers';
+import { render, find, settled } from '@ember/test-helpers';
 import { htmlSafe } from '@ember/template';
+import { tracked } from '@glimmer/tracking';
+import { MobileDrawer, type SnapPoint } from '#src/index.ts';
+import { drawerEnvironment } from '#src/-private/environment.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
 
@@ -441,5 +444,133 @@ module('Integration | themes/ios.css', function (hooks) {
     } finally {
       style.remove();
     }
+  });
+});
+
+class SheetState {
+  @tracked active = 0;
+  placement: 'bottom' | 'top';
+  constructor(placement: 'bottom' | 'top') {
+    this.placement = placement;
+  }
+  setActive = (index: number) => (this.active = index);
+}
+
+const SHEET_SNAP_POINTS: SnapPoint[] = [0, '40%', '100%'];
+
+/** Waits a few animation frames, for the component's scroll reset. */
+async function frames(count = 3) {
+  for (let i = 0; i < count; i++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  await settled();
+}
+
+/** The largest overlap (px) of the strip with any other content child. */
+function contentOverlap(root: Element): number {
+  const content = root.querySelector('.mobile-drawer__content')!;
+  const strip = root
+    .querySelector('.mobile-drawer-theme-ios__grabber')!
+    .getBoundingClientRect();
+  let overlap = 0;
+  for (const child of Array.from(content.children)) {
+    if (child.classList.contains('mobile-drawer-theme-ios__grabber')) continue;
+    const r = child.getBoundingClientRect();
+    overlap = Math.max(
+      overlap,
+      Math.min(r.bottom, strip.bottom) - Math.max(r.top, strip.top),
+    );
+  }
+  return overlap;
+}
+
+module('Integration | themes/ios.css | with the component', function (hooks) {
+  setupRenderingTest(hooks);
+
+  hooks.beforeEach(function () {
+    drawerEnvironment.prefersReducedMotion = () => true;
+  });
+
+  hooks.afterEach(function () {
+    delete drawerEnvironment.prefersReducedMotion;
+  });
+
+  async function renderSheet(state: SheetState) {
+    const isTop = state.placement === 'top';
+    const lines = TALL_LINES;
+    await render(
+      <template>
+        <div class="mobile-drawer-theme-ios">
+          <MobileDrawer
+            @placement={{state.placement}}
+            @snapPoints={{SHEET_SNAP_POINTS}}
+            @activeSnapPoint={{state.active}}
+            @onSnapPointChange={{state.setActive}}
+          >
+            {{#unless isTop}}
+              <div class="mobile-drawer-theme-ios__grabber"></div>
+            {{/unless}}
+            {{#each lines as |line|}}
+              <p>{{line}}</p>
+            {{/each}}
+            {{#if isTop}}
+              <div class="mobile-drawer-theme-ios__grabber"></div>
+            {{/if}}
+          </MobileDrawer>
+        </div>
+      </template>,
+    );
+    await frames();
+    return find('.mobile-drawer')!;
+  }
+
+  // The strip is transparent below the highest snap point. That is only
+  // right if no content is under it there, which the component's scroll
+  // reset guarantees (the tray is at its scroll start).
+  test('top: at a partial snap point no content is under the transparent strip', async function (assert) {
+    const state = new SheetState('top');
+    const root = await renderSheet(state);
+    state.active = 1;
+    await frames();
+
+    const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+    assert.dom(root).doesNotHaveAttribute('data-expanded');
+    assert.true(tray.scrollHeight > tray.clientHeight, 'the content scrolls');
+    const strip = root.querySelector('.mobile-drawer-theme-ios__grabber')!;
+    assert.strictEqual(
+      getComputedStyle(strip).backgroundColor,
+      'rgba(0, 0, 0, 0)',
+      'transparent',
+    );
+    const overlap = contentOverlap(root);
+    assert.true(overlap <= 0, `no content under the strip (${overlap}px)`);
+  });
+
+  test('bottom: reopened at a partial snap point after a scroll, no content is under the transparent strip', async function (assert) {
+    const state = new SheetState('bottom');
+    const root = await renderSheet(state);
+    state.active = 2;
+    await frames();
+    assert.dom(root).hasAttribute('data-expanded');
+
+    const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+    tray.scrollTop = 200;
+    assert.true(tray.scrollTop > 0, 'scrolled');
+    assert.true(contentOverlap(root) > 0, 'expanded: content under the strip');
+
+    state.active = 0;
+    await frames();
+    state.active = 1;
+    await frames();
+
+    assert.dom(root).doesNotHaveAttribute('data-expanded');
+    const strip = root.querySelector('.mobile-drawer-theme-ios__grabber')!;
+    assert.strictEqual(
+      getComputedStyle(strip).backgroundColor,
+      'rgba(0, 0, 0, 0)',
+      'transparent',
+    );
+    const overlap = contentOverlap(root);
+    assert.true(overlap <= 0, `no content under the strip (${overlap}px)`);
   });
 });
