@@ -108,6 +108,9 @@ const CLICK_MATCH = 2;
  */
 const modalStack: object[] = [];
 
+/** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
+const mountedDrawers = new Set<object>();
+
 /**
  * Whether `element` can scroll along the axis in the direction a finger that
  * moved `movement` px (positive: down or right) pushes its content.
@@ -471,6 +474,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #open = false;
   /** The element to focus again when the drawer closes. */
   #returnFocus?: HTMLElement | SVGElement;
+  /** Its ancestors when the drawer opened, see `#returnFocusAfterClose`. */
+  #returnFocusPath: Element[] = [];
   /**
    * Set when the drawer closed and `#applyOpen` has yet to return focus:
    * whether focus was inside the drawer when it closed.
@@ -613,6 +618,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       });
       this.#placement = this.placement;
       root.addEventListener('keydown', this.#onKeyDown);
+      mountedDrawers.add(this);
       this.#measure();
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
@@ -683,6 +689,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#stopScrollReset();
       this.#syncScrollLock();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
+      mountedDrawers.delete(this);
       // Undone right away, so nothing outlives the drawer. Focus can only
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
@@ -1294,8 +1301,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         !this.#root!.contains(active)
       ) {
         this.#returnFocus = active;
+        this.#returnFocusPath = this.#ancestorsOf(active);
       } else if (!reopened) {
         this.#returnFocus = undefined;
+        this.#returnFocusPath = [];
       }
     } else if (!open && this.#open) {
       this.#open = false;
@@ -1318,13 +1327,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #applyOpen(): void {
     if (this.#destroyed) return;
-    const modal = this.#open && this.isModal;
+    const modal = this.#open && this.isModal && !this.#insideClosedDrawer();
     const wasModal = this.#releaseModal !== undefined;
     if (modal && !wasModal) {
       this.#activateModal();
     } else if (!modal && wasModal) {
       this.#deactivateModal();
     }
+    // Before focus returns: an open modal drawer inside this one would keep
+    // the element to return to inert.
+    this.#applyNested();
     const focusInside = this.#closedWithFocusInside;
     if (focusInside !== undefined) {
       this.#closedWithFocusInside = undefined;
@@ -1379,26 +1391,88 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Focuses the element that had focus when the drawer opened again, if it
-   * is still on the page and focus was inside the drawer when it closed (or,
-   * for a modal drawer, was dropped onto `<body>`). Runs after the modal
-   * behaviour was undone, so the element is no longer inert.
+   * Focuses the element that had focus when the drawer opened again, if
+   * focus was inside the drawer when it closed (or, for a modal drawer, was
+   * dropped onto `<body>`). Runs after the modal behaviour was undone, so the
+   * element is no longer inert.
+   *
+   * If that element has left the page (e.g. the drawer deleted the list item
+   * it was opened from), focus goes to the first tabbable element in the
+   * nearest of its former ancestors that is still on the page, outside the
+   * drawer, but never all the way up to `<body>`: focus then stays where the
+   * browser put it.
    */
   #returnFocusAfterClose(focusInside: boolean, wasModal: boolean): void {
     const target = this.#returnFocus;
+    const path = this.#returnFocusPath;
     this.#returnFocus = undefined;
-    if (!target?.isConnected) return;
+    this.#returnFocusPath = [];
+    if (!target) return;
     const active = document.activeElement;
     const dropped = !active || active === document.body;
-    if (focusInside || this.#hasFocus() || (wasModal && dropped)) {
+    if (!(focusInside || this.#hasFocus() || (wasModal && dropped))) return;
+    if (target.isConnected) {
       target.focus();
+      return;
+    }
+    const root = this.#root;
+    const ancestor = path.find((element) => element.isConnected);
+    if (!ancestor) return;
+    tabbables(ancestor)
+      .find((element) => !root?.contains(element))
+      ?.focus();
+  }
+
+  /**
+   * The ancestors of `element` from its parent up to (not including)
+   * `<body>`, for the fallback in `#returnFocusAfterClose`.
+   */
+  #ancestorsOf(element: Element): Element[] {
+    const path: Element[] = [];
+    for (
+      let node = element.parentElement;
+      node && node !== document.body && node !== document.documentElement;
+      node = node.parentElement
+    ) {
+      path.push(node);
+    }
+    return path;
+  }
+
+  /**
+   * Whether the drawer is inside another drawer that is closed or closing,
+   * whose `data-closed` hides it (or soon will): its modal behaviour is then
+   * off, so it never keeps the page inert and locked from inside a hidden
+   * drawer. It comes back when that drawer opens again.
+   */
+  #insideClosedDrawer(): boolean {
+    const root = this.#root;
+    if (!root) return false;
+    for (const other of mountedDrawers as Set<MobileDrawer>) {
+      if (other !== this && !other.#open && other.#root?.contains(root)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Re-applies the open state of the drawers inside this one. */
+  #applyNested(): void {
+    const root = this.#root;
+    if (!root) return;
+    for (const other of mountedDrawers as Set<MobileDrawer>) {
+      if (other !== this && other.#root && root.contains(other.#root)) {
+        other.#applyOpen();
+      }
     }
   }
 
   /**
    * Escape closes an open drawer while focus is inside it, modal or not.
    * Events another handler already took care of (`preventDefault`) are left
-   * alone, so of nested drawers only the innermost one closes.
+   * alone, so of nested drawers only the innermost one closes. Ignored while
+   * the drawer is dragged: the release decides where it goes, so the parent
+   * never sees a close and a reopen.
    */
   #onKeyDown = (event: KeyboardEvent): void => {
     if (
@@ -1406,6 +1480,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       event.defaultPrevented ||
       event.isComposing ||
       !this.#open ||
+      this.#drag ||
       this.#destroyed
     ) {
       return;
@@ -1428,7 +1503,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     if (event.key === 'Escape') {
-      if (event.isComposing || !this.#open) return;
+      // Not during a drag: the release decides where the drawer goes.
+      if (event.isComposing || !this.#open || this.#drag) return;
       event.preventDefault();
       this.close();
     } else if (
@@ -1454,12 +1530,24 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const inside = !!active && tray.contains(active);
     const first = items[0];
     const last = items[items.length - 1];
+    // Whether a tabbable element comes after (or before) the focused one,
+    // also when that isn't tabbable itself (e.g. a focused `tabindex="-1"`
+    // status message after the last button).
+    const any = (position: number) =>
+      !!active &&
+      items.some((item) => active.compareDocumentPosition(item) & position);
     let next: HTMLElement | undefined;
     if (!first || !last) {
       next = tray;
     } else if (event.shiftKey) {
-      if (!inside || active === first || active === tray) next = last;
-    } else if (!inside || active === last) {
+      if (
+        !inside ||
+        active === tray ||
+        !any(Node.DOCUMENT_POSITION_PRECEDING)
+      ) {
+        next = last;
+      }
+    } else if (!inside || !any(Node.DOCUMENT_POSITION_FOLLOWING)) {
       next = first;
     }
     if (next) {

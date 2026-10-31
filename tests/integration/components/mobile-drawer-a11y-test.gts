@@ -12,6 +12,7 @@ import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { htmlSafe } from '@ember/template';
 import { a11yAudit } from 'ember-a11y-testing/test-support';
+import { pan } from 'ember-gesture-modifiers/test-support';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { bodyScrollLocks } from '#src/-private/modal/scroll-lock.ts';
@@ -59,6 +60,9 @@ class State {
   @tracked focusable = true;
   @tracked autofocus = false;
   @tracked secondActive: number | undefined;
+  @tracked nestedShown = false;
+  @tracked nestedActive = 0;
+  @tracked triggerShown = true;
   changes: number[] = [];
   /** Whether the parent accepts changes requested by the drawer. */
   accept = true;
@@ -70,6 +74,8 @@ class State {
   };
 
   onSecondChange = (index: number) => (this.secondActive = index);
+
+  onNestedChange = (index: number) => (this.nestedActive = index);
 
   onPageClick = () => this.pageClicks++;
 }
@@ -88,7 +94,9 @@ async function renderDrawer(state: State) {
           data-test-page
           {{on "click" state.onPageClick}}
         >Page</button>
-        <button type="button" data-test-trigger>Trigger</button>
+        {{#if state.triggerShown}}
+          <button type="button" data-test-trigger>Trigger</button>
+        {{/if}}
         {{#if state.shown}}
           <MobileDrawer
             @snapPoints={{state.snapPoints}}
@@ -119,6 +127,23 @@ async function renderDrawer(state: State) {
                 >Close</button>
               {{/if}}
               <output data-test-active>{{drawer.activeSnapPoint}}</output>
+              {{#if state.nestedShown}}
+                <MobileDrawer
+                  @snapPoints={{SNAP_POINTS}}
+                  @activeSnapPoint={{state.nestedActive}}
+                  @onSnapPointChange={{state.onNestedChange}}
+                  style="position: absolute"
+                  aria-label="Nested"
+                  data-test-nested
+                >
+                  <div style={{contentStyle}}>
+                    <button
+                      type="button"
+                      data-test-nested-button
+                    >Nested</button>
+                  </div>
+                </MobileDrawer>
+              {{/if}}
             </div>
           </MobileDrawer>
         {{/if}}
@@ -538,6 +563,141 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
       assert.strictEqual(clock.pendingFrames, 0, 'no animation');
       assert.dom('[data-test-drawer]').hasAttribute('data-closed');
       assert.strictEqual(active(), el('[data-test-trigger]'));
+    });
+
+    test('app code closing a parent drawer under an open nested one frees the page', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      state.nestedShown = true;
+      state.nestedActive = 2;
+      await settle();
+      assert.strictEqual(active(), el('[data-test-nested-button]'));
+      assert.strictEqual(bodyScrollLocks(), 2);
+
+      // E.g. a route change resets the parent's state only.
+      state.active = 0;
+      await settled();
+      assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
+      assert.dom('[inert]').doesNotExist('nothing inert');
+      assert
+        .dom('[data-test-nested]')
+        .doesNotHaveAttribute('aria-modal', 'the nested drawer is not modal');
+      assert.strictEqual(
+        active(),
+        el('[data-test-trigger]'),
+        'focus returns to the trigger of the parent',
+      );
+      await settle();
+      assert.dom('[data-test-drawer]').hasAttribute('data-closed');
+
+      state.changes = [];
+      await triggerKeyEvent(document.body, 'keydown', 'Escape');
+      assert.strictEqual(state.nestedActive, 2, 'no hidden drawer on Escape');
+
+      // Opening the parent again brings the nested drawer's modality back.
+      state.active = 2;
+      await settle();
+      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+      assert.strictEqual(bodyScrollLocks(), 2);
+      assert.strictEqual(active(), el('[data-test-nested-button]'));
+
+      state.nestedShown = false;
+      state.active = 0;
+      await settle();
+    });
+
+    test('inert that the app sets while the drawer is open stays after the close', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      const page = el('[data-test-page]');
+      assert.dom(page).hasAttribute('inert', '', 'made inert by the drawer');
+
+      // The app makes the page button inert itself, and the trigger usable.
+      page.setAttribute('inert', '');
+      el('[data-test-trigger]').removeAttribute('inert');
+      state.active = 0;
+      await settle();
+      assert.dom(page).hasAttribute('inert', '', 'the app’s inert stays');
+      assert.dom('[data-test-trigger]').doesNotHaveAttribute('inert');
+      assert
+        .dom(qunitUi())
+        .doesNotHaveAttribute('inert', 'the drawer’s own is removed');
+
+      // A second drawer leaves it alone too.
+      await openFromTrigger(state);
+      state.active = 0;
+      await settle();
+      assert.dom(page).hasAttribute('inert', '', 'still the app’s');
+      page.removeAttribute('inert');
+    });
+
+    test('Escape during a drag neither closes nor reopens the drawer', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      const first = el('[data-test-first]');
+      assert.strictEqual(active(), first);
+
+      let moves = 0;
+      let escapes = 0;
+      const onMove = () => {
+        // Well after the pan was recognised and the drag started.
+        if (++moves !== 20) return;
+        escapes++;
+        first.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Escape',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      };
+      document.addEventListener('pointermove', onMove);
+      try {
+        await pan('[data-test-drawer] .mobile-drawer__content > div', 'down');
+      } finally {
+        document.removeEventListener('pointermove', onMove);
+      }
+      assert.strictEqual(escapes, 1, 'Escape was pressed mid-drag');
+      await settle();
+      assert.false(state.changes.includes(0), 'no close was requested');
+      assert.dom('[data-test-active]').hasText('2', 'still open');
+      assert.strictEqual(active(), first, 'focus stayed in the drawer');
+
+      await triggerKeyEvent(first, 'keydown', 'Escape');
+      await settle();
+      assert.dom('[data-test-active]').hasText('0', 'after the drag it works');
+    });
+
+    test('focus falls back near the trigger when the trigger is gone', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      // E.g. the drawer deleted the item the trigger belonged to.
+      state.triggerShown = false;
+      await settled();
+      state.active = 0;
+      await settle();
+      assert.strictEqual(
+        active(),
+        el('[data-test-page]'),
+        'the first tabbable element in its nearest remaining ancestor',
+      );
+    });
+
+    test('Tab from a focused element after the last tabbable one wraps', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      const output = el('[data-test-active]');
+      output.tabIndex = -1;
+      output.focus();
+      await triggerKeyEvent(output, 'keydown', 'Tab');
+      assert.strictEqual(active(), el('[data-test-first]'));
+      state.active = 0;
+      await settle();
     });
 
     test('passes an axe audit open and closed', async function (assert) {

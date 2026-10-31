@@ -10,8 +10,13 @@
  *
  * Counted per element, so drawers can open and close in any order: an
  * element only loses `inert` once every drawer that made it inert let go.
- * Elements that were already inert are left alone. Elements added to the
- * page later (e.g. a toast appended to `<body>`) are not made inert.
+ * Only attributes the drawers added are removed:
+ * - elements that were already inert are left alone;
+ * - once the app sets (or removes) `inert` on an element a drawer made
+ *   inert, the attribute is the app's, and the drawers stop managing it.
+ *   A `MutationObserver` on those elements notices that.
+ * Elements added to the page later (e.g. a toast appended to `<body>`) are
+ * not made inert.
  *
  * @module
  * @internal
@@ -27,45 +32,88 @@ const SKIP = new Set([
   'NOSCRIPT',
 ]);
 
-/** How many drawers made each element inert. */
+/** How many drawers made each element inert, for the elements they manage. */
 const counts = new Map<Element, number>();
+
+let observer: MutationObserver | undefined;
+
+/**
+ * Hands every element whose `inert` attribute someone else changed over to
+ * that someone: the drawers stop managing it.
+ */
+function handOver(records: MutationRecord[]): void {
+  for (const record of records) counts.delete(record.target as Element);
+}
+
+/**
+ * Takes the pending records of changes by others, so they are handled before
+ * the drawers change attributes themselves.
+ */
+function flush(): void {
+  if (observer) handOver(observer.takeRecords());
+}
+
+/** Runs `change` without its own mutations counting as someone else's. */
+function own(change: () => void): void {
+  flush();
+  change();
+  observer?.takeRecords();
+}
 
 /**
  * Makes every element on the page outside `element` inert, until the
  * returned function is called. Calling it more than once does nothing.
  */
 export function inertOutside(element: Element): () => void {
+  observer ??=
+    typeof MutationObserver === 'undefined'
+      ? undefined
+      : new MutationObserver(handOver);
   const touched: Element[] = [];
-  for (
-    let node: Element = element;
-    node.parentElement && node !== document.body;
-    node = node.parentElement
-  ) {
-    for (const sibling of node.parentElement.children) {
-      if (sibling === node || SKIP.has(sibling.tagName)) continue;
-      const count = counts.get(sibling);
-      if (count === undefined) {
-        // Inert already, by the app: not ours to undo.
-        if (sibling.hasAttribute('inert')) continue;
-        sibling.setAttribute('inert', '');
+  own(() => {
+    for (
+      let node: Element = element;
+      node.parentElement && node !== document.body;
+      node = node.parentElement
+    ) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling === node || SKIP.has(sibling.tagName)) continue;
+        const count = counts.get(sibling);
+        if (count === undefined) {
+          // Inert already, by the app: not ours to undo.
+          if (sibling.hasAttribute('inert')) continue;
+          sibling.setAttribute('inert', '');
+          observer?.observe(sibling, {
+            attributes: true,
+            attributeFilter: ['inert'],
+          });
+        }
+        counts.set(sibling, (count ?? 0) + 1);
+        touched.push(sibling);
       }
-      counts.set(sibling, (count ?? 0) + 1);
-      touched.push(sibling);
     }
-  }
+  });
 
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    for (const sibling of touched) {
-      const count = counts.get(sibling)! - 1;
-      if (count > 0) {
-        counts.set(sibling, count);
-      } else {
-        counts.delete(sibling);
-        sibling.removeAttribute('inert');
+    own(() => {
+      for (const sibling of touched) {
+        const count = counts.get(sibling);
+        // Handed over to the app, or never ours.
+        if (count === undefined) continue;
+        if (count > 1) {
+          counts.set(sibling, count - 1);
+        } else {
+          counts.delete(sibling);
+          sibling.removeAttribute('inert');
+        }
       }
+    });
+    if (counts.size === 0) {
+      // Stop observing the elements that are no longer managed.
+      observer?.disconnect();
     }
   };
 }
