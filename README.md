@@ -73,6 +73,7 @@ Arguments:
 - `@modal`: whether the drawer is a modal dialog while it is open. Default `true`. See [Accessibility](#accessibility).
 - `@backdrop`: whether to render the backdrop behind the tray. Defaults to the value of `@modal`: `true`, unless the drawer is non-modal. With `@backdrop={{false}}` nothing covers the page.
 - `@closeOnBackdropClick`: whether a tap or click on the backdrop closes the drawer (like `close()`, so through `@onSnapPointChange` when `@activeSnapPoint` is set). Default `true`.
+- `@onOpen`, `@onClose`, `@onDragStart`, `@onDragEnd`: lifecycle callbacks, see [Events](#events).
 
 Attributes such as `class`, `aria-label` and `aria-labelledby` go on the drawer's root element.
 
@@ -83,6 +84,29 @@ The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (sm
 The backdrop covers the page behind the drawer. Its opacity follows the drawer as it moves, from transparent when closed to `--mobile-drawer-backdrop-opacity` (default `0.4`) at the largest snap point; set its colour with `--mobile-drawer-backdrop-color` (see [Styles](#styles)). While the drawer is open the backdrop catches taps, so the page behind it can't be clicked; a tap closes the drawer. A pointer that moves more than 10px before it lifts (a drag or a scroll that happens to start on the backdrop) doesn't count as a tap. At its smallest snap point the backdrop doesn't block the page: not when the drawer is closed, and not for a "peek" drawer whose smallest snap point is above `0` (for example `[120, '100%']`), so the page stays usable next to the peeking drawer.
 
 Turn off tap-to-close with `@closeOnBackdropClick={{false}}`, or leave the backdrop out entirely with `@backdrop={{false}}`. Non-modal drawers have no backdrop unless you pass `@backdrop={{true}}`.
+
+### Events
+
+Each callback gets one object argument. The types are exported from `ember-mobile-drawer`.
+
+| Argument       | Called                                                                                                               | Argument type                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `@onOpen`      | when the drawer opens: its snap point moves from the smallest one to a larger one                                    | `MobileDrawerToggleEvent`: `{ snapPoint }`, the snap point it opens to                            |
+| `@onClose`     | when the drawer closes: its snap point moves back to the smallest one                                                | `MobileDrawerToggleEvent`: `{ snapPoint }`, the snap point it closes to                           |
+| `@onDragStart` | when a drag starts (once a pan along the axis is recognised, when `isDragging` turns `true`)                         | `MobileDrawerDragStartEvent`: `{ snapPoint, offset }`, the active snap point and px open          |
+| `@onDragEnd`   | once for every `@onDragStart`, when the finger lifts, before `@onSnapPointChange`                                    | `MobileDrawerDragEndEvent`: `{ snapPoint, offset, velocity }`, see below                          |
+
+- `@onOpen` and `@onClose` are called once per change, whatever caused it: `open()`, `close()`, `snapTo()`, a drag, the backdrop, Escape or a new `@activeSnapPoint`. They are called when the drawer starts to move, not when it arrives (in a microtask, at the same time as the modal behaviour turns on or off), so the drawer is still animating. A move between two open snap points calls neither, and so does a drawer that opens and closes again within the same task. They are not called for the snap point the drawer is inserted at, or when it is removed.
+- `@onDragEnd` gets the snap point the release picked (the one passed to `@onSnapPointChange` if it differs from the active one), the px open at the release, and the release velocity in px/s (positive opens, negative closes; `0` when the browser cancelled the pointer). When `@activeSnapPoint` is set, the drawer only moves to that snap point once you pass it in. A drag that ends without a release, because its handle was removed or `@placement` changed, gives the active snap point and velocity `0`. A drag that is still going when the drawer is removed calls no `@onDragEnd`.
+- A touch that only stops a moving drawer, without dragging it, calls neither drag callback.
+
+```gts
+<MobileDrawer
+  @onOpen={{this.trackOpen}}
+  @onClose={{this.trackClose}}
+  @onDragEnd={{this.logRelease}}
+/>
+```
 
 ### Accessibility
 
@@ -199,8 +223,7 @@ These are the package's public API:
 - `ember-mobile-drawer/template-registry`: the Glint template registry, for apps that use loose-mode (`.hbs`) templates
 - `ember-mobile-drawer/styles.css`: the base stylesheet (see [Styles](#styles))
 - `ember-mobile-drawer/themes/ios.css`: the optional iOS theme (see [iOS theme](#ios-theme))
-
-Test helpers (`ember-mobile-drawer/test-support`) will be added later.
+- `ember-mobile-drawer/test-support`: test helpers (see [Testing](#testing))
 
 The package's `exports` also lists a few entries that are for tools, not for imports in your app:
 
@@ -322,6 +345,36 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 - The sheet stays attached to the screen edge at every snap point. On iOS a partial-height sheet floats inset from the screen edges and only becomes edge-to-edge and opaque when fully expanded; the theme can't do that yet.
 
 The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` on the tray, in the same `ember-mobile-drawer` layer with zero-specificity selectors. Unlayered app CSS wins over it. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
+
+## Testing
+
+The drawer's animations are registered with [`@ember/test-waiters`](https://github.com/emberjs/ember-test-waiters), so `await settled()` (and every helper of `@ember/test-helpers` that waits for it, such as `click`) waits until the drawer is at rest. In production builds the waiter does nothing.
+
+`ember-mobile-drawer/test-support` has helpers for rendering and application tests. They need `@ember/test-helpers` (an optional peer dependency, which apps with tests already have).
+
+```ts
+import { click } from '@ember/test-helpers';
+import {
+  openDrawer,
+  closeDrawer,
+  dragDrawer,
+} from 'ember-mobile-drawer/test-support';
+
+await openDrawer(); // the first .mobile-drawer
+await closeDrawer('[data-test-cart]');
+await dragDrawer('[data-test-cart]', { to: 1 });
+await dragDrawer('[data-test-cart-grabber]', { distance: -80, velocity: -1200 });
+```
+
+Every helper takes the drawer as a selector (looked up in the test's root element) or an element: the drawer's root element, or any element inside it. For nested drawers, the innermost drawer is used. Each helper waits for `settled()`.
+
+- `openDrawer(target = '.mobile-drawer')`: does what the yielded `open()` does: moves to the largest snap point. When `@activeSnapPoint` is set it only calls `@onSnapPointChange`, like `open()`.
+- `closeDrawer(target = '.mobile-drawer')`: does what `close()` does: moves to the smallest snap point.
+- `dragDrawer(target, { to, velocity })` or `dragDrawer(target, { distance, velocity })`: drags the drawer with one finger and lets go. The finger goes down in the middle of `target`: an element in the tray, or the tray when `target` is the drawer's root element. With `@handleOnly`, pass a handle. It sends touch pointer events (and touch events, in browsers that can create them), so it goes through the same code as a real drag and calls `@onDragStart`, `@onDragEnd` and `@onSnapPointChange`.
+  - `to`: the index of the snap point to drag to.
+  - `distance`: how far to move the finger along the drawer's axis, in px: positive opens, negative closes. Past the first and last snap point the drawer follows with resistance.
+  - `velocity`: the velocity at the release, in px/s, positive opens. It must have the same direction as the drag. Default `0`: the finger stops before it lifts, and the drawer settles on the nearest snap point. A release faster than 400 px/s moves at least one snap point that way.
+  - The finger first moves 11px to start the drag; the drawer does not follow over that distance. A moving drawer is stopped where it is. If no drag starts (for example, because the gesture scrolled the content, or `target` is not a handle of a `@handleOnly` drawer), `dragDrawer` throws.
 
 ## Development
 
