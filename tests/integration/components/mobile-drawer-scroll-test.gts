@@ -391,9 +391,9 @@ module(
         );
         assert.true(opening.dragging, 'towards open drags');
         assert.true(opening.shift > 20, `expands (${opening.shift})`);
-        assert.false(
-          opening.prevented.some(Boolean),
-          'touch-action already rules out scrolling: touchmoves left alone',
+        assert.true(
+          opening.prevented.length > 0 && opening.prevented.every(Boolean),
+          'touchmoves are cancelled, not left to touch-action',
         );
         clock.runUntilIdle();
         await settled();
@@ -406,6 +406,7 @@ module(
         );
         assert.true(closing.dragging, 'towards close drags too');
         assert.true(closing.shift < -20, `closes (${closing.shift})`);
+        assert.true(closing.prevented.every(Boolean), 'touchmoves cancelled');
       });
 
       for (const active of [1, 2]) {
@@ -617,7 +618,7 @@ module(
         result.dragging,
         'caught below the highest snap point: drags',
       );
-      assert.false(result.prevented.some(Boolean), 'touch-action is enough');
+      assert.true(result.prevented.every(Boolean), 'touchmoves cancelled');
     });
 
     test('a slight move along the axis does not decide the gesture', async function (assert) {
