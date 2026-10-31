@@ -49,6 +49,9 @@ export default class DrawerDemo extends Component<{
   @tracked handleOnly: boolean;
   @tracked tall: boolean;
   @tracked backdropOpacity: number;
+  // Not settable from the URL, so they start at the drawer's defaults.
+  @tracked backdrop = true;
+  @tracked closeOnBackdropClick = true;
 
   constructor(owner: Owner, args: DrawerDemo['args']) {
     super(owner, args);
@@ -89,6 +92,10 @@ export default class DrawerDemo extends Component<{
       '@activeSnapPoint={{this.active}}',
       '@onSnapPointChange={{this.setActive}}',
       ...(this.handleOnly ? ['@handleOnly={{true}}'] : []),
+      ...(this.backdrop ? [] : ['@backdrop={{false}}']),
+      ...(this.backdrop && !this.closeOnBackdropClick
+        ? ['@closeOnBackdropClick={{false}}']
+        : []),
     ];
     const lines = [
       `snapPoints: SnapPoint[] = [${formatSnapPoints(this.snapPoints)}];`,
@@ -154,6 +161,14 @@ export default class DrawerDemo extends Component<{
     this.tall = (event.target as HTMLInputElement).checked;
   };
 
+  setBackdrop = (event: Event) => {
+    this.backdrop = (event.target as HTMLInputElement).checked;
+  };
+
+  setCloseOnBackdropClick = (event: Event) => {
+    this.closeOnBackdropClick = (event.target as HTMLInputElement).checked;
+  };
+
   setBackdropOpacity = (event: Event) => {
     this.backdropOpacity = Number((event.target as HTMLInputElement).value);
   };
@@ -174,6 +189,8 @@ export default class DrawerDemo extends Component<{
         @activeSnapPoint={{this.active}}
         @onSnapPointChange={{this.onSnapPointChange}}
         @handleOnly={{this.handleOnly}}
+        @backdrop={{this.backdrop}}
+        @closeOnBackdropClick={{this.closeOnBackdropClick}}
         class="demo-drawer"
         as |drawer|
       >
@@ -298,6 +315,23 @@ export default class DrawerDemo extends Component<{
         Tall content (to try scrolling)
       </label>
       <label>
+        <input
+          type="checkbox"
+          checked={{this.backdrop}}
+          {{on "change" this.setBackdrop}}
+        />
+        Backdrop (@backdrop)
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={{this.closeOnBackdropClick}}
+          disabled={{if this.backdrop false true}}
+          {{on "change" this.setCloseOnBackdropClick}}
+        />
+        Tap the backdrop to close (@closeOnBackdropClick)
+      </label>
+      <label>
         Backdrop opacity (--mobile-drawer-backdrop-opacity:
         {{this.backdropOpacity}})
         <input
@@ -334,15 +368,6 @@ export default class DrawerDemo extends Component<{
         <a
           href="https://github.com/nickschot/ember-mobile-drawer/issues/26"
         >#26</a>
-      </div>
-      <div class="demo-pending">
-        <label>
-          <input type="checkbox" checked />
-          Backdrop (@backdrop: show it, tap it to close)
-        </label>
-        <a
-          href="https://github.com/nickschot/ember-mobile-drawer/issues/25"
-        >#25</a>
       </div>
       <div class="demo-pending">
         <label>

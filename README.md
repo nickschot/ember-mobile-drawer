@@ -68,8 +68,16 @@ Arguments:
 - `@activeSnapPoint`: the index into `@snapPoints` the drawer should be at. Changing it animates the drawer there. Leave it out to let the drawer keep track of its snap point itself (it then starts at index `0`, or stays where it was if you stop passing it). Update it together with `@snapPoints`: an index that doesn't exist is clamped to the nearest valid one, with a warning in development.
 - `@onSnapPointChange`: called with the new index when the drawer wants to move (through `snapTo`, `open`, `close` or a drag). When `@activeSnapPoint` is set, the drawer only moves once you pass the new index back in.
 - `@handleOnly`: only start a drag on elements with the yielded `handle` modifier. Default `false`: the whole tray drags.
+- `@backdrop`: whether to render the backdrop behind the tray. Default `true`. With `@backdrop={{false}}` nothing covers the page, so it stays interactive while the drawer is open.
+- `@closeOnBackdropClick`: whether a tap or click on the backdrop closes the drawer (like `close()`, so through `@onSnapPointChange` when `@activeSnapPoint` is set). Default `true`.
 
 The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), the `handle` modifier, and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
+
+### Backdrop
+
+The backdrop covers the page behind the drawer. Its opacity follows the drawer as it moves, from transparent when closed to `--mobile-drawer-backdrop-opacity` (default `0.4`) at the largest snap point; set its colour with `--mobile-drawer-backdrop-color` (see [Styles](#styles)). While the drawer is open the backdrop catches taps, so the page behind it can't be clicked; a tap closes the drawer. A pointer that moves more than 10px before it lifts (a drag or a scroll that happens to start on the backdrop) doesn't count as a tap. Once the drawer is closed, or while the backdrop is fully transparent, it doesn't block the page.
+
+Turn off tap-to-close with `@closeOnBackdropClick={{false}}`, or leave the backdrop out entirely with `@backdrop={{false}}`.
 
 ### Dragging
 

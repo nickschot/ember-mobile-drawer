@@ -36,12 +36,18 @@
  *                           at rest. Hides the whole drawer (also from
  *                           assistive technology). Remove it before the first
  *                           frame of an opening drag or animation.
- * .mobile-drawer__backdrop  Optional. Fills the root behind the tray. Its
+ * .mobile-drawer__backdrop  Optional (left out with `@backdrop={{false}}`).
+ *                           Fills the root behind the tray. Its
  *                           opacity is the max opacity multiplied by
  *                           `--mobile-drawer-progress` (0-1), which the
  *                           component writes as an inline style on the
  *                           backdrop element itself (not the root, so the
  *                           tray content is not restyled every frame).
+ *                           It captures pointer events, so it blocks the
+ *                           page while the drawer is open. At progress 0 the
+ *                           component writes an inline
+ *                           `pointer-events: none` on it, so an invisible
+ *                           backdrop never blocks the page.
  * .mobile-drawer__tray      The sheet and scroll container. The component
  *                           writes an inline `touch-action` on it to decide
  *                           between scrolling and dragging (see the README);
