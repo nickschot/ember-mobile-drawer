@@ -5,7 +5,8 @@ import '#src/styles.css';
 
 class Router extends EmberRouter {
   location = 'history';
-  rootURL = '/';
+  // Vite's `base`: `/` in development, `/ember-mobile-drawer/` on GitHub Pages.
+  rootURL = import.meta.env.BASE_URL;
 }
 
 export class App extends EmberApp {
