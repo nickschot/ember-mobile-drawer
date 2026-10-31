@@ -4,6 +4,7 @@ import { hash } from '@ember/helper';
 import { assert, warn } from '@ember/debug';
 import { buildWaiter } from '@ember/test-waiters';
 import {
+  DEFAULT_SPRING_CONFIG,
   Spring,
   type FrameClock,
   type SpringResult,
@@ -36,6 +37,7 @@ import {
   tabbables,
 } from '../-private/modal/focus.ts';
 import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
+import type { MobileDrawerSpring } from '../springs.ts';
 
 import type {
   MobileDrawerApi,
@@ -289,6 +291,16 @@ export interface MobileDrawerSignature {
      * as they were at the release, also if `@onDragEnd` changes them.
      */
     onDragEnd?: (event: MobileDrawerDragEndEvent) => void;
+    /**
+     * The spring that moves the drawer to a snap point: `stiffness`,
+     * `damping` and `mass`, for example `springPresets.ios`. Keys that are
+     * left out keep the default (`springPresets.default`). Read when an
+     * animation starts, so a change applies from the next one. Values must
+     * be finite numbers greater than `0`: development builds assert that,
+     * production builds ignore other values. With reduced motion the drawer
+     * jumps to its snap point whatever the spring.
+     */
+    spring?: Partial<MobileDrawerSpring>;
   };
   Blocks: {
     default: [drawer: MobileDrawerApi];
@@ -671,6 +683,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       const { clock } = drawerEnvironment;
       this.#clock = clock;
       this.#spring = new Spring({
+        ...this.#springConfig(),
         clock,
         prefersReducedMotion: drawerEnvironment.prefersReducedMotion,
         onUpdate: ({ value }) => this.#render(value),
@@ -974,6 +987,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     const scrollSpring = new Spring({
+      ...this.#springConfig(),
       clock: this.#clock,
       prefersReducedMotion: drawerEnvironment.prefersReducedMotion,
       onUpdate: ({ value }) =>
@@ -1027,12 +1041,38 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * themselves, and `settled()` would wait for frames that never come.
    */
   #startSpring(spring: Spring): Promise<SpringResult> {
+    if (!spring.isAnimating) spring.configure(this.#springConfig());
     const run = spring.start();
     if (spring.isAnimating && !this.#clock) {
       const token = animationWaiter.beginAsync();
       void run.then(() => animationWaiter.endAsync(token));
     }
     return run;
+  }
+
+  /**
+   * The spring parameters from `@spring`, with the defaults for the keys it
+   * leaves out. Development builds assert that every value is valid;
+   * production builds use the default instead of an invalid value.
+   */
+  #springConfig(): MobileDrawerSpring {
+    const { stiffness, damping, mass } = DEFAULT_SPRING_CONFIG;
+    const config: MobileDrawerSpring = { stiffness, damping, mass };
+    const spring = this.args.spring;
+    if (!spring) return config;
+    for (const key of ['stiffness', 'damping', 'mass'] as const) {
+      const value: unknown = spring[key];
+      if (value === undefined) continue;
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        config[key] = value;
+      } else {
+        const shown = typeof value === 'number' ? String(value) : typeof value;
+        assert(
+          `<MobileDrawer>: @spring.${key} must be a finite number greater than 0, got ${shown}`,
+        );
+      }
+    }
+    return config;
   }
 
   /** Stops a running scroll reset where it is. */
