@@ -194,15 +194,6 @@ section > h2 {
   background: var(--mobile-drawer-background, Canvas);
 }
 
-/*
- * The playground drawer leaves the page usable while it is open, so the
- * controls can be changed live. The base styles let the backdrop catch
- * pointer events; backdrop behaviour is settled in #25 and #26.
- */
-.demo-playground-drawer .mobile-drawer__backdrop {
-  pointer-events: none;
-}
-
 .demo-drawer-content h2 {
   margin-top: 0;
 }

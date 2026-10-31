@@ -1,8 +1,12 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { find, findAll, render } from '@ember/test-helpers';
+import { click, find, findAll, render } from '@ember/test-helpers';
+import { drawerEnvironment } from '#src/-private/environment.ts';
 import DrawerDemo from '../../../demo-app/components/drawer-demo.gts';
 import '#src/styles.css';
+// The playground's own stylesheet, applied only while its tests run: it
+// styles `:root` and `body`, which would leak into every other test.
+import demoStyles from '../../../demo-app/styles.css?raw';
 
 /**
  * Renders the playground the way a URL does. Tests run as a development build,
@@ -139,4 +143,85 @@ module('Integration | demo-app | DrawerDemo URL params', function (hooks) {
       );
     }
   });
+});
+
+module('Integration | demo-app | DrawerDemo controls', function (hooks) {
+  setupRenderingTest(hooks);
+
+  let style: HTMLStyleElement;
+
+  hooks.beforeEach(function () {
+    style = document.createElement('style');
+    style.textContent = demoStyles;
+    document.head.append(style);
+  });
+
+  hooks.afterEach(function () {
+    style.remove();
+  });
+
+  test('the backdrop controls toggle @backdrop and @closeOnBackdropClick', async function (assert) {
+    await render(<template><DrawerDemo @search="" /></template>);
+    const checkbox = (label: string) => {
+      const match = findAll('.demo-controls label').find((element) =>
+        element.textContent?.includes(label),
+      );
+      return match!.querySelector('input') as HTMLInputElement;
+    };
+    const backdrop = '.demo-playground-drawer .mobile-drawer__backdrop';
+    const code = () => find('.demo-code code')!.textContent!;
+
+    assert.dom(backdrop).exists();
+    assert.true(checkbox('(@backdrop)').checked);
+    assert.true(checkbox('(@closeOnBackdropClick)').checked);
+    assert.notOk(code().includes('Backdrop'), 'defaults are not in the code');
+
+    await click(checkbox('(@closeOnBackdropClick)'));
+    assert.true(code().includes('@closeOnBackdropClick={{false}}'));
+
+    await click(checkbox('(@backdrop)'));
+    assert.dom(backdrop).doesNotExist();
+    assert.true(checkbox('(@closeOnBackdropClick)').disabled);
+    assert.true(code().includes('@backdrop={{false}}'));
+    assert.false(code().includes('@closeOnBackdropClick'));
+  });
+
+  for (const closeOnBackdropClick of [true, false]) {
+    test(`a tap on the backdrop ${closeOnBackdropClick ? 'closes' : 'keeps'} the drawer with tap-to-close ${closeOnBackdropClick ? 'on' : 'off'}`, async function (assert) {
+      drawerEnvironment.prefersReducedMotion = () => true;
+      try {
+        await render(<template><DrawerDemo @search="?snap=1" /></template>);
+        if (!closeOnBackdropClick) {
+          const label = findAll('.demo-controls label').find((element) =>
+            element.textContent?.includes('(@closeOnBackdropClick)'),
+          )!;
+          await click(label.querySelector('input')!);
+        }
+        const root = find('.demo-playground-drawer > .mobile-drawer')!;
+        assert.dom(root).doesNotHaveAttribute('data-closed', 'open at 50%');
+
+        // Whatever is on top just above the tray is what a finger hits.
+        const tray = root.querySelector('.mobile-drawer__tray')!;
+        const rect = tray.getBoundingClientRect();
+        const target = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top - 10,
+        );
+        assert.strictEqual(
+          target,
+          root.querySelector('.mobile-drawer__backdrop'),
+          'the backdrop is hit, not the page',
+        );
+        await click(target!);
+
+        if (closeOnBackdropClick) {
+          assert.true(root.hasAttribute('data-closed'), 'closed');
+        } else {
+          assert.dom(root).doesNotHaveAttribute('data-closed', 'still open');
+        }
+      } finally {
+        delete drawerEnvironment.prefersReducedMotion;
+      }
+    });
+  }
 });
