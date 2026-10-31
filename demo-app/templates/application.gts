@@ -50,7 +50,8 @@ import IosSheetExample from '../components/ios-sheet-example.gts';
         <p class="demo-hint">
           The optional theme from ember-mobile-drawer/themes/ios.css, opted in
           with the mobile-drawer-theme-ios class on an ancestor. Snap points [0,
-          '40%', 'content'].
+          '40%', 'content']. Fully open, the list scrolls under the grabber,
+          which stays at the sheet's page-facing edge.
         </p>
         <div class="demo-buttons"><IosSheetExample /></div>
       </article>
