@@ -45,26 +45,3 @@ body {
 .demo-drawer-content [aria-pressed="true"] {
   font-weight: bold;
 }
-
-/*
- * When a snap point makes the tray larger than its content, keep the content
- * at the tray's leading edge, so a top or left drawer shows it while only
- * partly open. Auto margins (unlike justify-content) keep overflowing content
- * scrollable.
- */
-.demo-drawer[data-placement="top"] > .mobile-drawer__tray {
-  display: flex;
-  flex-direction: column;
-}
-
-.demo-drawer[data-placement="top"] > .mobile-drawer__tray > * {
-  margin-top: auto;
-}
-
-.demo-drawer[data-placement="left"] > .mobile-drawer__tray {
-  display: flex;
-}
-
-.demo-drawer[data-placement="left"] > .mobile-drawer__tray > * {
-  margin-left: auto;
-}
