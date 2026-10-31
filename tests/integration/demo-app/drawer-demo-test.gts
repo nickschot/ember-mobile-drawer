@@ -240,6 +240,10 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
             tray.scrollHeight > tray.clientHeight,
             'the tall content scrolls',
           );
+          // A desktop scrollbar runs along a left drawer's leading edge and
+          // takes hits; phones have no such scrollbar, so hide it (before
+          // measuring: a classic scrollbar also takes layout space).
+          tray.style.scrollbarWidth = 'none';
           tray.scrollTop = tray.scrollHeight;
           assert.true(tray.scrollTop > 0, 'scrolled');
 
@@ -259,10 +263,7 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
             right: g.left - t.left,
           }[placement];
           assert.true(gap < 16, `at the leading edge (${gap}px)`);
-          // Nothing scrolled over it: a finger on it hits the grabber. The
-          // desktop scrollbar runs along a left drawer's leading edge and
-          // takes hits; phones have no such scrollbar, so hide it here.
-          tray.style.scrollbarWidth = 'none';
+          // Nothing scrolled over it: a finger on it hits the grabber.
           const hit = document.elementFromPoint(
             g.left + g.width / 2,
             g.top + g.height / 2,
