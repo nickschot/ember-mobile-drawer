@@ -63,6 +63,10 @@ const OPEN_RUBBER_BAND = 24;
  */
 const SCROLL_ATTRIBUTE = 'data-mobile-drawer-scroll';
 
+/** Events on the tray that (re)lock the scroll containers they reach. */
+const TRAY_INPUT_EVENTS = ['pointerdown', 'wheel', 'focusin'] as const;
+const CAPTURE_PASSIVE = { capture: true, passive: true } as const;
+
 /**
  * Tolerance (px) for "at the highest snap point" and "at a scroll end":
  * offsets and scroll positions can be fractional.
@@ -163,10 +167,10 @@ export interface MobileDrawerSignature {
     /**
      * Only start a drag on elements with the yielded `handle` modifier,
      * instead of anywhere on the tray. Use it when the content has its own
-     * gestures, or should always scroll natively. Without it, scrollable
-     * content (the tray and elements marked `data-mobile-drawer-scroll`)
-     * scrolls at the highest snap point and drags elsewhere, see the class
-     * docs. Default `false`.
+     * gestures. Either way the content only scrolls along the axis at the
+     * highest snap point; without it, scrollable content (the tray and
+     * elements marked `data-mobile-drawer-scroll`) scrolls there and drags
+     * elsewhere, see the class docs. Default `false`.
      */
     handleOnly?: boolean;
     /**
@@ -276,7 +280,8 @@ const clampIndex = (index: number, count: number) =>
  * container, so nothing relies on it alone. Touchmoves are only cancelled
  * once a gesture is decided, so swipes across the axis (a carousel, a list
  * in a side drawer) keep working. Handles always drag and keep `didPan`'s
- * `touch-action`; with `@handleOnly` the content is never locked.
+ * `touch-action`. With `@handleOnly` the content is locked below the
+ * highest snap point too, so it only scrolls when the drawer is fully open.
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
@@ -365,6 +370,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     HTMLElement,
     { property: string; value: string; priority: string }
   >();
+  /** The overflow property the lock sets, while locked. */
+  #scrollLockProperty?: string;
   /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
   /**
@@ -498,6 +505,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
       this.#syncScrollLock();
+      for (const type of TRAY_INPUT_EVENTS) {
+        this.#tray.addEventListener(type, this.#onTrayInput, CAPTURE_PASSIVE);
+      }
 
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
@@ -512,7 +522,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       const placementChanged = this.placement !== this.#placement;
       this.#placement = this.placement;
       this.#measure();
-      // The axis or `@handleOnly` may have changed.
+      // The axis may have changed.
       this.#syncScrollLock();
       if (this.#drag) {
         // The finger wins until it lets go; the release then picks a snap
@@ -528,6 +538,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     destroy: () => {
       this.#destroyed = true;
+      for (const type of TRAY_INPUT_EVENTS) {
+        this.#tray?.removeEventListener(type, this.#onTrayInput, true);
+      }
       this.#endHold();
       this.#endBackdropPointer();
       this.#resizeObserver?.disconnect();
@@ -730,47 +743,79 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * containers in it (`data-mobile-drawer-scroll`, not those of a nested
    * drawer) get an inline `overflow-y: hidden` (`overflow-x` for left and
    * right), which is removed again at the highest snap point. `hidden`
-   * keeps them scroll containers, so their scroll position is kept. Not
-   * with `@handleOnly`, where the content always scrolls natively.
+   * keeps them scroll containers, so their scroll position is kept. Also
+   * with `@handleOnly`: the content only scrolls when the drawer is fully
+   * open, so a handle never scrolls out of reach below the top.
    *
    * Inline styles rather than a CSS rule keyed on a state attribute: the
    * marked elements are the app's, and their `overflow` usually comes from
    * unlayered app CSS, which beats every rule in the drawer's cascade layer;
-   * and CSS can't see `@handleOnly`. The previous inline value is put back
-   * on unlock. Runs when `#atTop` flips, on install, on argument changes and
-   * on teardown; a marked element added while locked is locked when a
-   * gesture starts on it (`onPointerDown`).
+   * and it must follow the rendered position, also mid-drag. The previous
+   * inline value is put back on unlock. Runs when `#atTop` flips, on
+   * install, on argument changes and on teardown; a marked element added
+   * while locked, or whose inline style the app rewrote, is locked when a
+   * pointer goes down, a wheel turns or focus moves in it (`#onTrayInput`).
+   * After a placement change during a drag, the lock follows the new
+   * layout from the next frame.
    */
   #syncScrollLock(): void {
     const tray = this.#tray;
     if (!tray) return;
-    const lock = !this.#destroyed && !this.handleOnly && !this.#atTop;
+    const lock = !this.#destroyed && !this.#atTop;
     const property = this.axis === 'vertical' ? 'overflow-y' : 'overflow-x';
+    this.#scrollLockProperty = lock ? property : undefined;
     for (const [element, saved] of this.#scrollLock) {
-      if (lock && saved.property === property) continue;
-      element.style.setProperty(saved.property, saved.value, saved.priority);
-      this.#scrollLock.delete(element);
+      if (!element.isConnected) {
+        // Removed from the page: nothing to put back.
+        this.#scrollLock.delete(element);
+      } else if (!lock || saved.property !== property) {
+        this.#unlockScroll(element);
+      }
     }
     if (!lock) return;
-    this.#lockScroll(tray, property);
+    this.#lockScroll(tray);
     for (const element of tray.querySelectorAll<HTMLElement>(
       `[${SCROLL_ATTRIBUTE}]`,
     )) {
       if (element.closest('.mobile-drawer__tray') === tray) {
-        this.#lockScroll(element, property);
+        this.#lockScroll(element);
       }
     }
   }
 
-  #lockScroll(element: HTMLElement, property: string): void {
-    if (this.#scrollLock.has(element)) return;
+  /**
+   * Locks `element` with the current lock property, or locks it again if
+   * the app has rewritten its inline style since: the app's value is then
+   * the one to put back.
+   */
+  #lockScroll(element: HTMLElement): void {
+    const property = this.#scrollLockProperty;
+    if (!property) return;
     const { style } = element;
-    this.#scrollLock.set(element, {
-      property,
-      value: style.getPropertyValue(property),
-      priority: style.getPropertyPriority(property),
-    });
+    const value = style.getPropertyValue(property);
+    const priority = style.getPropertyPriority(property);
+    if (value === 'hidden' && !priority && this.#scrollLock.has(element)) {
+      return;
+    }
+    this.#scrollLock.set(element, { property, value, priority });
     style.setProperty(property, 'hidden');
+  }
+
+  /**
+   * Puts back the inline value `element` had before it was locked, unless
+   * the app has set a value of its own since, which is then kept.
+   */
+  #unlockScroll(element: HTMLElement): void {
+    const saved = this.#scrollLock.get(element);
+    if (!saved) return;
+    this.#scrollLock.delete(element);
+    const { style } = element;
+    if (
+      style.getPropertyValue(saved.property) === 'hidden' &&
+      !style.getPropertyPriority(saved.property)
+    ) {
+      style.setProperty(saved.property, saved.value, saved.priority);
+    }
   }
 
   /**
@@ -1014,7 +1059,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * so taps on content keep working.
    */
   private onPointerDown = (event: PointerEvent): void => {
-    this.#lockTouched(event.target);
     const spring = this.#spring;
     if (!spring?.isAnimating || this.#drag || this.#hold || this.#destroyed) {
       return;
@@ -1031,14 +1075,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * While scrolling is locked, also locks the marked scroll containers
-   * around `target` that were added after the lock (see `#syncScrollLock`),
-   * before the browser could start scrolling them.
+   * While scrolling is locked, locks the marked scroll containers around
+   * the target of a `pointerdown`, `wheel` or `focusin` on the tray before
+   * the browser scrolls them: those added after the lock, and those whose
+   * inline style the app has rewritten since (see `#lockScroll`). Listens
+   * on the tray itself, so it works with `@handleOnly` and any pointer type.
    */
-  #lockTouched(target: EventTarget | null): void {
+  #onTrayInput = (event: Event): void => {
     const tray = this.#tray;
-    const property = tray && this.#scrollLock.get(tray)?.property;
-    if (!property || !(target instanceof Element)) return;
+    const { target } = event;
+    if (!tray || !this.#scrollLockProperty || !(target instanceof Element)) {
+      return;
+    }
+    this.#lockScroll(tray);
     for (
       let element: Element | null = target;
       element && element !== tray && tray.contains(element);
@@ -1049,10 +1098,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         element.hasAttribute(SCROLL_ATTRIBUTE) &&
         element.closest('.mobile-drawer__tray') === tray
       ) {
-        this.#lockScroll(element, property);
+        this.#lockScroll(element);
       }
     }
-  }
+  };
 
   #endHold(): void {
     const hold = this.#hold;
@@ -1233,7 +1282,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.placement
         this.snapPoints
         this.activeSnapPoint
-        this.handleOnly
       }}
     >
       {{#if this.showBackdrop}}

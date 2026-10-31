@@ -112,6 +112,8 @@ async function gesture(
     sideways?: number;
     during?: (step: number) => void;
     then?: { direction: Direction; steps: number };
+    /** Where the finger goes down, instead of the middle of the tray. */
+    start?: { x: number; y: number };
   } = {},
 ): Promise<GestureResult> {
   const container = el('[data-test-container]').getBoundingClientRect();
@@ -124,6 +126,7 @@ async function gesture(
     (Math.max(rect.top, container.top) +
       Math.min(rect.bottom, container.bottom)) /
     2;
+  if (options.start) ({ x, y } = options.start);
   const before = rect;
   const pointerId = 1;
 
@@ -589,6 +592,27 @@ module(
       assert.true(next.shift < -80, `moves the drawer (${next.shift})`);
     });
 
+    test('half open, a fast first touchmove from near the tray edge decides and is cancelled', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const handle = el('[data-test-handle]');
+      const rect = handle.getBoundingClientRect();
+      const top = tray().getBoundingClientRect().top;
+      // A grabber-like spot about 12px below the tray's top edge. The first
+      // touchmove jumps 25px straight up, past the tray's edge, before iOS
+      // could have seen a slower start.
+      const start = { x: rect.left + rect.width / 2, y: top + 12 };
+      const result = await gesture(handle, 'up', 10, {
+        start,
+        path: [[0, -25]],
+      });
+      assert.true(result.prevented[0], 'the very first touchmove is cancelled');
+      assert.true(result.prevented.every(Boolean), 'and every one after it');
+      assert.true(result.dragging, 'drags');
+      assert.true(result.shift > 30, `the drawer follows (${result.shift})`);
+    });
+
     test('a drag keeps dragging when the finger turns around', async function (assert) {
       const state = new State();
       await renderDrawer(state);
@@ -813,20 +837,39 @@ module(
       added.remove();
     });
 
-    test('the scroll lock follows @handleOnly and the placement', async function (assert) {
+    test('with @handleOnly the content is locked below the highest snap point too', async function (assert) {
       const state = new State();
       state.active = 1;
       state.handleOnly = true;
       await renderDrawer(state);
       assert.strictEqual(
         getComputedStyle(tray()).overflowY,
-        'auto',
-        'with @handleOnly the content always scrolls',
+        'hidden',
+        'half open: locked',
       );
-      assert.strictEqual(tray().style.overflowY, '');
+      assert.strictEqual(tray().style.touchAction, '', 'not a drag source');
+
+      const content = await gesture(el('[data-test-content]'), 'up', 12);
+      assert.false(content.dragging, 'the content does not drag');
+      const handle = await gesture(el('[data-test-handle]'), 'up', 30);
+      assert.true(handle.dragging, 'the handle drags');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, [2], 'opened fully');
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'auto', 'open');
 
       state.handleOnly = false;
       await settled();
+      state.active = 1;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'hidden');
+    });
+
+    test('the scroll lock follows the placement', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
       assert.strictEqual(getComputedStyle(tray()).overflowY, 'hidden');
 
       state.placement = 'left';
@@ -834,10 +877,69 @@ module(
       clock.runUntilIdle();
       assert.strictEqual(tray().style.overflowY, '', 'vertical lock removed');
       assert.strictEqual(getComputedStyle(tray()).overflowX, 'hidden');
+    });
 
-      state.handleOnly = true;
+    test('an app that rewrites a locked inline style is locked again, and keeps its own value', async function (assert) {
+      const state = new State();
+      state.nested = true;
+      state.active = 1;
+      await renderDrawer(state);
+      const nested = el('[data-test-nested]');
+      assert.strictEqual(nested.style.overflowY, 'hidden', 'locked');
+
+      // The app rewrites the whole inline style (like a `style=` binding).
+      nested.style.cssText =
+        'width: 300px; height: 150px; overflow: scroll; overscroll-behavior: contain';
+      nested.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, deltaY: 10 }),
+      );
+      assert.strictEqual(nested.style.overflowY, 'hidden', 'a wheel relocks');
+
+      nested.style.overflowY = 'auto';
+      el('[data-test-nested-content]').dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          pointerType: 'mouse',
+        }),
+      );
+      assert.strictEqual(nested.style.overflowY, 'hidden', 'a pointer relocks');
+
+      state.active = 2;
       await settled();
-      assert.strictEqual(tray().style.overflowX, '', 'unlocked');
+      clock.runUntilIdle();
+      assert.strictEqual(
+        nested.style.overflowY,
+        'auto',
+        "unlocked to the app's latest value",
+      );
+
+      state.active = 1;
+      await settled();
+      clock.runUntilIdle();
+      nested.style.overflowY = 'scroll';
+      state.active = 2;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(
+        nested.style.overflowY,
+        'scroll',
+        "a value the app set while locked isn't overwritten on unlock",
+      );
+    });
+
+    test('a marked scroller added while locked is locked when focus moves into it', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const added = document.createElement('div');
+      added.setAttribute('data-mobile-drawer-scroll', '');
+      added.style.cssText = 'height: 100px; overflow-y: auto';
+      const input = document.createElement('input');
+      added.append(input);
+      el('.mobile-drawer__content').prepend(added);
+      input.focus();
+      assert.strictEqual(added.style.overflowY, 'hidden');
+      added.remove();
     });
 
     test('a slight move along the axis does not decide the gesture', async function (assert) {
