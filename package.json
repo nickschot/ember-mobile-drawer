@@ -111,6 +111,7 @@
     "vite": "^7.1.9"
   },
   "peerDependencies": {
+    "@glimmer/component": ">= 1.1.2",
     "@glint/template": ">= 1.0.0",
     "ember-source": ">= 5.12"
   },
