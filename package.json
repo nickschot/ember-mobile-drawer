@@ -32,6 +32,7 @@
       "default": "./dist/template-registry.js"
     },
     "./styles.css": "./dist/styles.css",
+    "./themes/ios.css": "./dist/themes/ios.css",
     "./_app_/components/mobile-drawer": "./dist/_app_/components/mobile-drawer.js",
     "./addon-main.js": "./addon-main.cjs",
     "./package.json": "./package.json",

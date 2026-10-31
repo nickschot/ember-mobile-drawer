@@ -125,6 +125,7 @@ These are the package's public API:
 - `ember-mobile-drawer/components/mobile-drawer`: the `<MobileDrawer>` component as a default export
 - `ember-mobile-drawer/template-registry`: the Glint template registry, for apps that use loose-mode (`.hbs`) templates
 - `ember-mobile-drawer/styles.css`: the base stylesheet (see [Styles](#styles))
+- `ember-mobile-drawer/themes/ios.css`: the optional iOS theme (see [iOS theme](#ios-theme))
 
 Test helpers (`ember-mobile-drawer/test-support`) will be added later.
 
@@ -191,6 +192,34 @@ Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
 ```html
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 ```
+
+### iOS theme
+
+An optional theme gives the drawer the look of an iOS 26/27 sheet ("Liquid Glass"): a translucent, blurred sheet with a light rim and a darkened edge, large rounded corners on the page-facing side, a dimming backdrop and a grabber bar. Import it after the base styles; it does not import them itself:
+
+```js
+import 'ember-mobile-drawer/styles.css';
+import 'ember-mobile-drawer/themes/ios.css';
+```
+
+The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an ancestor of the drawer: `<body>` to theme every drawer, or a wrapper element for one drawer. Don't put it on `<MobileDrawer>` itself.
+
+```hbs
+<div class="mobile-drawer-theme-ios">
+  <MobileDrawer as |drawer|>
+    <div class="mobile-drawer-theme-ios__grabber"></div>
+    ...
+  </MobileDrawer>
+</div>
+```
+
+`mobile-drawer-theme-ios__grabber` draws a 36×5px bar for bottom and top drawers. Put it first in a bottom drawer and last in a top drawer. The bar is a small touch target, so with `@handleOnly` put the `handle` modifier on a larger element around it.
+
+- **Light and dark** follow the page's `color-scheme` (through `light-dark()`), like the base styles' `Canvas` default. Declare `color-scheme: light dark` (for example on `:root`) to get the dark sheet in dark mode. Browsers without `light-dark()` (Safari before 17.5, Chrome before 123) always get the light sheet.
+- **Glass** needs `backdrop-filter`; without it the sheet is solid. With reduced transparency or increased contrast (`prefers-reduced-transparency: reduce`, `prefers-contrast: more`) the sheet is solid too.
+- The sheet stays attached to the screen edge at every snap point. On iOS a partial-height sheet floats inset from the screen edges and only becomes edge-to-edge and opaque when fully expanded; the theme can't do that yet.
+
+The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` on the tray, in the same `ember-mobile-drawer` layer with zero-specificity selectors. Unlayered app CSS wins over it. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
 
 ## Development
 

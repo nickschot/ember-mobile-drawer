@@ -146,14 +146,6 @@ section > h2 {
   margin-bottom: 0.75rem;
 }
 
-.demo-placeholder {
-  margin: 0;
-  padding: 1rem;
-  border: 2px dashed color-mix(in srgb, currentcolor 35%, transparent);
-  border-radius: 8px;
-  text-align: center;
-}
-
 .demo-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -347,4 +339,41 @@ section > h2 {
 .example-nav a[aria-current="page"] {
   background: color-mix(in srgb, currentcolor 12%, transparent);
   font-weight: bold;
+}
+
+/* iOS theme example: spacing and type only; the look comes from the theme. */
+.example-ios-sheet {
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.example-ios-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 1rem 0.5rem;
+}
+
+.example-ios-title h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.example-ios-title button {
+  border: 0;
+  background: none;
+  color: #007aff;
+  color: light-dark(#007aff, #0a84ff);
+  font: inherit;
+  font-weight: 600;
+}
+
+.example-ios-list {
+  margin: 0;
+  padding: 0 0 0 1rem;
+  list-style: none;
+}
+
+.example-ios-list li {
+  padding: 0.75rem 1rem 0.75rem 0;
+  border-bottom: 0.5px solid color-mix(in srgb, currentcolor 20%, transparent);
 }

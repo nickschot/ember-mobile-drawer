@@ -2,6 +2,7 @@ import EmberApp from 'ember-strict-application-resolver';
 import EmberRouter from '@ember/routing/router';
 import PageTitleService from 'ember-page-title/services/page-title';
 import '#src/styles.css';
+import '#src/themes/ios.css';
 
 class Router extends EmberRouter {
   location = 'history';
