@@ -32,21 +32,29 @@ Scenarios for other Ember versions are defined in `.try.mjs` and run in CI.
 
 ## Workflow
 
-Work is tracked in GitHub issues; there is no project board. Issues carry a status label (`ready to implement` or `blocked`) and a milestone. An issue is in progress when it has an open PR that says `Closes #<issue>`.
+Work is tracked in GitHub issues; there is no project board. The planned tickets are issues #17–#32, with a `[TN]` title prefix (for example `[T16] Release v0.1.0`); later issues cover follow-ups. Issues carry a status label (`ready to implement` or `blocked`) and a milestone (`M0 Foundation`, `M1 Core engine`, `M2 Styling` or `M3 Docs & release`). An issue is in progress when it has an open PR that says `Closes #<issue>`.
 
 The project is developed by a set of agents and a human maintainer:
 
-- **PM agent** – plans work, keeps issue labels up to date, assigns issues to implementers and merges PRs where the merge rules allow it.
+- **PM agent** – plans work, keeps issue labels up to date, assigns issues to implementers, records the maintainer's decisions and merges PRs where the merge rules allow it.
 - **Implementer agents** – only pick issues labelled `ready to implement`. Each issue gets its own git worktree and branch (for example `issue-19-process`) and one PR that says `Closes #<issue>`.
-- **Reviewer agent** – adversarially reviews every PR against the acceptance criteria of the linked issue and manages the `reviewed` label.
+- **Reviewer agent** – adversarially reviews every PR against the acceptance criteria of the linked issue, if there is one, and manages the `reviewed` label.
 - **Maintainer** – approves every PR that is not `trivial`, and may approve any PR.
+
+The PM may also open small PRs without an issue, such as docs updates. Their body says so instead of `Closes #<issue>`.
+
+### Agent hygiene
+
+- Each agent works in its own git worktree and its own temporary directory (`mktemp -d`), and uses its own browser tab.
+- Never write into another agent's worktree or scratch space.
 
 ### Pull requests
 
 Use the PR template. Every PR has:
 
-- a `Closes #<issue>` line,
+- a `Closes #<issue>` line (or, for a PM-opened PR without an issue, a line saying so),
 - a summary and a test summary,
+- screenshots for a visible change (see [Visual proof](#visual-proof)), or "n/a: no visible change",
 - a classification label, proposed by the author:
   - `trivial`: docs/tooling/config, no runtime behaviour change.
   - `uncertain`: runtime behaviour, covered by tests, but involved judgment calls.
@@ -55,15 +63,40 @@ Use the PR template. Every PR has:
 
 The reviewer may raise a PR's classification but never lower it.
 
+### Visual proof
+
+Every PR with a visible change (CSS, component rendering, gestures, the demo app) includes screenshots of the demo app:
+
+- Phone size: 390×844 at device scale factor 2. Use device emulation over the Chrome DevTools Protocol (`Emulation.setDeviceMetricsOverride`); Chrome's `--window-size` can't go below about 500px wide.
+- One screenshot for each relevant placement and state, in light and dark mode when colours are involved.
+- Commit only the PNGs to the orphan branch `pr-screenshots`, under `pr-<number>/`. Never commit them to `main` or the PR branch.
+- Embed them in the PR body with `https://raw.githubusercontent.com/nickschot/ember-mobile-drawer/pr-screenshots/pr-<number>/<file>.png`.
+
+The reviewer checks that the screenshots match the code.
+
 ### Review and the `reviewed` label
 
-Everything runs under a single GitHub account, so nobody can formally approve a PR. Instead:
+Everything runs under a single GitHub account, so nobody can formally approve a PR. Each PR gets one adversarial reviewer. Instead of an approval:
 
 - The reviewer posts its verdict as a PR review comment (`gh pr review --comment`).
 - On APPROVE it adds the `reviewed` label. On REQUEST CHANGES it removes the label if present.
 - The label only counts for the head commit it was given on. Any push after it was added makes it stale; the reviewer removes or re-adds it after re-reviewing.
 
+The `reviewed` label records the adversarial review, not the maintainer's approval.
+
+### Maintainer approval
+
+- The maintainer gives explicit approval to the PM, in the PM's chat session. It is not recorded as a GitHub review.
+- When a PR involves design decisions, the PM records the maintainer's decisions on the PR as a comment ("Maintainer decisions (recorded by PM): …").
+
 ### Merge rules
 
-- `trivial`: the PM merges once the PR has the `reviewed` label (added after the latest push) and CI is green.
-- `uncertain` and `needs-human-review`: need the maintainer's explicit approval before merging, with or without `reviewed`.
+The PM merges a PR only when all of these hold:
+
+- the `reviewed` label was added on the current head, after the latest push,
+- CI is green,
+- for `uncertain` and `needs-human-review`: the maintainer has explicitly approved it. `trivial` PRs don't need this.
+
+The merge is pinned to the reviewed head commit (`gh pr merge --match-head-commit <sha>`), so a later push can't slip in.
+
+The release-plan "Prepare Release" PR is only merged as part of the release ticket (T16, #32), never earlier.

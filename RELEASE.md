@@ -26,6 +26,8 @@ When reviewing merged PR's the labels to be used are:
 
 Once the prep work is completed, the actual release is straight forward: you just need to merge the open [Plan Release](https://github.com/nickschot/ember-mobile-drawer/pulls?q=is%3Apr+is%3Aopen+%22Prepare+Release%22+in%3Atitle) PR
 
+The Prepare Release PR is only merged as part of the release ticket (T16, #32), never earlier.
+
 ## One-time maintainer setup
 
 1. **Initial tag (done).** release-plan needs at least one git tag to compute the changelog. An initial `v0.0.0` tag exists on the initial commit.
