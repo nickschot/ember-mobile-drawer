@@ -57,6 +57,45 @@ const OPENING_DIRECTION: Record<Placement, 1 | -1> = {
  */
 const OPEN_RUBBER_BAND = 24;
 
+/**
+ * Marks an element inside the tray as a scroll container for scroll vs drag
+ * handling. The tray itself always is one.
+ */
+const SCROLL_ATTRIBUTE = 'data-mobile-drawer-scroll';
+
+/**
+ * Tolerance (px) for "at the highest snap point" and "at a scroll end":
+ * offsets and scroll positions can be fractional.
+ */
+const EPSILON = 0.5;
+
+/**
+ * Whether `element` can scroll along the axis in the direction a finger that
+ * moved `movement` px (positive: down or right) pushes its content.
+ */
+function canScroll(
+  element: Element,
+  vertical: boolean,
+  movement: number,
+): boolean {
+  const style = getComputedStyle(element);
+  const overflow = vertical ? style.overflowY : style.overflowX;
+  if (overflow !== 'auto' && overflow !== 'scroll') return false;
+  const range = vertical
+    ? element.scrollHeight - element.clientHeight
+    : element.scrollWidth - element.clientWidth;
+  if (!(range > EPSILON)) return false;
+  // Horizontal right-to-left scroll positions run from -range to 0.
+  const rtl = !vertical && style.direction === 'rtl';
+  const min = rtl ? -range : 0;
+  const max = rtl ? 0 : range;
+  // iOS reports positions past the ends while bouncing; those count as ends.
+  const position = vertical ? element.scrollTop : element.scrollLeft;
+  // A finger moving down (right) reveals what is above (left of) the view,
+  // so the position has to be able to decrease; moving up (left), increase.
+  return movement > 0 ? position > min + EPSILON : position < max - EPSILON;
+}
+
 interface Drag {
   /** The element whose pan modifier started the drag. */
   source: HTMLElement;
@@ -109,8 +148,11 @@ export interface MobileDrawerSignature {
     onSnapPointChange?: (index: number) => void;
     /**
      * Only start a drag on elements with the yielded `handle` modifier,
-     * instead of anywhere on the tray. Use it when the content scrolls or has
-     * its own gestures. Default `false`.
+     * instead of anywhere on the tray. Use it when the content has its own
+     * gestures, or should always scroll natively. Without it, scrollable
+     * content (the tray and elements marked `data-mobile-drawer-scroll`)
+     * scrolls at the highest snap point and drags elsewhere, see the class
+     * docs. Default `false`.
      */
     handleOnly?: boolean;
   };
@@ -188,10 +230,24 @@ const clampIndex = (index: number, count: number) =>
  * With `@handleOnly`, only elements with the yielded `handle` modifier start
  * a drag. One finger drags at a time.
  *
- * The element that drags gets `touch-action: pan-x` (vertical drawers) or
- * `pan-y` (horizontal ones), so the browser doesn't scroll along the
- * drawer's axis while it drags. Scrolling content inside the tray along that
- * axis isn't handled yet; use `@handleOnly` for scrolling content.
+ * Scroll vs drag: the tray is a scroll container, as is every element in it
+ * marked with `data-mobile-drawer-scroll`. Each touch gesture is decided
+ * once the finger has moved a few px along the axis, and further along it
+ * than across it (see `dragSource`), and keeps that decision until the
+ * finger lifts:
+ * - below the highest snap point every gesture along the axis drags;
+ * - at the highest snap point a gesture scrolls if a scroll container
+ *   between the touched element and the tray (inclusive) can scroll the way
+ *   the finger pushes the content, and drags otherwise. So at the start of
+ *   the content, pulling a bottom drawer down closes it.
+ * The tray gets `touch-action: pan-x` (vertical drawers) or `pan-y`
+ * (horizontal ones) while it is below the highest snap point, so the
+ * browser never scrolls along the axis there, and `pan-x pan-y` at the
+ * highest snap point, where a drag cancels its `touchmove` events instead
+ * (see `dragSource`). Below the highest snap point touchmoves are never
+ * cancelled, so swipes across the axis (a carousel, a list in a side
+ * drawer) always work. Handles always drag and keep `didPan`'s
+ * `touch-action`.
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` and a
@@ -260,6 +316,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * never pulls it further off its edge.
    */
   #overshoot = 0;
+  /**
+   * Whether the tray was at (or past) the highest snap point at the last
+   * render, i.e. whether its content may scroll. See `#trayTouchAction`.
+   */
+  #atTop = false;
 
   get placement(): Placement {
     const { placement } = this.args;
@@ -557,6 +618,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }[this.placement];
 
     this.#tray!.style.transform = transform;
+    const atTop = open >= layout.maxOffset - EPSILON;
+    if (atTop !== this.#atTop) {
+      this.#atTop = atTop;
+      // Only while the tray is a drag source (not with @handleOnly).
+      if (this.#tray!.style.touchAction) {
+        this.#tray!.style.touchAction = this.trayTouchAction();
+      }
+    }
     this.#backdrop!.style.setProperty(
       '--mobile-drawer-progress',
       String(this.#progressOf(open)),
@@ -617,6 +686,45 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       },
     );
   }
+
+  /**
+   * The tray's `touch-action`. Below the highest snap point every gesture
+   * along the axis drags, so the browser may only pan across it. At the
+   * highest snap point the content may scroll along the axis too; gestures
+   * that drag cancel their `touchmove` events instead. Read when a touch
+   * starts, so it is kept up to date in `#render`.
+   */
+  private trayTouchAction = (): string => {
+    if (this.#atTop) return 'pan-x pan-y';
+    return this.axis === 'vertical' ? 'pan-x' : 'pan-y';
+  };
+
+  /**
+   * Decides whether a gesture on the tray drags the drawer or scrolls (see
+   * the class docs). Called once per gesture, after a touch on a moving
+   * drawer has held it.
+   */
+  private shouldDrag = (movement: number, target: Element | null): boolean => {
+    const layout = this.#layout;
+    const tray = this.#tray;
+    if (!layout || !tray) return true;
+    if (this.#renderedOffset < layout.maxOffset - EPSILON) return true;
+    const vertical = this.axis === 'vertical';
+    for (
+      let element = target instanceof Element ? target : tray;
+      element && tray.contains(element);
+      element = element.parentElement!
+    ) {
+      if (
+        (element === tray || element.hasAttribute(SCROLL_ATTRIBUTE)) &&
+        canScroll(element, vertical, movement)
+      ) {
+        return false;
+      }
+      if (element === tray) break;
+    }
+    return true;
+  };
 
   /**
    * A touch on a drag source holds a running animation right away, like
@@ -836,6 +944,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
             onPan=this.onPan
             onPanEnd=this.onPanEnd
             onTeardown=this.onDragSourceTeardown
+            shouldDrag=this.shouldDrag
+            touchAction=this.trayTouchAction
           )
         )}}
       >

@@ -42,7 +42,10 @@
  *                           component writes as an inline style on the
  *                           backdrop element itself (not the root, so the
  *                           tray content is not restyled every frame).
- * .mobile-drawer__tray      The sheet and scroll container. At
+ * .mobile-drawer__tray      The sheet and scroll container. The component
+ *                           writes an inline `touch-action` on it to decide
+ *                           between scrolling and dragging (see the README);
+ *                           don't override `touch-action` on it. At
  *                           `transform: none` it rests flush against its
  *                           edge, i.e. fully open. The component writes an
  *                           inline `transform` every frame that moves it away

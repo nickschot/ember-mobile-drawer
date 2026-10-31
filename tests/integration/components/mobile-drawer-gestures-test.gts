@@ -704,7 +704,11 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
 
     state.handleOnly = false;
     await settled();
-    assert.strictEqual(tray().style.touchAction, 'pan-x', 'the tray drags');
+    assert.strictEqual(
+      tray().style.touchAction,
+      'pan-x pan-y',
+      'the tray drags (and scrolls: it is fully open)',
+    );
     assert.strictEqual(
       el('[data-test-handle]').style.touchAction,
       '',

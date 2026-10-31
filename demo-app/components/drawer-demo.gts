@@ -21,6 +21,12 @@ const CUSTOM = -1;
 /** Default of `--mobile-drawer-backdrop-opacity` in the base styles. */
 const DEFAULT_BACKDROP_OPACITY = 0.4;
 
+/** Lines of filler for trying out scrolling inside the drawer. */
+const TALL_CONTENT = Array.from(
+  { length: 40 },
+  (_, index) => `Line ${index + 1} of the tall content`,
+);
+
 const isPlacement = (value: unknown): value is Placement =>
   PLACEMENTS.includes(value as Placement);
 
@@ -30,7 +36,7 @@ const isPlacement = (value: unknown): value is Placement =>
  * that haven't landed yet are shown disabled, with the issue that adds them.
  *
  * The initial state can be set from the URL, e.g.
- * `/?placement=left&preset=0&snap=1&handle=1`, or with custom snap points
+ * `/?placement=left&preset=0&snap=1&handle=1&tall=1`, or with custom snap points
  * `/?points=0,200,'content'&snap=2&backdrop=0.6`, which is handy for
  * screenshots.
  */
@@ -42,6 +48,7 @@ export default class DrawerDemo extends Component {
   @tracked snapPointsError?: string;
   @tracked active = 0;
   @tracked handleOnly = false;
+  @tracked tall = false;
   @tracked backdropOpacity = DEFAULT_BACKDROP_OPACITY;
 
   constructor(owner: Owner, args: object) {
@@ -49,13 +56,17 @@ export default class DrawerDemo extends Component {
     const params = new URLSearchParams(window.location.search);
     const placement = params.get('placement');
     if (isPlacement(placement)) this.placement = placement;
+    // The constructor runs during rendering, where reading `active` and then
+    // writing it fails Ember's tracking assertion. It is still 0 here, so the
+    // presets don't need to clamp it.
     const preset = Number(params.get('preset'));
-    if (SNAP_POINT_PRESETS[preset]) this.selectPreset(preset);
+    if (SNAP_POINT_PRESETS[preset]) this.selectPreset(preset, false);
     const points = params.get('points');
-    if (points !== null) this.setSnapPointsText(points);
+    if (points !== null) this.setSnapPointsText(points, false);
     const snap = Number(params.get('snap'));
     if (snap >= 0 && snap < this.snapPoints.length) this.active = snap;
     this.handleOnly = params.get('handle') === '1';
+    this.tall = params.get('tall') === '1';
     const backdrop = Number(params.get('backdrop') ?? NaN);
     if (backdrop >= 0 && backdrop <= 1) this.backdropOpacity = backdrop;
   }
@@ -100,19 +111,20 @@ export default class DrawerDemo extends Component {
     return lines.join('\n');
   }
 
-  selectPreset(preset: number) {
+  selectPreset(preset: number, clampActive = true) {
     this.preset = preset;
     this.snapPoints = SNAP_POINT_PRESETS[preset]!.snapPoints;
     this.snapPointsText = formatSnapPoints(this.snapPoints);
     this.snapPointsError = undefined;
-    this.active = Math.min(this.active, this.snapPoints.length - 1);
+    if (clampActive)
+      this.active = Math.min(this.active, this.snapPoints.length - 1);
   }
 
   /**
    * Applies typed snap points once they parse. While they don't, the drawer
    * keeps the last valid ones and the error is shown under the field.
    */
-  setSnapPointsText(text: string) {
+  setSnapPointsText(text: string, clampActive = true) {
     this.snapPointsText = text;
     const result = parseSnapPoints(text);
     if (result.error !== undefined) {
@@ -125,7 +137,8 @@ export default class DrawerDemo extends Component {
     this.preset = SNAP_POINT_PRESETS.findIndex(
       (preset) => formatSnapPoints(preset.snapPoints) === formatted,
     );
-    this.active = Math.min(this.active, this.snapPoints.length - 1);
+    if (clampActive)
+      this.active = Math.min(this.active, this.snapPoints.length - 1);
   }
 
   setPlacement = (event: Event) => {
@@ -144,6 +157,10 @@ export default class DrawerDemo extends Component {
 
   setHandleOnly = (event: Event) => {
     this.handleOnly = (event.target as HTMLInputElement).checked;
+  };
+
+  setTall = (event: Event) => {
+    this.tall = (event.target as HTMLInputElement).checked;
   };
 
   setBackdropOpacity = (event: Event) => {
@@ -209,6 +226,13 @@ export default class DrawerDemo extends Component {
             tools). The buttons in here use the yielded snapTo, open and close
             actions.
           </p>
+          {{#if this.tall}}
+            <ol class="demo-tall-content">
+              {{#each TALL_CONTENT as |line|}}
+                <li>{{line}}</li>
+              {{/each}}
+            </ol>
+          {{/if}}
         </div>
       </MobileDrawer>
     </div>
@@ -273,6 +297,14 @@ export default class DrawerDemo extends Component {
           {{on "change" this.setHandleOnly}}
         />
         Drag by the grabber only (@handleOnly)
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={{this.tall}}
+          {{on "change" this.setTall}}
+        />
+        Tall content (to try scrolling)
       </label>
       <label>
         Backdrop opacity (--mobile-drawer-backdrop-opacity:
