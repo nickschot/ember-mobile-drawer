@@ -31,11 +31,15 @@
  *                                    for a top sheet). The element is a
  *                                    15px strip across the tray, sticky at
  *                                    its page-facing edge so it stays in
- *                                    view while the content scrolls, with an
- *                                    opaque sheet background so scrolled
- *                                    content doesn't show through. Its
- *                                    ::before draws the 36x5px bar, in the
- *                                    tray's text colour.
+ *                                    view while the content scrolls. While
+ *                                    the drawer is [data-expanded] it has an
+ *                                    opaque sheet background, so scrolled
+ *                                    content doesn't show through; otherwise
+ *                                    it is transparent. Its ::before draws
+ *                                    the 36x5px bar, in the tray's text
+ *                                    colour. Don't wrap it in another
+ *                                    element: a sticky element only sticks
+ *                                    inside its parent.
  *
  * Light and dark: the colours use light-dark(), so they follow the page's
  * `color-scheme`, like the base styles' Canvas/CanvasText defaults. A page
@@ -86,16 +90,24 @@
   /*
    * The grabber: a strip across the tray at its leading edge (the edge that
    * faces the page), sticky so it stays in view while the content scrolls at
-   * the highest snap point. The bar itself is drawn by ::before; the strip's
-   * 5px padding above and below it keeps the bar's place in the layout.
+   * the highest snap point. The bar itself is drawn by ::before, with 5px of
+   * the strip's padding above and below it. (Unlike the old 5px margins, the
+   * padding doesn't collapse with a neighbour's margin.)
    *
-   * The strip has the sheet's background, made opaque so the content that
-   * scrolls under it doesn't show through the glass tint: the opaque version
+   * Below the highest snap point the content can't scroll, so the strip is
+   * transparent: the tray's sheet background shows through it unchanged, and
+   * no band shows on the glass sheet. While the drawer is expanded
+   * ([data-expanded], at or heading to the highest snap point) the content
+   * scrolls under the strip, so it gets the sheet's background, made opaque
+   * so the content doesn't show through the glass tint: the opaque version
    * of the glass tint is the solid sheet colour. (A backdrop-filter on the
    * strip instead would cost a second blur, and in Chrome it doesn't blur
-   * the content scrolling under it.) Browsers without relative colours
-   * (Safari < 18, Chrome < 119, Firefox < 128) get the sheet's background
-   * as is.
+   * the content scrolling under it.)
+   *
+   * The opaque colour needs relative colours with a light-dark() origin
+   * (the theme's background is a light-dark() value where light-dark() is
+   * supported). Where that doesn't work the expanded strip gets the sheet's
+   * background as is, translucent on the glass sheet.
    */
   :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
     display: block;
@@ -104,11 +116,27 @@
     top: 0;
     z-index: 1;
     padding: 5px 0;
+    background: transparent;
+  }
+
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-expanded]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  ) {
     background: var(--mobile-drawer-background, Canvas);
   }
 
-  @supports (color: rgb(from red r g b / 1)) {
-    :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
+  @supports (color: rgb(from light-dark(red, red) r g b / 1)) {
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-expanded]
+        > .mobile-drawer__tray
+        > .mobile-drawer__content
+        > .mobile-drawer-theme-ios__grabber
+    ) {
       background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
     }
   }

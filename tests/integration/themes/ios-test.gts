@@ -103,7 +103,8 @@ const TALL_LINES = Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`);
  * Renders the drawer markup inside a wrapper with the given `color-scheme`,
  * with or without the theme class on the wrapper. The grabber goes first,
  * or last for a top drawer. With `tall` the content is much longer than the
- * drawer and the tray rests fully open (`transform: none`), as at the
+ * drawer and the tray rests fully open (`transform: none`). With
+ * `expanded` the root gets `data-expanded`, as the component sets it at the
  * highest snap point.
  */
 async function renderDrawer({
@@ -111,22 +112,30 @@ async function renderDrawer({
   placement = 'bottom',
   scheme = 'light',
   tall = false,
+  expanded = false,
 }: {
   themed?: boolean;
   placement?: Placement;
   scheme?: Scheme;
   tall?: boolean;
+  expanded?: boolean;
 } = {}) {
   const wrapperClass = themed ? 'mobile-drawer-theme-ios' : '';
   const wrapperStyle = htmlSafe(`color-scheme: ${scheme}`);
   const trayStyle = htmlSafe(tall ? 'transform: none' : '');
   const isTop = placement === 'top';
   const lines = tall ? TALL_LINES : ['Content'];
+  const expandedAttr = expanded ? '' : undefined;
   await render(
     <template>
       {{! template-lint-disable no-inline-styles }}
       <div class={{wrapperClass}} style={{wrapperStyle}}>
-        <div class="mobile-drawer" data-placement={{placement}} data-test-root>
+        <div
+          class="mobile-drawer"
+          data-placement={{placement}}
+          data-expanded={{expandedAttr}}
+          data-test-root
+        >
           <div class="mobile-drawer__backdrop" data-test-backdrop></div>
           <div class="mobile-drawer__tray" style={{trayStyle}} data-test-tray>
             <div class="mobile-drawer__content">
@@ -273,7 +282,7 @@ module('Integration | themes/ios.css', function (hooks) {
 
   for (const placement of ['bottom', 'top'] as const) {
     test(`${placement}: the grabber stays at the leading edge while the content scrolls`, async function (assert) {
-      await renderDrawer({ placement, tall: true });
+      await renderDrawer({ placement, tall: true, expanded: true });
 
       const tray = el('[data-test-tray]');
       const grabber = el('[data-test-grabber]');
@@ -303,8 +312,20 @@ module('Integration | themes/ios.css', function (hooks) {
   }
 
   for (const scheme of SCHEMES) {
-    test(`${scheme}: on the glass sheet the grabber has the opaque sheet colour behind it`, async function (assert) {
+    test(`${scheme}: below the highest snap point the grabber shows the glass sheet unchanged`, async function (assert) {
       await renderDrawer({ scheme, tall: true });
+
+      const tray = getComputedStyle(el('[data-test-tray]'));
+      assert.strictEqual(tray.backgroundColor, GLASS[scheme].background);
+      const grabber = getComputedStyle(el('[data-test-grabber]'));
+      assert.strictEqual(grabber.position, 'sticky', 'still sticky');
+      // Transparent: no second tint over the tray's, so no band.
+      assert.strictEqual(grabber.backgroundColor, 'rgba(0, 0, 0, 0)');
+      assert.strictEqual(grabber.backdropFilter, 'none');
+    });
+
+    test(`${scheme}: expanded, the grabber has the opaque sheet colour behind it`, async function (assert) {
+      await renderDrawer({ scheme, tall: true, expanded: true });
 
       const tray = getComputedStyle(el('[data-test-tray]'));
       assert.strictEqual(tray.backgroundColor, GLASS[scheme].background);
@@ -315,23 +336,33 @@ module('Integration | themes/ios.css', function (hooks) {
       assert.strictEqual(grabber.backdropFilter, 'none', 'no second blur');
     });
 
-    test(`${scheme}: on the solid sheet the grabber has the solid sheet colour behind it`, async function (assert) {
+    test(`${scheme}: on the solid sheet the grabber shows the solid sheet colour`, async function (assert) {
       await renderDrawer({ scheme, tall: true });
       const style = applyReducedTransparency();
 
       try {
         const tray = getComputedStyle(el('[data-test-tray]'));
         assert.strictEqual(tray.backgroundColor, SOLID[scheme]);
-        const grabber = getComputedStyle(el('[data-test-grabber]'));
-        assert.strictEqual(rgb(grabber.backgroundColor), SOLID[scheme]);
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-grabber]')).backgroundColor,
+          'rgba(0, 0, 0, 0)',
+          'not expanded: the solid tray shows through',
+        );
+
+        el('[data-test-root]').setAttribute('data-expanded', '');
+        assert.strictEqual(
+          rgb(getComputedStyle(el('[data-test-grabber]')).backgroundColor),
+          SOLID[scheme],
+          'expanded: solid',
+        );
       } finally {
         style.remove();
       }
     });
   }
 
-  test("the grabber follows the app's sheet background, made opaque", async function (assert) {
-    await renderDrawer({ tall: true });
+  test("expanded, the grabber follows the app's sheet background, made opaque", async function (assert) {
+    await renderDrawer({ tall: true, expanded: true });
     const style = addStyles(
       '.mobile-drawer-theme-ios { --mobile-drawer-background: rgb(10 20 30 / 0.5); }',
     );
@@ -342,6 +373,34 @@ module('Integration | themes/ios.css', function (hooks) {
     } finally {
       style.remove();
     }
+  });
+
+  test('the opaque grabber colour is only used where a light-dark() origin works', function (assert) {
+    // A browser with relative colours that can't take light-dark() as the
+    // origin would make the declaration invalid at computed-value time, i.e.
+    // a transparent strip. The feature query must test that combination, so
+    // such a browser keeps the translucent sheet background instead.
+    const conditions: string[] = [];
+    const visit = (rules: CSSRuleList) => {
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSSupportsRule &&
+          rule.cssText.includes('mobile-drawer-theme-ios__grabber') &&
+          rule.cssText.includes('rgb(from')
+        ) {
+          conditions.push(rule.conditionText);
+        }
+        if (rule instanceof CSSGroupingRule) visit(rule.cssRules);
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      visit(sheet.cssRules);
+    }
+    assert.strictEqual(conditions.length, 1, 'one feature query');
+    assert.true(
+      /rgb\(from light-dark\(/.test(conditions[0] ?? ''),
+      `tests a light-dark() origin: ${conditions[0]}`,
+    );
   });
 
   test('unlayered app CSS wins over the theme', async function (assert) {
