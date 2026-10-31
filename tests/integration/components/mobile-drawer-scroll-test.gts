@@ -220,6 +220,8 @@ class State {
   /** Size of the content block, in px on both axes. */
   @tracked contentSize = 1000;
   @tracked nested = false;
+  /** Size of a block after the nested scrollers, in px. */
+  @tracked filler = 0;
   changes: number[] = [];
 
   onChange = (index: number) => {
@@ -268,6 +270,7 @@ async function renderDrawer(state: State) {
               <div style={{sizeStyle 1000}} data-test-unmarked-content></div>
             </div>
             <div style={{sizeStyle 60}} data-test-outside></div>
+            <div style={{sizeStyle state.filler}}></div>
           {{else}}
             <div style={{sizeStyle state.contentSize}} data-test-content></div>
           {{/if}}
@@ -407,6 +410,102 @@ module(
         assert.true(closing.dragging, 'towards close drags too');
         assert.true(closing.shift < -20, `closes (${closing.shift})`);
         assert.true(closing.prevented.every(Boolean), 'touchmoves cancelled');
+      });
+
+      test(`${placement}: below the highest snap point the tray and marked scrollers can't scroll along the axis`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.nested = true;
+        state.filler = 1000;
+        await renderDrawer(state);
+        const nested = el('[data-test-nested]');
+        const unmarked = el('[data-test-unmarked]');
+        const [along, across] = vertical(placement)
+          ? (['overflowY', 'overflowX'] as const)
+          : (['overflowX', 'overflowY'] as const);
+        const overflow = (
+          element: HTMLElement,
+          which: 'overflowX' | 'overflowY',
+        ) => getComputedStyle(element)[which];
+
+        assert.strictEqual(overflow(tray(), along), 'auto', 'top: tray');
+        assert.strictEqual(overflow(nested, along), 'auto', 'top: marked');
+        scrollTo(tray(), placement, 'middle');
+        scrollTo(nested, placement, 'middle');
+        const trayScroll = scrollPosition(tray(), placement);
+        const nestedScroll = scrollPosition(nested, placement);
+        assert.true(trayScroll > 0 && nestedScroll > 0, 'scrolled');
+
+        state.active = 1;
+        await settled();
+        clock.frame();
+        assert.strictEqual(
+          overflow(tray(), along),
+          'hidden',
+          'locked as soon as it leaves the top',
+        );
+        clock.runUntilIdle();
+        assert.strictEqual(overflow(tray(), along), 'hidden', 'tray locked');
+        assert.strictEqual(overflow(nested, along), 'hidden', 'marked locked');
+        assert.strictEqual(overflow(tray(), across), 'auto', 'tray: across');
+        assert.strictEqual(overflow(nested, across), 'auto', 'marked: across');
+        assert.strictEqual(
+          overflow(unmarked, along),
+          'auto',
+          'unmarked scrollers are left alone',
+        );
+        assert.strictEqual(
+          scrollPosition(tray(), placement),
+          trayScroll,
+          'tray keeps its scroll position',
+        );
+        assert.strictEqual(scrollPosition(nested, placement), nestedScroll);
+
+        const result = await gesture(
+          el('[data-test-nested-content]'),
+          OPENING[placement],
+          12,
+        );
+        assert.true(result.dragging, 'a gesture on the marked scroller drags');
+        assert.true(result.prevented.every(Boolean));
+        clock.runUntilIdle();
+        await settled();
+
+        state.active = 2;
+        await settled();
+        clock.frame();
+        assert.strictEqual(overflow(tray(), along), 'hidden', 'until the top');
+        clock.runUntilIdle();
+        assert.strictEqual(overflow(tray(), along), 'auto', 'unlocked');
+        assert.strictEqual(overflow(nested, along), 'auto');
+        assert.strictEqual(
+          nested.style.overflow,
+          'auto',
+          "the scroller's own inline overflow is back",
+        );
+        assert.strictEqual(scrollPosition(tray(), placement), trayScroll);
+        assert.strictEqual(scrollPosition(nested, placement), nestedScroll);
+      });
+
+      test(`${placement}: half open, a drag that turns sideways before it starts is released`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        // 5px along the axis decides a drag; didPan only starts one past
+        // 10px. The swipe then goes across, e.g. a carousel.
+        const across: Direction = vertical(placement) ? 'right' : 'down';
+        const lean: [number, number] = vertical(placement) ? [0, -5] : [-5, 0];
+        const result = await gesture(el('[data-test-content]'), across, 10, {
+          path: [lean],
+        });
+        assert.true(result.prevented[0], 'decided to drag');
+        assert.false(
+          result.prevented.slice(2).some(Boolean),
+          'released once it went sideways',
+        );
+        assert.false(result.dragging, 'never dragged');
+        assert.strictEqual(result.shift, 0);
       });
 
       for (const active of [1, 2]) {
@@ -619,6 +718,73 @@ module(
         'caught below the highest snap point: drags',
       );
       assert.true(result.prevented.every(Boolean), 'touchmoves cancelled');
+    });
+
+    test('dragging down from the top locks the content once it leaves the top', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'start');
+      const locks: string[] = [];
+      await gesture(el('[data-test-content]'), 'down', 10, {
+        during: () => locks.push(getComputedStyle(tray()).overflowY),
+      });
+      assert.strictEqual(locks[0], 'auto', 'at the top before the drag');
+      assert.strictEqual(locks[locks.length - 1], 'hidden', 'below it');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, [], 'springs back to the top');
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'auto');
+    });
+
+    test('a marked scroller added below the highest snap point is locked when touched', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const added = document.createElement('div');
+      added.setAttribute('data-mobile-drawer-scroll', '');
+      added.style.cssText = 'height: 100px; overflow-y: scroll';
+      const inner = document.createElement('div');
+      inner.style.height = '500px';
+      added.append(inner);
+      el('.mobile-drawer__content').prepend(added);
+      assert.strictEqual(getComputedStyle(added).overflowY, 'scroll');
+
+      const result = await gesture(inner, 'up', 10);
+      assert.strictEqual(getComputedStyle(added).overflowY, 'hidden');
+      assert.true(result.dragging);
+
+      state.active = 2;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(added.style.overflowY, 'scroll', 'restored');
+      added.remove();
+    });
+
+    test('the scroll lock follows @handleOnly and the placement', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      state.handleOnly = true;
+      await renderDrawer(state);
+      assert.strictEqual(
+        getComputedStyle(tray()).overflowY,
+        'auto',
+        'with @handleOnly the content always scrolls',
+      );
+      assert.strictEqual(tray().style.overflowY, '');
+
+      state.handleOnly = false;
+      await settled();
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'hidden');
+
+      state.placement = 'left';
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(tray().style.overflowY, '', 'vertical lock removed');
+      assert.strictEqual(getComputedStyle(tray()).overflowX, 'hidden');
+
+      state.handleOnly = true;
+      await settled();
+      assert.strictEqual(tray().style.overflowX, '', 'unlocked');
     });
 
     test('a slight move along the axis does not decide the gesture', async function (assert) {
