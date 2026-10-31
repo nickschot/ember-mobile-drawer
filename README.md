@@ -74,6 +74,7 @@ Arguments:
 - `@backdrop`: whether to render the backdrop behind the tray. Defaults to the value of `@modal`: `true`, unless the drawer is non-modal. With `@backdrop={{false}}` nothing covers the page.
 - `@closeOnBackdropClick`: whether a tap or click on the backdrop closes the drawer (like `close()`, so through `@onSnapPointChange` when `@activeSnapPoint` is set). Default `true`.
 - `@onOpen`, `@onClose`, `@onDragStart`, `@onDragEnd`: lifecycle callbacks, see [Events](#events).
+- `@spring`: the spring that moves the drawer to a snap point, for example `springPresets.ios`. See [Spring](#spring).
 
 Attributes such as `class`, `aria-label` and `aria-labelledby` go on the drawer's root element.
 
@@ -84,6 +85,42 @@ The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (sm
 The backdrop covers the page behind the drawer. Its opacity follows the drawer as it moves, from transparent when closed to `--mobile-drawer-backdrop-opacity` (default `0.4`) at the largest snap point; set its colour with `--mobile-drawer-backdrop-color` (see [Styles](#styles)). While the drawer is open the backdrop catches taps, so the page behind it can't be clicked; a tap closes the drawer. A pointer that moves more than 10px before it lifts (a drag or a scroll that happens to start on the backdrop) doesn't count as a tap. At its smallest snap point the backdrop doesn't block the page: not when the drawer is closed, and not for a "peek" drawer whose smallest snap point is above `0` (for example `[120, '100%']`), so the page stays usable next to the peeking drawer.
 
 Turn off tap-to-close with `@closeOnBackdropClick={{false}}`, or leave the backdrop out entirely with `@backdrop={{false}}`. Non-modal drawers have no backdrop unless you pass `@backdrop={{true}}`.
+
+### Spring
+
+The drawer moves to a snap point on a damped spring. The release velocity of a drag carries over into it. Change the spring with `@spring`: an object with `stiffness`, `damping` and `mass` (all finite numbers greater than `0`). Keys that you leave out keep their default. A change applies from the next animation. With `prefers-reduced-motion: reduce` the drawer jumps to its snap point, whatever the spring.
+
+```gts
+import { MobileDrawer, springPresets } from 'ember-mobile-drawer';
+
+<template>
+  <MobileDrawer @spring={{springPresets.ios}} aria-label="Details">
+    ...
+  </MobileDrawer>
+</template>
+```
+
+`springPresets` has these presets:
+
+| Preset      | Stiffness | Damping | Mass | Like                                     |
+| ----------- | --------- | ------- | ---- | ---------------------------------------- |
+| `default`   | 400       | 40      | 1    | The drawer without `@spring`             |
+| `ios`       | 157.9     | 25.1    | 1    | SwiftUI `.smooth`: 0.5s, no bounce       |
+| `iosSnappy` | 157.9     | 21.4    | 1    | SwiftUI `.snappy`: 0.5s, bounce 0.15     |
+| `iosBouncy` | 157.9     | 17.6    | 1    | SwiftUI `.bouncy`: 0.5s, bounce 0.3      |
+
+`default` and `ios` are critically damped: they don't oscillate, but a fast flick can still carry the drawer past a snap point once. `iosSnappy` and `iosBouncy` overshoot a snap point and come back. A bounce never pulls the tray off its edge: at fully open (the tray's full size) it stops, so the overshoot shows at snap points below that.
+
+Apple doesn't document the spring of the system sheet. `ios` is SwiftUI's `.smooth` spring (iOS 17 and later), the same as `Spring(duration: 0.5, bounce: 0)` and SwiftUI's `.spring` without arguments. To use other values from Apple's frameworks, convert a duration and bounce with `springFromDuration`, which uses the formulas from Apple's [Animate with springs](https://developer.apple.com/videos/play/wwdc2023/10158/) (WWDC23): `stiffness = (2π / duration)²`, `damping = 4π × (1 − bounce) / duration` and `mass = 1`.
+
+```ts
+import { springFromDuration } from 'ember-mobile-drawer';
+
+// Like SwiftUI's .snappy(duration: 0.4, extraBounce: 0.05).
+const spring = springFromDuration({ duration: 0.4, bounce: 0.2 });
+```
+
+`duration` is in seconds and must be greater than `0`. `bounce` goes from `0` (the default, no bounce) up to, but not including, `1`. Negative values (over-damped springs in SwiftUI) are not supported. The types `MobileDrawerSpring` and `SpringDuration` are exported too.
 
 ### Events
 
@@ -218,7 +255,7 @@ How it works: below the highest snap point the component writes an inline `overf
 
 These are the package's public API:
 
-- `ember-mobile-drawer`: the components and types
+- `ember-mobile-drawer`: the components, the spring presets (`springPresets`, `springFromDuration`) and types
 - `ember-mobile-drawer/components/mobile-drawer`: the `<MobileDrawer>` component as a default export
 - `ember-mobile-drawer/template-registry`: the Glint template registry, for apps that use loose-mode (`.hbs`) templates
 - `ember-mobile-drawer/styles.css`: the base stylesheet (see [Styles](#styles))
@@ -358,7 +395,40 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
   }
   ```
 
+- **Spring**: the theme is CSS only, so it doesn't change how the drawer moves. For iOS-like motion, also pass `@spring={{springPresets.ios}}` (see [Spring](#spring)).
 - The sheet stays attached to the screen edge at every snap point. On iOS a partial-height sheet floats inset from the screen edges and only becomes edge-to-edge when fully expanded; the theme can't do the inset sheet yet.
+
+#### Page scale
+
+Optional, and off by default: while a modal sheet is open, the page behind it scales down, moves down and gets rounded top corners, like the page behind an iOS sheet. It follows the sheet frame by frame, and the area around the page is black. To turn it on, put the `mobile-drawer-theme-ios__page` class and the `data-mobile-drawer-page` attribute on the element that holds your page, for example a wrapper around your application template:
+
+```hbs
+{{! app/templates/application.hbs }}
+<div class="mobile-drawer-theme-ios__page" data-mobile-drawer-page>
+  {{outlet}}
+</div>
+```
+
+`data-mobile-drawer-page` tells the drawers to write their progress on the element (see "The page behind" in `styles.css`). The class makes the iOS theme use it. The element doesn't need to be inside the `mobile-drawer-theme-ios` class.
+
+- **The drawer must not be inside the page element.** A drawer inside it doesn't scale the page (the page can't move without moving the drawer). Render the drawer outside it, for example at the end of `<body>` with `{{#in-element}}`, and put the `mobile-drawer-theme-ios` class around the drawer there. Drawers that stay inside the page still work; they just don't scale it.
+- Only modal drawers (the default) scale the page. A non-modal drawer leaves the page usable, so the page stays as it is. The page follows the drawer from its smallest snap point (no scale) to its largest (full scale), so a sheet at `'40%'` of `[0, '40%', 'content']` scales the page part of the way. With several open drawers it follows the one that is open furthest.
+- **`position: fixed`**: while the page is scaled it has a `transform`, so `position: fixed` content in it is positioned against the page element instead of the viewport. That is only right when the page element fills the viewport (for example an app shell whose content scrolls inside it); otherwise such content can move while a sheet is open. While no modal sheet is open the page has no `transform` at all, so fixed content works as usual.
+- **Black around the page**: the theme makes `<body>` black while a modal drawer outside the page is open, when the page element is a direct child of `<body>`. An unlayered `background` on `<body>` wins over that: put the page colour on `<html>` and on the page element instead. The page element gets `Canvas` as its background (set `--mobile-drawer-ios-page-background`, or a `background` of your own). Give `<body>` no margin or padding, so the black only shows around the scaled page.
+- **Leave a gap at the top**: a sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px); }`, as the demo does.
+- **Performance**: the page's `transform` (a `translate3d` and a `scale`) changes every frame, and the `translate3d` puts the page on a compositing layer of its own while it is scaled, so the browser doesn't paint the page again on every frame. The rounded corners are a `clip-path` with a fixed radius, which only changes when a sheet opens.
+- **Reduced motion**: with `prefers-reduced-motion: reduce` the page doesn't scale or move.
+
+Settings, as custom properties on the page element or an ancestor of it:
+
+| Property                              | Default                                   | Purpose                              |
+| ------------------------------------- | ----------------------------------------- | ------------------------------------ |
+| `--mobile-drawer-ios-page-scale`      | `0.92`                                    | Scale of the page when fully open    |
+| `--mobile-drawer-ios-page-offset`     | `calc(env(safe-area-inset-top) + 10px)`   | How far the page moves down          |
+| `--mobile-drawer-ios-page-radius`     | `12px`                                    | Radius of the page's top corners     |
+| `--mobile-drawer-ios-page-background` | `Canvas`                                  | Background of the page element       |
+
+Like the rest of the theme, these values are approximations: Apple doesn't document them.
 
 The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` and `transition` on the tray, and `background` on the tray while the drawer is expanded, in the same `ember-mobile-drawer` layer with zero-specificity selectors. One rule is an exception: the expanded tray's `background` has the specificity of one class, so it wins over the base styles' tray background in either load order. Unlayered app CSS, and app CSS in a later layer, win over all of the theme. In the `ember-mobile-drawer` layer itself, app CSS needs more than one class (or must come later) to override the expanded tray's `background`. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
 
