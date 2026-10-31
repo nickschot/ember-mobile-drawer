@@ -613,6 +613,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const target = this.#offsetOf(index);
     this.#queueState({ progress: this.#progressOf(target) });
     spring.retarget(target);
+    this.#markExpanded(target);
 
     if (!animate) {
       spring.stop();
@@ -631,6 +632,24 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#queueState({ isAnimating: spring.isAnimating });
   }
 
+  /**
+   * Sets `data-expanded` on the root when the drawer rests at, or is
+   * animating to, its highest snap point (and that snap point is open at
+   * all), from `target`: where the drawer is headed. Only called when the
+   * target changes outside a drag, so the attribute keeps its value during
+   * a drag and while a touch holds the drawer: small movements at the top
+   * never flicker it, and a drag down from the top only removes it when it
+   * is released towards a lower snap point. Unlike the scroll lock (see
+   * `#syncScrollLock`), which follows the rendered position.
+   */
+  #markExpanded(target: number): void {
+    const { maxOffset } = this.#layout!;
+    this.#root!.toggleAttribute(
+      'data-expanded',
+      maxOffset > 0 && target >= maxOffset - EPSILON,
+    );
+  }
+
   #onResize(): void {
     const spring = this.#spring;
     if (!spring || this.#destroyed || !this.#measure()) return;
@@ -644,6 +663,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     const target = this.#offsetOf(this.activeSnapPoint);
     this.#queueState({ progress: this.#progressOf(target) });
+    this.#markExpanded(target);
 
     if (spring.isAnimating) {
       // Keep going from the current position to the new target.

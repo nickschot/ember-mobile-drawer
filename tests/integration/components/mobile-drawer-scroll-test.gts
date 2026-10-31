@@ -736,6 +736,59 @@ module(
       assert.strictEqual(getComputedStyle(tray()).overflowY, 'auto');
     });
 
+    test('data-expanded marks resting at or heading for the highest snap point', async function (assert) {
+      const root = () => el('.mobile-drawer');
+      const expanded = () => root().hasAttribute('data-expanded');
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      assert.false(expanded(), 'at rest half open');
+
+      state.active = 2;
+      await settled();
+      clock.frame();
+      assert.true(expanded(), 'set as soon as it heads for the top');
+      clock.runUntilIdle();
+      assert.true(expanded(), 'at rest at the top');
+
+      // Small movements at the top: down a little and back up.
+      scrollTo(tray(), 'bottom', 'start');
+      const during: boolean[] = [];
+      const wobble = await gesture(el('[data-test-content]'), 'down', 8, {
+        then: { direction: 'up', steps: 8 },
+        during: () => during.push(expanded()),
+      });
+      assert.true(wobble.dragging, 'dragged');
+      assert.true(during.every(Boolean), 'kept during the drag');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, []);
+      assert.true(expanded(), 'back at the top');
+
+      const down: boolean[] = [];
+      await gesture(el('[data-test-content]'), 'down', 40, {
+        during: () => down.push(expanded()),
+      });
+      assert.true(down.every(Boolean), 'kept until the drag is released');
+      assert.deepEqual(state.changes, [1], 'released towards half open');
+      assert.false(expanded(), 'removed on release');
+      clock.runUntilIdle();
+      assert.false(expanded());
+
+      state.active = 0;
+      await settled();
+      clock.runUntilIdle();
+      assert.false(expanded(), 'closed');
+    });
+
+    test('data-expanded is not set when the highest snap point is closed', async function (assert) {
+      const state = new State();
+      state.snapPoints = [0];
+      state.active = 0;
+      await renderDrawer(state);
+      assert.false(el('.mobile-drawer').hasAttribute('data-expanded'));
+    });
+
     test('a marked scroller added below the highest snap point is locked when touched', async function (assert) {
       const state = new State();
       state.active = 1;
