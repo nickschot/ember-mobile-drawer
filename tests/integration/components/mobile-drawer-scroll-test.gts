@@ -1363,7 +1363,12 @@ module(
       state.active = 1;
       await settled();
       clock.runUntilIdle();
-      const edge = tray().getBoundingClientRect().bottom;
+      // The bottom of the tray's visible area, above a horizontal scrollbar
+      // (the content is wider than the tray; classic scrollbars in CI), in
+      // screen px: the test container may be scaled.
+      const rect = tray().getBoundingClientRect();
+      const scale = rect.height / tray().offsetHeight;
+      const edge = rect.top + (tray().clientTop + tray().clientHeight) * scale;
       const end = el('.mobile-drawer__content').getBoundingClientRect().bottom;
       assert.true(
         Math.abs(end - edge) <= 1,
