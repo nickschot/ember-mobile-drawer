@@ -96,7 +96,27 @@ To drag only from a grabber, for example because the content scrolls, use `@hand
 
 Without `@handleOnly` the `handle` modifier does nothing, so you can keep it on your grabber either way. A handle gets `touch-action: pan-x` (for `bottom` and `top`) or `pan-y` (for `left` and `right`) and always drags.
 
-With `@handleOnly` too, the content only scrolls along the drawer's axis when the drawer is at its highest snap point (see [Scrolling content](#scrolling-content)). A grabber inside the scrolling content scrolls away with it there, so keep it reachable: make it `position: sticky` at the tray's page-facing edge (`top: 0` for a bottom drawer, `bottom: 0` for a top drawer) with the tray's background, or put it outside the scrolling element.
+#### Keep the grabber at the leading edge
+
+Put the grabber (with or without the `handle` modifier) at the tray's leading edge, the edge that faces the page, and make it sticky there, so it doesn't scroll with the content. The tray is the scroll container, and the content scrolls at the highest snap point (also with `@handleOnly`, see [Scrolling content](#scrolling-content)). A grabber that scrolls out of view can't be dragged, and with `@handleOnly` it is the only way to drag the drawer at all. Give it the tray's background, so content doesn't show through as it scrolls under it.
+
+```css
+/* Bottom drawer: the grabber is the first element in the drawer. */
+.grabber {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.75rem 0; /* A larger touch target around a small bar. */
+  background: var(--mobile-drawer-background, Canvas);
+}
+```
+
+For the other placements, stick it to the other leading edges:
+
+- `top`: put the grabber last and use `bottom: 0` instead of `top: 0`.
+- `left` and `right`: a vertical bar along the tray's right (for `left`) or left (for `right`) edge. A sticky element needs room to stay in view, so let the content fill at least the tray's height and stick the bar in the middle of the visible area, for example `top: calc(50% - 1.25rem)` for a 2.5rem bar. The tray of a side drawer scrolls vertically at every snap point, because that is across its axis.
+
+The demo app's playground (`demo-app/styles.css`, `.demo-grabber`) does this for all four placements.
 
 ### Scrolling content
 
