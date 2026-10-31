@@ -26,10 +26,20 @@
  *                                    the tray's glass blur.
  * .mobile-drawer-theme-ios__grabber  Optional. A horizontal grabber bar for
  *                                    bottom and top sheets. Put an element
- *                                    with this class in the drawer content
- *                                    (first for a bottom sheet, last for a
- *                                    top sheet). It takes its colour from the
- *                                    tray's text colour.
+ *                                    with this class directly in the drawer
+ *                                    content (first for a bottom sheet, last
+ *                                    for a top sheet). The element is a
+ *                                    15px strip across the tray, sticky at
+ *                                    its page-facing edge so it stays in
+ *                                    view while the content scrolls. While
+ *                                    the drawer is [data-expanded] it has an
+ *                                    opaque sheet background, so scrolled
+ *                                    content doesn't show through; otherwise
+ *                                    it is transparent. Its ::before draws
+ *                                    the 36x5px bar, in the tray's text
+ *                                    colour. Don't wrap it in another
+ *                                    element: a sticky element only sticks
+ *                                    inside its parent.
  *
  * Light and dark: the colours use light-dark(), so they follow the page's
  * `color-scheme`, like the base styles' Canvas/CanvasText defaults. A page
@@ -75,6 +85,91 @@
         0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
         0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
     }
+  }
+
+  /*
+   * The grabber: a strip across the tray at its leading edge (the edge that
+   * faces the page), sticky so it stays in view while the content scrolls at
+   * the highest snap point. The bar itself is drawn by ::before, with 5px of
+   * the strip's padding above and below it. (Unlike the old 5px margins, the
+   * padding doesn't collapse with a neighbour's margin.)
+   *
+   * Below the highest snap point the strip is transparent: the tray's sheet
+   * background shows through it unchanged, and no band shows on the glass
+   * sheet. That works because no content is under the strip there: the
+   * content can't scroll below the highest snap point, and the component
+   * keeps the tray at its scroll start there (the content start at the top
+   * of a bottom drawer, the content end at the bottom of a top drawer; see
+   * "Scrolling content" in the README). The exception is a run down from a
+   * scrolled sheet: [data-expanded] goes away when the run starts, but the
+   * tray only gets back to its scroll start in step with the run (or, for a
+   * close, once closed), so for that moment the scrolled content shows
+   * under the bar. While the drawer is expanded
+   * ([data-expanded], at or heading to the highest snap point) the content
+   * scrolls under the strip, so it gets the sheet's background, made opaque
+   * so the content doesn't show through the glass tint: the opaque version
+   * of the glass tint is the solid sheet colour. (A backdrop-filter on the
+   * strip instead would cost a second blur, and in Chrome it doesn't blur
+   * the content scrolling under it.)
+   *
+   * The opaque colour needs relative colours with a light-dark() origin
+   * (the theme's background is a light-dark() value where light-dark() is
+   * supported). Where that doesn't work the expanded strip gets the sheet's
+   * background as is, translucent on the glass sheet.
+   */
+  :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
+    display: block;
+    flex: none;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 5px 0;
+    background: transparent;
+  }
+
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-expanded]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  ) {
+    background: var(--mobile-drawer-background, Canvas);
+  }
+
+  @supports (color: rgb(from light-dark(red, red) r g b / 1)) {
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-expanded]
+        > .mobile-drawer__tray
+        > .mobile-drawer__content
+        > .mobile-drawer-theme-ios__grabber
+    ) {
+      background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
+    }
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 5px;
+    margin: 0 auto;
+    border-radius: 2.5px;
+    background: rgb(128 128 128 / 0.4);
+    background: color-mix(in srgb, currentcolor 30%, transparent);
+  }
+
+  /* A top sheet's leading edge is its bottom: the grabber goes last. */
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-placement="top"]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  ) {
+    top: auto;
+    bottom: 0;
   }
 
   /*
@@ -125,16 +220,5 @@
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
-  }
-
-  :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
-    display: block;
-    flex: none;
-    width: 36px;
-    height: 5px;
-    margin: 5px auto;
-    border-radius: 2.5px;
-    background: rgb(128 128 128 / 0.4);
-    background: color-mix(in srgb, currentcolor 30%, transparent);
   }
 }

@@ -185,7 +185,7 @@
  * that). Themes that only set custom properties on `:where(:root)` don't
  * depend on order, because the base rules never declare those properties.
  *   - Wrap all selectors in :where() and scope them to a theme class, e.g.
- *     `:where(.<theme-class> > .mobile-drawer__tray)`.
+ *     `:where(.<theme-class> .mobile-drawer__tray)`.
  *   - Set values only through the custom properties above, declared on
  *     `:where(:root)` or on a :where()-wrapped theme class the app puts on an
  *     ancestor. Never declare `--mobile-drawer-*` on `.mobile-drawer` (or the

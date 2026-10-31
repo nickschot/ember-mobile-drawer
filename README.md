@@ -258,10 +258,23 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 </div>
 ```
 
-`mobile-drawer-theme-ios__grabber` draws a 36×5px bar for bottom and top drawers. Put it first in a bottom drawer and last in a top drawer. The bar is a small touch target, so with `@handleOnly` put the `handle` modifier on a larger element around it.
+`mobile-drawer-theme-ios__grabber` draws a 36×5px bar for bottom and top drawers. Put it directly in the drawer: first in a bottom drawer and last in a top drawer. The element is a 15px strip across the tray that stays at the tray's leading edge (see [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge)): sticky at the top of a bottom drawer and at the bottom of a top drawer, so it stays in view while the content scrolls at the highest snap point. Don't wrap the grabber in another element: a sticky element only sticks inside its parent, so a wrapped grabber scrolls away with its wrapper. While the drawer is expanded (`data-expanded`, at the highest snap point) the strip has the sheet colour behind the bar, opaque also on the glass sheet, so the content scrolling under it doesn't show through (browsers that can't make the colour opaque, such as Safari before 18, get the translucent sheet colour). Below the highest snap point the strip is transparent, so it looks like the rest of the sheet. That works because no content is under the strip there: the component keeps the tray at its scroll start below the highest snap point (the start of the content at the top of a bottom drawer, the end of the content at the bottom of a top drawer; see [Scrolling content](#scrolling-content)). There is one short exception, a run down from a scrolled sheet. `data-expanded` goes away when the run starts, but the tray only gets back to its scroll start during the run, in step with the tray (or, for a close, once the drawer is closed). So for that moment the rows that were scrolled under the strip show under the bar. In the demo, when you close a fully open, scrolled sheet with "Done", a part of a row shows under the bar while the sheet slides away (about half a second). The strip's 5px padding above and below the bar doesn't collapse with a neighbour's margin, as the old 5px margins did. The bar is drawn by the strip's `::before`, so style the bar there, for example `.mobile-drawer-theme-ios__grabber::before { width: 48px; }`. With `@handleOnly`, put the `handle` modifier on the grabber itself, not on a wrapper; for a larger touch target, give it more padding, for example `.mobile-drawer-theme-ios__grabber { padding-block: 12px; }`.
 
 - **Light and dark** follow the page's `color-scheme` (through `light-dark()`), like the base styles' `Canvas` default. Declare `color-scheme: light dark` (for example on `:root`) to get the dark sheet in dark mode. Browsers without `light-dark()` (Safari before 17.5, Chrome before 123) always get the light sheet.
 - **Glass** needs `backdrop-filter`; without it the sheet is solid. With reduced transparency or increased contrast (`prefers-reduced-transparency: reduce`, `prefers-contrast: more`) the sheet is solid too.
+- **Blur cost**: the glass is a 30px `backdrop-filter` blur on the tray, and the tray moves every frame while it is dragged or animates, so the browser blurs the page behind it again on every frame. On slower devices that can cost frames. To turn the blur off, override it on the tray and give the sheet a solid background, so the page doesn't show through unblurred:
+
+  ```css
+  .mobile-drawer-theme-ios {
+    --mobile-drawer-background: light-dark(rgb(255 255 255), rgb(28 28 30));
+  }
+
+  .mobile-drawer-theme-ios .mobile-drawer__tray {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  ```
+
 - The sheet stays attached to the screen edge at every snap point. On iOS a partial-height sheet floats inset from the screen edges and only becomes edge-to-edge and opaque when fully expanded; the theme can't do that yet.
 
 The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` on the tray, in the same `ember-mobile-drawer` layer with zero-specificity selectors. Unlayered app CSS wins over it. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
