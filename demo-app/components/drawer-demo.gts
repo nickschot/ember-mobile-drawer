@@ -4,14 +4,22 @@ import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { htmlSafe } from '@ember/template';
 import type Owner from '@ember/owner';
-import { MobileDrawer, type Placement, type SnapPoint } from '#src/index.ts';
+import {
+  MobileDrawer,
+  springPresets,
+  type Placement,
+  type SnapPoint,
+} from '#src/index.ts';
 import { formatSnapPoints, parseSnapPoints } from '../lib/parse-snap-points.ts';
 import {
   CUSTOM,
   DEFAULT_BACKDROP_OPACITY,
   PLACEMENTS,
   SNAP_POINT_PRESETS,
+  SPRING_PRESETS,
   isPlacement,
+  isSpringPresetName,
+  type SpringPresetName,
   parsePlaygroundParams,
 } from '../lib/parse-playground-params.ts';
 
@@ -23,12 +31,11 @@ const TALL_CONTENT = Array.from(
 
 /**
  * The playground: every control here changes an argument of the drawer (or,
- * for the backdrop opacity, a custom property) live. Controls for features
- * that haven't landed yet are shown disabled, with the issue that adds them.
+ * for the backdrop opacity, a custom property) live.
  *
  * The initial state can be set from the URL, e.g.
  * `/?placement=left&preset=0&snap=1&handle=1&tall=1`, or with custom snap points
- * `/?points=0,200,'content'&snap=2&backdrop=0.6`, which is handy for
+ * `/?points=0,200,'content'&snap=2&backdrop=0.6&spring=ios`, which is handy for
  * screenshots.
  */
 export default class DrawerDemo extends Component<{
@@ -49,6 +56,7 @@ export default class DrawerDemo extends Component<{
   @tracked handleOnly: boolean;
   @tracked tall: boolean;
   @tracked backdropOpacity: number;
+  @tracked springPreset: SpringPresetName;
   // Not settable from the URL, so they start at the drawer's defaults.
   @tracked modal = true;
   @tracked backdrop = true;
@@ -66,6 +74,11 @@ export default class DrawerDemo extends Component<{
     this.handleOnly = state.handleOnly;
     this.tall = state.tall;
     this.backdropOpacity = state.backdropOpacity;
+    this.springPreset = state.spring;
+  }
+
+  get spring() {
+    return springPresets[this.springPreset];
   }
 
   get snapPointButtons() {
@@ -101,9 +114,13 @@ export default class DrawerDemo extends Component<{
       ...(this.backdrop && !this.closeOnBackdropClick
         ? ['@closeOnBackdropClick={{false}}']
         : []),
+      ...(this.springPreset === 'default' ? [] : ['@spring={{this.spring}}']),
     ];
     const lines = [
       `snapPoints: SnapPoint[] = [${formatSnapPoints(this.snapPoints)}];`,
+      ...(this.springPreset === 'default'
+        ? []
+        : [`spring = springPresets.${this.springPreset};`]),
       '',
       `<MobileDrawer\n  ${args.join('\n  ')}\n  as |drawer|\n>\n  …\n</MobileDrawer>`,
     ];
@@ -180,6 +197,11 @@ export default class DrawerDemo extends Component<{
     this.closeOnBackdropClick = (event.target as HTMLInputElement).checked;
   };
 
+  setSpring = (event: Event) => {
+    const { value } = event.target as HTMLSelectElement;
+    if (isSpringPresetName(value)) this.springPreset = value;
+  };
+
   setBackdropOpacity = (event: Event) => {
     this.backdropOpacity = Number((event.target as HTMLInputElement).value);
   };
@@ -203,6 +225,7 @@ export default class DrawerDemo extends Component<{
         @modal={{this.modal}}
         @backdrop={{this.backdrop}}
         @closeOnBackdropClick={{this.closeOnBackdropClick}}
+        @spring={{this.spring}}
         class="demo-drawer"
         aria-labelledby="demo-drawer-title"
         as |drawer|
@@ -364,6 +387,17 @@ export default class DrawerDemo extends Component<{
           {{on "input" this.setBackdropOpacity}}
         />
       </label>
+      <label>
+        Spring (@spring)
+        <select {{on "change" this.setSpring}}>
+          {{#each SPRING_PRESETS as |preset|}}
+            <option
+              value={{preset.name}}
+              selected={{this.isSelected preset.name this.springPreset}}
+            >{{preset.label}}</option>
+          {{/each}}
+        </select>
+      </label>
       <div class="demo-buttons">
         Set @activeSnapPoint:
         {{#each this.snapPointButtons as |snapPoint|}}
@@ -373,25 +407,6 @@ export default class DrawerDemo extends Component<{
             {{on "click" (fn this.onSnapPointChange snapPoint.index)}}
           >{{snapPoint.label}}</button>
         {{/each}}
-      </div>
-    </fieldset>
-
-    <fieldset class="demo-controls" disabled>
-      <legend>Not available yet</legend>
-      <p class="demo-hint">
-        These options land with later issues and show up here once they do.
-      </p>
-      <div class="demo-pending">
-        <label>
-          Spring
-          <select>
-            <option>Default</option>
-            <option>iOS</option>
-          </select>
-        </label>
-        <a
-          href="https://github.com/nickschot/ember-mobile-drawer/issues/29"
-        >#29</a>
       </div>
     </fieldset>
 

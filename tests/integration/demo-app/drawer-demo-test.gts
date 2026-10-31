@@ -1,6 +1,6 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { click, find, findAll, render } from '@ember/test-helpers';
+import { click, fillIn, find, findAll, render } from '@ember/test-helpers';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import DrawerDemo from '../../../demo-app/components/drawer-demo.gts';
 import '#src/styles.css';
@@ -184,6 +184,22 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
     assert.true(checkbox('(@closeOnBackdropClick)').disabled);
     assert.true(code().includes('@backdrop={{false}}'));
     assert.false(code().includes('@closeOnBackdropClick'));
+  });
+
+  test('the Spring control picks a preset and shows it in the code', async function (assert) {
+    await render(<template><DrawerDemo @search="" /></template>);
+    const select = findAll('.demo-controls label')
+      .find((element) => element.textContent?.includes('(@spring)'))!
+      .querySelector('select')!;
+    const code = () => find('.demo-code code')!.textContent!;
+
+    assert.false(select.disabled);
+    assert.strictEqual(select.value, 'default');
+    assert.notOk(code().includes('spring'), 'the default is not in the code');
+
+    await fillIn(select, 'ios');
+    assert.true(code().includes('@spring={{this.spring}}'));
+    assert.true(code().includes('spring = springPresets.ios;'));
   });
 
   test('the modal control toggles @modal, and the backdrop follows it', async function (assert) {
