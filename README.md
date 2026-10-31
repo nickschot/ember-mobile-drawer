@@ -262,6 +262,19 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 
 - **Light and dark** follow the page's `color-scheme` (through `light-dark()`), like the base styles' `Canvas` default. Declare `color-scheme: light dark` (for example on `:root`) to get the dark sheet in dark mode. Browsers without `light-dark()` (Safari before 17.5, Chrome before 123) always get the light sheet.
 - **Glass** needs `backdrop-filter`; without it the sheet is solid. With reduced transparency or increased contrast (`prefers-reduced-transparency: reduce`, `prefers-contrast: more`) the sheet is solid too.
+- **Blur cost**: the glass is a 30px `backdrop-filter` blur on the tray, and the tray moves every frame while it is dragged or animates, so the browser blurs the page behind it again on every frame. On slower devices that can cost frames. To turn the blur off, override it on the tray and give the sheet a solid background, so the page doesn't show through unblurred:
+
+  ```css
+  .mobile-drawer-theme-ios {
+    --mobile-drawer-background: light-dark(rgb(255 255 255), rgb(28 28 30));
+  }
+
+  .mobile-drawer-theme-ios .mobile-drawer__tray {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  ```
+
 - The sheet stays attached to the screen edge at every snap point. On iOS a partial-height sheet floats inset from the screen edges and only becomes edge-to-edge and opaque when fully expanded; the theme can't do that yet.
 
 The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` on the tray, in the same `ember-mobile-drawer` layer with zero-specificity selectors. Unlayered app CSS wins over it. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
