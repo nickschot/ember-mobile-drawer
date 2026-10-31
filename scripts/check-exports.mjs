@@ -26,6 +26,7 @@ const publicSpecifiers = [
   `${pkg}/components/mobile-drawer`,
   `${pkg}/styles.css`,
   `${pkg}/themes/ios.css`,
+  `${pkg}/test-support`,
   `${pkg}/addon-main.js`,
   `${pkg}/package.json`,
 ];
@@ -35,6 +36,10 @@ const blockedSpecifiers = [
   `${pkg}/-private/snap-points`,
   `${pkg}/-private/snap-points/index`,
   `${pkg}/-private/anything.css`,
+  `${pkg}/-private/registry`,
+  `${pkg}/-private/gesture/touch-pointer`,
+  `${pkg}/test-support/index`,
+  `${pkg}/test-support.js`,
   // Themes are exported one by one; there is no `./themes/*` pattern.
   `${pkg}/themes/other.css`,
   `${pkg}/themes/ios`,
@@ -51,7 +56,7 @@ const blockedSpecifiers = [
 // Files in dist/ outside `-private/` and `_app_/`. Every one of them is
 // importable through `exports`, so adding one is a public API change: update
 // this list, `publicSpecifiers`, `exports` in package.json and the README's
-// list of public imports. For example, test-support adds 'test-support.js'
+// list of public imports. For example, test-support added 'test-support.js'
 // here, `${pkg}/test-support` to `publicSpecifiers` and an exact
 // "./test-support" key (types + default) to `exports`; a theme adds
 // 'themes/<name>.css', `${pkg}/themes/<name>.css` and an exact
@@ -63,6 +68,7 @@ const allowedDistFiles = [
   'components/mobile-drawer.js',
   'styles.css',
   'themes/ios.css',
+  'test-support.js',
 ];
 
 const failures = [];

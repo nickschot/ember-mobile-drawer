@@ -33,6 +33,10 @@
     },
     "./styles.css": "./dist/styles.css",
     "./themes/ios.css": "./dist/themes/ios.css",
+    "./test-support": {
+      "types": "./declarations/test-support.d.ts",
+      "default": "./dist/test-support.js"
+    },
     "./_app_/components/mobile-drawer": "./dist/_app_/components/mobile-drawer.js",
     "./addon-main.js": "./addon-main.cjs",
     "./package.json": "./package.json",
@@ -62,6 +66,7 @@
     "test": "vite build --mode=development --out-dir dist-tests && testem --file testem.cjs ci --port 0"
   },
   "dependencies": {
+    "@ember/test-waiters": "^3.1.0 || ^4.0.0",
     "@embroider/addon-shim": "^1.8.9",
     "decorator-transforms": "^2.2.2",
     "ember-gesture-modifiers": "^6.1.0"
@@ -74,7 +79,6 @@
     "@ember/app-tsconfig": "^1.0.0",
     "@ember/library-tsconfig": "^1.0.0",
     "@ember/test-helpers": "^5.2.1",
-    "@ember/test-waiters": "^4.1.1",
     "@embroider/addon-dev": "^8.1.0",
     "@embroider/compat": "^4.1.0",
     "@embroider/core": "^4.1.0",
@@ -115,11 +119,15 @@
     "vite": "^7.1.9"
   },
   "peerDependencies": {
+    "@ember/test-helpers": ">= 3.0.0",
     "@glimmer/component": ">= 1.1.2",
     "@glint/template": ">= 1.0.0",
     "ember-source": ">= 5.12"
   },
   "peerDependenciesMeta": {
+    "@ember/test-helpers": {
+      "optional": true
+    },
     "@glint/template": {
       "optional": true
     }
