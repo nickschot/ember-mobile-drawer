@@ -13,7 +13,7 @@ const rootDirectory = dirname(fileURLToPath(import.meta.url));
 // Stylesheets that apps import directly (e.g. `ember-mobile-drawer/styles.css`).
 // They are not imported by any module, so `keepAssets` below would not emit
 // them. Paths are relative to `src/` and end up at the same path in `dist/`.
-const standaloneStylesheets = ['styles.css'];
+const standaloneStylesheets = ['styles.css', 'themes/ios.css'];
 
 const babelConfig = resolve(rootDirectory, './babel.publish.config.cjs');
 const tsConfig = resolve(rootDirectory, './tsconfig.publish.json');

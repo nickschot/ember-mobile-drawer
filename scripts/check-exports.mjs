@@ -25,6 +25,7 @@ const publicSpecifiers = [
   `${pkg}/template-registry`,
   `${pkg}/components/mobile-drawer`,
   `${pkg}/styles.css`,
+  `${pkg}/themes/ios.css`,
   `${pkg}/addon-main.js`,
   `${pkg}/package.json`,
 ];
@@ -34,6 +35,9 @@ const blockedSpecifiers = [
   `${pkg}/-private/snap-points`,
   `${pkg}/-private/snap-points/index`,
   `${pkg}/-private/anything.css`,
+  // Themes are exported one by one; there is no `./themes/*` pattern.
+  `${pkg}/themes/other.css`,
+  `${pkg}/themes/ios`,
   // Bypasses of a catch-all `"./*"` export: a double slash or a different
   // case reaches `dist/-private` on disk (the latter on case-insensitive
   // file systems). They must not match any export pattern at all.
@@ -50,13 +54,15 @@ const blockedSpecifiers = [
 // list of public imports. For example, test-support adds 'test-support.js'
 // here, `${pkg}/test-support` to `publicSpecifiers` and an exact
 // "./test-support" key (types + default) to `exports`; a theme adds
-// 'themes/ios.css', `${pkg}/themes/ios.css` and an exact "./themes/ios.css"
-// key. Source maps of these files are allowed too.
+// 'themes/<name>.css', `${pkg}/themes/<name>.css` and an exact
+// "./themes/<name>.css" key, as the iOS theme does. Source maps of these
+// files are allowed too.
 const allowedDistFiles = [
   'index.js',
   'template-registry.js',
   'components/mobile-drawer.js',
   'styles.css',
+  'themes/ios.css',
 ];
 
 const failures = [];

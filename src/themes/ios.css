@@ -1,0 +1,140 @@
+/*
+ * ember-mobile-drawer iOS theme (optional)
+ *
+ * An iOS 26/27 ("Liquid Glass") look: a translucent, blurred sheet with a
+ * light rim and a darkened edge, large rounded corners on the page-facing
+ * side, a dimming backdrop and a grabber.
+ *
+ * Import it after the base styles:
+ *   import 'ember-mobile-drawer/styles.css';
+ *   import 'ember-mobile-drawer/themes/ios.css';
+ *
+ * This file does not @import styles.css; apps import both. The only real
+ * properties it sets are `backdrop-filter` on the tray (which the base styles
+ * don't set) and the grabber's, so it doesn't depend on load order, but load
+ * it after styles.css anyway.
+ *
+ * Opt in by putting the theme class on an ancestor of the drawer, e.g.
+ *   <body class="mobile-drawer-theme-ios">
+ * or a wrapper element around one drawer. Not on the drawer itself: the theme
+ * declares the `--mobile-drawer-*` properties on the element with the class,
+ * and themes must not declare them on `.mobile-drawer` itself (see the theme
+ * guidance in styles.css).
+ * Without the class this file changes nothing.
+ *
+ * .mobile-drawer-theme-ios           Sets the drawer's custom properties and
+ *                                    the tray's glass blur.
+ * .mobile-drawer-theme-ios__grabber  Optional. A horizontal grabber bar for
+ *                                    bottom and top sheets. Put an element
+ *                                    with this class in the drawer content
+ *                                    (first for a bottom sheet, last for a
+ *                                    top sheet). It takes its colour from the
+ *                                    tray's text colour.
+ *
+ * Light and dark: the colours use light-dark(), so they follow the page's
+ * `color-scheme`, like the base styles' Canvas/CanvasText defaults. A page
+ * without `color-scheme: light dark` stays light. Browsers without
+ * light-dark() (Safari < 17.5, Chrome < 123, Firefox < 120) get the light
+ * values: a custom property holding an unsupported light-dark() would not
+ * fall back, so it's only declared inside @supports.
+ *
+ * Glass: only where backdrop-filter is supported; elsewhere the sheet is
+ * solid. With `prefers-reduced-transparency: reduce` or `prefers-contrast:
+ * more` the sheet is solid and unblurred, like iOS with Reduce Transparency
+ * or Increase Contrast.
+ *
+ * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
+ * with :where() selectors (zero specificity), so unlayered app CSS always
+ * wins. To change a theme value, set the custom property on the element that
+ * carries the theme class or on anything between it and the drawer, e.g.
+ *   .mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }
+ * A value on :root does not override the theme when the theme class sits on
+ * a descendant of :root (the theme's declaration is closer to the drawer).
+ *
+ * Values are approximations: Apple documents the behaviour of sheets and
+ * Liquid Glass but not radii, blur amounts or tint opacities.
+ */
+
+@layer ember-mobile-drawer {
+  /* Solid sheet (light; also the fallback without light-dark()). */
+  :where(.mobile-drawer-theme-ios) {
+    --mobile-drawer-background: rgb(255 255 255);
+    --mobile-drawer-color: rgb(0 0 0);
+    --mobile-drawer-radius: 32px;
+    --mobile-drawer-shadow:
+      0 0 0 0.5px rgb(0 0 0 / 0.12), 0 0 32px rgb(0 0 0 / 0.12);
+    --mobile-drawer-backdrop-color: rgb(0 0 0);
+    --mobile-drawer-backdrop-opacity: 0.35;
+  }
+
+  @supports (color: light-dark(#000, #fff)) {
+    :where(.mobile-drawer-theme-ios) {
+      --mobile-drawer-background: light-dark(rgb(255 255 255), rgb(28 28 30));
+      --mobile-drawer-color: light-dark(rgb(0 0 0), rgb(255 255 255));
+      --mobile-drawer-shadow:
+        0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
+        0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+    }
+  }
+
+  /*
+   * Liquid Glass: a translucent tint over a strong blur, a light inner rim
+   * (the specular edge) and a darkened outer edge.
+   */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    :where(.mobile-drawer-theme-ios) {
+      --mobile-drawer-background: rgb(255 255 255 / 0.72);
+      --mobile-drawer-shadow:
+        inset 0 0 0 0.5px rgb(255 255 255 / 0.8), 0 0 0 0.5px rgb(0 0 0 / 0.12),
+        0 0 32px rgb(0 0 0 / 0.12);
+    }
+
+    @supports (color: light-dark(#000, #fff)) {
+      :where(.mobile-drawer-theme-ios) {
+        --mobile-drawer-background: light-dark(
+          rgb(255 255 255 / 0.72),
+          rgb(28 28 30 / 0.72)
+        );
+        --mobile-drawer-shadow:
+          inset 0 0 0 0.5px
+            light-dark(rgb(255 255 255 / 0.8), rgb(255 255 255 / 0.22)),
+          0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
+          0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+      }
+    }
+
+    :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
+      -webkit-backdrop-filter: blur(30px) saturate(1.8);
+      backdrop-filter: blur(30px) saturate(1.8);
+    }
+  }
+
+  /* Reduce Transparency / Increase Contrast: back to the solid sheet. */
+  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    :where(.mobile-drawer-theme-ios) {
+      --mobile-drawer-background: rgb(255 255 255);
+    }
+
+    @supports (color: light-dark(#000, #fff)) {
+      :where(.mobile-drawer-theme-ios) {
+        --mobile-drawer-background: light-dark(rgb(255 255 255), rgb(28 28 30));
+      }
+    }
+
+    :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
+    display: block;
+    flex: none;
+    width: 36px;
+    height: 5px;
+    margin: 5px auto;
+    border-radius: 2.5px;
+    background: rgb(128 128 128 / 0.4);
+    background: color-mix(in srgb, currentcolor 30%, transparent);
+  }
+}
