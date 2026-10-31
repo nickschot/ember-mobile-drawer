@@ -866,6 +866,75 @@ module(
       assert.strictEqual(getComputedStyle(tray()).overflowY, 'hidden');
     });
 
+    for (const placement of PLACEMENTS) {
+      test(`${placement}: with @handleOnly at 50%, a swipe along the axis is cancelled without dragging`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        state.handleOnly = true;
+        await renderDrawer(state);
+
+        for (const direction of [OPENING[placement], CLOSING[placement]]) {
+          const result = await gesture(
+            el('[data-test-content]'),
+            direction,
+            12,
+          );
+          assert.true(
+            result.prevented.length > 0 && result.prevented.every(Boolean),
+            `${direction}: touchmoves cancelled, so the page can't scroll`,
+          );
+          assert.false(result.dragging, `${direction}: no drag`);
+          assert.strictEqual(result.shift, 0, `${direction}: the tray stays`);
+        }
+
+        // Sideways, also with a slight lean along the axis first.
+        const across: Direction = vertical(placement) ? 'left' : 'up';
+        for (const [along, sideways] of [
+          [0, 0],
+          [3, -1],
+          [-2, -2],
+        ] as [number, number][]) {
+          const result = await gesture(el('[data-test-content]'), across, 12, {
+            path: [vertical(placement) ? [sideways, along] : [along, sideways]],
+          });
+          assert.false(
+            result.prevented.some(Boolean),
+            `across, lean ${along},${sideways}: left to the browser`,
+          );
+        }
+
+        // Decided along the axis, then sideways before 10px: released.
+        const lean: [number, number] = vertical(placement) ? [0, -5] : [-5, 0];
+        const turned = await gesture(
+          el('[data-test-content]'),
+          vertical(placement) ? 'right' : 'down',
+          10,
+          { path: [lean] },
+        );
+        assert.true(turned.prevented[0], 'decided along the axis');
+        assert.false(
+          turned.prevented.slice(2).some(Boolean),
+          'released once it went sideways',
+        );
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(state.changes, [], 'never moved the drawer');
+      });
+    }
+
+    test('with @handleOnly at the highest snap point, content swipes are left to the browser', async function (assert) {
+      const state = new State();
+      state.handleOnly = true;
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      for (const direction of ['up', 'down'] as const) {
+        const result = await gesture(el('[data-test-content]'), direction, 12);
+        assert.false(result.prevented.some(Boolean), `${direction}: scrolls`);
+        assert.false(result.dragging);
+      }
+    });
+
     test('the scroll lock follows the placement', async function (assert) {
       const state = new State();
       state.active = 1;

@@ -11,7 +11,11 @@ import {
   type ResolvedSnapPoint,
   type SnapPoint,
 } from '../-private/snap-points/index.ts';
-import { dragSource, type PanData } from '../-private/gesture/drag-source.ts';
+import {
+  DECISION_SLOP,
+  dragSource,
+  type PanData,
+} from '../-private/gesture/drag-source.ts';
 import { drawerEnvironment } from '../-private/environment.ts';
 import {
   lifecycle,
@@ -63,9 +67,13 @@ const OPEN_RUBBER_BAND = 24;
  */
 const SCROLL_ATTRIBUTE = 'data-mobile-drawer-scroll';
 
-/** Events on the tray that (re)lock the scroll containers they reach. */
+/**
+ * Events on the tray that (re)lock the scroll containers they reach. `wheel`
+ * isn't passive, so the browser applies the lock before the wheel scrolls.
+ */
 const TRAY_INPUT_EVENTS = ['pointerdown', 'wheel', 'focusin'] as const;
 const CAPTURE_PASSIVE = { capture: true, passive: true } as const;
+const CAPTURE_ACTIVE = { capture: true, passive: false } as const;
 
 /**
  * Tolerance (px) for "at the highest snap point" and "at a scroll end":
@@ -281,7 +289,9 @@ const clampIndex = (index: number, count: number) =>
  * once a gesture is decided, so swipes across the axis (a carousel, a list
  * in a side drawer) keep working. Handles always drag and keep `didPan`'s
  * `touch-action`. With `@handleOnly` the content is locked below the
- * highest snap point too, so it only scrolls when the drawer is fully open.
+ * highest snap point too, so it only scrolls when the drawer is fully open,
+ * and swipes along the axis on it are cancelled there without dragging
+ * (see `#onTrayTouchMove`), so the page behind doesn't scroll instead.
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
@@ -372,6 +382,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   >();
   /** The overflow property the lock sets, while locked. */
   #scrollLockProperty?: string;
+  /**
+   * With `@handleOnly`, the touch on the tray that started while scrolling
+   * was locked, see `#onTrayTouchMove`. `cancels` is `undefined` until the
+   * gesture is decided; `far` once it moved `TAP_SLOP` along the axis.
+   */
+  #lockedTouch?: {
+    id: number;
+    x: number;
+    y: number;
+    cancels?: boolean;
+    far: boolean;
+  };
   /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
   /**
@@ -505,9 +527,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
       this.#syncScrollLock();
+      const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
-        this.#tray.addEventListener(type, this.#onTrayInput, CAPTURE_PASSIVE);
+        tray.addEventListener(
+          type,
+          this.#onTrayInput,
+          type === 'wheel' ? CAPTURE_ACTIVE : CAPTURE_PASSIVE,
+        );
       }
+      tray.addEventListener('touchstart', this.#onTrayTouchStart, {
+        passive: true,
+      });
+      // Not passive: see `#onTrayTouchMove`.
+      tray.addEventListener('touchmove', this.#onTrayTouchMove, {
+        passive: false,
+      });
+      tray.addEventListener('touchend', this.#onTrayTouchEnd);
+      tray.addEventListener('touchcancel', this.#onTrayTouchEnd);
 
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
@@ -538,9 +574,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     destroy: () => {
       this.#destroyed = true;
+      const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
-        this.#tray?.removeEventListener(type, this.#onTrayInput, true);
+        tray?.removeEventListener(type, this.#onTrayInput, true);
       }
+      tray?.removeEventListener('touchstart', this.#onTrayTouchStart);
+      tray?.removeEventListener('touchmove', this.#onTrayTouchMove);
+      tray?.removeEventListener('touchend', this.#onTrayTouchEnd);
+      tray?.removeEventListener('touchcancel', this.#onTrayTouchEnd);
+      this.#lockedTouch = undefined;
       this.#endHold();
       this.#endBackdropPointer();
       this.#resizeObserver?.disconnect();
@@ -1100,6 +1142,73 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       ) {
         this.#lockScroll(element);
       }
+    }
+  };
+
+  #onTrayTouchStart = (event: TouchEvent): void => {
+    const current = this.#lockedTouch;
+    // A gesture whose touch is gone ended without its touchend reaching the
+    // tray (e.g. its element was removed): start over.
+    if (
+      current &&
+      Array.from(event.touches).some((touch) => touch.identifier === current.id)
+    ) {
+      return;
+    }
+    this.#lockedTouch = undefined;
+    const touch = event.changedTouches[0];
+    if (!touch || !this.handleOnly || !this.#scrollLockProperty) return;
+    this.#lockedTouch = {
+      id: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY,
+      far: false,
+    };
+  };
+
+  /**
+   * With `@handleOnly` below the highest snap point, the content can't
+   * scroll along the axis, and the content isn't a drag source, so nothing
+   * else would cancel a swipe along the axis: iOS then skips the locked tray
+   * and scrolls the page behind it, whatever `overscroll-behavior` says.
+   * So such a swipe has its touchmoves cancelled, decided as in
+   * `dragSource`: once the finger has moved `DECISION_SLOP` px along the
+   * axis and further along it than across it, and released to the browser
+   * if it turns sideways before it has moved `TAP_SLOP` px along the axis.
+   * It never drags the drawer. Swipes across the axis (a carousel, a side
+   * drawer's list) are left alone. Without `@handleOnly`, `dragSource` does
+   * this as part of dragging.
+   */
+  #onTrayTouchMove = (event: TouchEvent): void => {
+    const gesture = this.#lockedTouch;
+    if (!gesture) return;
+    const touch = Array.from(event.changedTouches).find(
+      (changed) => changed.identifier === gesture.id,
+    );
+    if (!touch) return;
+    const vertical = this.axis === 'vertical';
+    const dx = touch.clientX - gesture.x;
+    const dy = touch.clientY - gesture.y;
+    const along = Math.abs(vertical ? dy : dx);
+    const across = Math.abs(vertical ? dx : dy);
+    if (gesture.cancels === undefined) {
+      if (along >= DECISION_SLOP && along > across) gesture.cancels = true;
+    } else if (gesture.cancels && !gesture.far && across > along) {
+      gesture.cancels = false;
+    }
+    if (along >= TAP_SLOP) gesture.far = true;
+    if (gesture.cancels && event.cancelable) event.preventDefault();
+  };
+
+  #onTrayTouchEnd = (event: TouchEvent): void => {
+    const gesture = this.#lockedTouch;
+    if (
+      gesture &&
+      Array.from(event.changedTouches).some(
+        (touch) => touch.identifier === gesture.id,
+      )
+    ) {
+      this.#lockedTouch = undefined;
     }
   };
 
