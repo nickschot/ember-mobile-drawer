@@ -169,6 +169,35 @@
  * `--mobile-drawer-progress` is internal: the component writes it on the
  * backdrop element. Don't set it from app CSS.
  *
+ * The page behind (optional, for effects such as the iOS theme's page scale)
+ * --------------------------------------------------------------------------
+ *
+ * [data-mobile-drawer-page]  An element of the app (e.g. a wrapper around the
+ *                            page) that should follow the modal drawers. It
+ *                            must not contain them: a drawer inside it never
+ *                            drives it. While a modal drawer outside it is
+ *                            open above its smallest snap point, the
+ *                            component writes two inline custom properties on
+ *                            it, and removes them again when no such drawer
+ *                            is open:
+ *   --mobile-drawer-page-progress      the largest progress of those drawers,
+ *                                      above 0 and at most 1, from their
+ *                                      smallest snap point (0) to their
+ *                                      largest (1). Every frame.
+ *   --mobile-drawer-page-viewport-top  the top of the viewport in the
+ *                                      element, in px: how far it is
+ *                                      scrolled out of view at the top.
+ *                                      Measured when it starts to follow.
+ *                            Marked elements are looked up when the first
+ *                            modal drawer starts to open, so an element
+ *                            marked while a drawer is open only follows from
+ *                            the next opening. These base styles don't use
+ *                            either property. Use them without a fallback, so
+ *                            a rule only applies while a drawer is open; and
+ *                            register them as not inherited (`@property`,
+ *                            as the iOS theme does), so the page's content
+ *                            isn't styled again on every frame.
+ *
  * Safe areas: the content element pads with env(safe-area-inset-*) on every
  * side that touches the viewport edge, and the tray never grows under the
  * opposite inset. Because the insets live on the content element (inside the

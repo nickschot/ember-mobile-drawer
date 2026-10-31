@@ -37,6 +37,7 @@ import {
   tabbables,
 } from '../-private/modal/focus.ts';
 import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
+import { setPageProgress } from '../-private/page-progress.ts';
 import type { MobileDrawerSpring } from '../springs.ts';
 
 import type {
@@ -785,7 +786,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#syncScrollLock();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
       mountedDrawers.delete(this);
-      if (this.#root) unregisterDrawer(this.#root);
+      if (this.#root) {
+        setPageProgress(this.#root, 0);
+        unregisterDrawer(this.#root);
+      }
       // Undone right away, so nothing outlives the drawer. Focus can only
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
@@ -1182,8 +1186,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (!this.#drag) this.#applyScrollReset(open);
     this.#backdropProgress = this.#progressOf(open);
-    this.#backdropBlocks = open > layout.resolved[0]!.offset;
+    const smallest = layout.resolved[0]!.offset;
+    this.#backdropBlocks = open > smallest;
     this.#paintBackdrop();
+    // For the page behind (`data-mobile-drawer-page`, see
+    // `setPageProgress`): from the smallest snap point (0) to the largest
+    // (1), for modal drawers only; a non-modal drawer leaves the page as it
+    // is, usable.
+    setPageProgress(
+      root,
+      this.isModal && layout.maxOffset > smallest
+        ? clamp((open - smallest) / (layout.maxOffset - smallest), 0, 1)
+        : 0,
+    );
     root.toggleAttribute(
       'data-closed',
       open <= 0 && !this.#spring!.isAnimating && !this.#drag,
