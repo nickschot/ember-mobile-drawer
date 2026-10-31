@@ -70,6 +70,20 @@ const SCROLL_ATTRIBUTE = 'data-mobile-drawer-scroll';
 const EPSILON = 0.5;
 
 /**
+ * How far (screen px) a pointer may move between going down on the backdrop
+ * and its click for the click to still count as a tap. The same distance at
+ * which `didPan` recognises a pan.
+ */
+const TAP_SLOP = 10;
+
+/**
+ * How far (px) a click may be from where the backdrop pointer lifted to
+ * still be that pointer's click. Pointer and click coordinates can differ
+ * by rounding.
+ */
+const CLICK_MATCH = 2;
+
+/**
  * Whether `element` can scroll along the axis in the direction a finger that
  * moved `movement` px (positive: down or right) pushes its content.
  */
@@ -155,6 +169,19 @@ export interface MobileDrawerSignature {
      * docs. Default `false`.
      */
     handleOnly?: boolean;
+    /**
+     * Whether to render the backdrop behind the tray. Without it nothing
+     * covers the page, so the page stays interactive while the drawer is
+     * open. Default `true`.
+     */
+    backdrop?: boolean;
+    /**
+     * Whether a tap (or click) on the backdrop closes the drawer, like
+     * `close`: to the smallest snap point, through `@onSnapPointChange` when
+     * controlled. A pointer that moves more than a few px before it lifts
+     * isn't a tap. Default `true`.
+     */
+    closeOnBackdropClick?: boolean;
   };
   Blocks: {
     default: [drawer: MobileDrawerApi];
@@ -250,9 +277,16 @@ const clampIndex = (index: number, count: number) =>
  * `touch-action`.
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
- * `.mobile-drawer` root with a `.mobile-drawer__backdrop` and a
- * `.mobile-drawer__tray`, with the block inside `.mobile-drawer__content`.
- * Attributes are applied to the root element.
+ * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
+ * `@backdrop={{false}}`) and a `.mobile-drawer__tray`, with the block inside
+ * `.mobile-drawer__content`. Attributes are applied to the root element.
+ *
+ * Backdrop: its opacity follows the drawer frame by frame through
+ * `--mobile-drawer-progress`, written in `#render` like the transform. A tap
+ * on it calls `close` (unless `@closeOnBackdropClick={{false}}`); a pointer
+ * that moved more than `TAP_SLOP` isn't a tap. The backdrop
+ * is not a drag source: touching it doesn't hold a running animation, and
+ * a drag on it doesn't move the drawer.
  *
  * Snap points are re-measured when the root or `.mobile-drawer__content`
  * changes size, and when an argument changes. The tray itself is not
@@ -321,6 +355,21 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * render, i.e. whether its content may scroll. See `#trayTouchAction`.
    */
   #atTop = false;
+  /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
+  #backdropProgress = 0;
+  /**
+   * The pointer that went down on the backdrop, from its `pointerdown` until
+   * its click, its `pointercancel` or the next pointer down. `moved` once it
+   * went further than `TAP_SLOP`: its click then isn't a tap. `up` is where
+   * it lifted; only a click there belongs to it (see `onBackdropClick`).
+   */
+  #backdropPointer?: {
+    pointerId: number;
+    x: number;
+    y: number;
+    moved: boolean;
+    up?: { x: number; y: number };
+  };
 
   get placement(): Placement {
     const { placement } = this.args;
@@ -339,6 +388,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   get handleOnly(): boolean {
     return this.args.handleOnly === true;
+  }
+
+  get showBackdrop(): boolean {
+    return this.args.backdrop !== false;
+  }
+
+  get closeOnBackdropClick(): boolean {
+    return this.args.closeOnBackdropClick !== false;
   }
 
   get isControlled(): boolean {
@@ -419,9 +476,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#tray = root.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__tray',
       )!;
-      this.#backdrop = root.querySelector<HTMLElement>(
-        ':scope > .mobile-drawer__backdrop',
-      )!;
       const { clock } = drawerEnvironment;
       this.#clock = clock;
       this.#spring = new Spring({
@@ -462,6 +516,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     destroy: () => {
       this.#destroyed = true;
       this.#endHold();
+      this.#endBackdropPointer();
       this.#resizeObserver?.disconnect();
       this.#spring?.stop();
     },
@@ -626,15 +681,157 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#tray!.style.touchAction = this.trayTouchAction();
       }
     }
-    this.#backdrop!.style.setProperty(
-      '--mobile-drawer-progress',
-      String(this.#progressOf(open)),
-    );
+    this.#backdropProgress = this.#progressOf(open);
+    this.#paintBackdrop();
     root.toggleAttribute(
       'data-closed',
       open <= 0 && !this.#spring!.isAnimating && !this.#drag,
     );
   }
+
+  /**
+   * Writes the progress of the last render on the backdrop, if there is one:
+   * `--mobile-drawer-progress` for its opacity, and `pointer-events: none`
+   * at progress 0, so an invisible backdrop (e.g. while the drawer closes,
+   * before `data-closed` hides it) never blocks the page.
+   */
+  #paintBackdrop(): void {
+    const backdrop = this.#backdrop;
+    if (!backdrop) return;
+    const progress = this.#backdropProgress;
+    backdrop.style.setProperty('--mobile-drawer-progress', String(progress));
+    const pointerEvents = progress > 0 ? '' : 'none';
+    if (backdrop.style.pointerEvents !== pointerEvents) {
+      backdrop.style.pointerEvents = pointerEvents;
+    }
+  }
+
+  /**
+   * The backdrop is optional (`@backdrop`), so it registers itself. It is a
+   * pointer convenience and deliberately not focusable or a button: a
+   * keyboard closes the drawer through the app's own controls (and Escape
+   * once modal drawers land), so its listeners are added here rather than
+   * with `{{on}}`.
+   */
+  backdropHooks: LifecycleHooks = {
+    install: (backdrop) => {
+      this.#backdrop = backdrop;
+      backdrop.addEventListener('pointerdown', this.onBackdropPointerDown);
+      backdrop.addEventListener('click', this.onBackdropClick);
+      this.#paintBackdrop();
+    },
+    update: () => {},
+    destroy: () => {
+      const backdrop = this.#backdrop;
+      backdrop?.removeEventListener('pointerdown', this.onBackdropPointerDown);
+      backdrop?.removeEventListener('click', this.onBackdropClick);
+      this.#backdrop = undefined;
+      this.#endBackdropPointer();
+    },
+  };
+
+  /**
+   * Starts tracking a pointer on the backdrop, to tell a tap from a drag
+   * (or a scroll the browser took over) when its click arrives. Pointer
+   * events of a touch stay on the backdrop (implicit capture), those of a
+   * mouse don't, so movement is followed on the document.
+   */
+  private onBackdropPointerDown = (event: PointerEvent): void => {
+    if (!event.isPrimary) return;
+    this.#endBackdropPointer();
+    this.#backdropPointer = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+    };
+    document.addEventListener('pointermove', this.#onBackdropPointerMove, {
+      capture: true,
+      passive: true,
+    });
+    document.addEventListener('pointerup', this.#onBackdropPointerUp, {
+      capture: true,
+    });
+    document.addEventListener('pointercancel', this.#onBackdropPointerCancel, {
+      capture: true,
+    });
+  };
+
+  #onBackdropPointerMove = (event: PointerEvent): void => {
+    if (this.#backdropPointer?.pointerId === event.pointerId) {
+      this.#trackBackdropPointer(event.clientX, event.clientY);
+    }
+  };
+
+  /** Marks the backdrop pointer as `moved` once it is at `x`/`y`. */
+  #trackBackdropPointer(x: number, y: number): void {
+    const pointer = this.#backdropPointer;
+    if (!pointer) return;
+    const distance = Math.hypot(x - pointer.x, y - pointer.y);
+    // NaN (no coordinates) doesn't count as moved.
+    if (distance > TAP_SLOP) pointer.moved = true;
+  }
+
+  /**
+   * The pointer lifted: stop following it, but keep it (with where it
+   * lifted) for the click that may follow, which reads `moved`. A click
+   * elsewhere (e.g. a mouse dragged onto the tray) never reaches the
+   * backdrop; the record is then ignored by the next click, see
+   * `onBackdropClick`.
+   */
+  #onBackdropPointerUp = (event: PointerEvent): void => {
+    const pointer = this.#backdropPointer;
+    if (pointer?.pointerId !== event.pointerId) return;
+    this.#trackBackdropPointer(event.clientX, event.clientY);
+    pointer.up = { x: event.clientX, y: event.clientY };
+    this.#removeBackdropListeners();
+  };
+
+  /** The browser took the pointer over (e.g. to scroll): no click follows. */
+  #onBackdropPointerCancel = (event: PointerEvent): void => {
+    if (this.#backdropPointer?.pointerId === event.pointerId) {
+      this.#endBackdropPointer();
+    }
+  };
+
+  #removeBackdropListeners(): void {
+    document.removeEventListener('pointermove', this.#onBackdropPointerMove, {
+      capture: true,
+    });
+    document.removeEventListener('pointerup', this.#onBackdropPointerUp, {
+      capture: true,
+    });
+    document.removeEventListener(
+      'pointercancel',
+      this.#onBackdropPointerCancel,
+      { capture: true },
+    );
+  }
+
+  #endBackdropPointer(): void {
+    this.#removeBackdropListeners();
+    this.#backdropPointer = undefined;
+  }
+
+  /**
+   * Closes the drawer on a tap on the backdrop. A click whose pointer moved
+   * past `TAP_SLOP` (a drag that happened to start on the backdrop) isn't a
+   * tap. The click a pointer causes lands where it lifted; any other click,
+   * e.g. one without a pointer (`element.click()`, assistive technology),
+   * is a tap, also when an earlier pointer's click never reached the
+   * backdrop.
+   */
+  private onBackdropClick = (event: MouseEvent): void => {
+    const pointer = this.#backdropPointer;
+    const own =
+      pointer?.up !== undefined &&
+      Math.hypot(event.clientX - pointer.up.x, event.clientY - pointer.up.y) <=
+        CLICK_MATCH;
+    this.#endBackdropPointer();
+    if (!this.closeOnBackdropClick || this.#destroyed) return;
+    if (own && pointer?.moved) return;
+    this.close();
+  };
 
   /**
    * Screen px per px of drawer offset along the axis: `1`, unless an
@@ -929,7 +1126,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.activeSnapPoint
       }}
     >
-      <div class="mobile-drawer__backdrop"></div>
+      {{#if this.showBackdrop}}
+        <div
+          class="mobile-drawer__backdrop"
+          {{lifecycle this.backdropHooks}}
+        ></div>
+      {{/if}}
       <div
         class="mobile-drawer__tray"
         {{(if
