@@ -305,6 +305,15 @@ Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 ```
 
+#### iOS Safari 26 bars
+
+iOS 26 Safari doesn't let fixed elements paint under the status bar or the floating toolbar. Instead, it fills each bar with a colour that it takes from the fixed element at that edge of the screen. The base styles have an iOS-only rule (in `@supports (-webkit-touch-callout: none)`) that gives Safari the right colours:
+
+- The bars dim with the backdrop. The backdrop fades with `filter: opacity()` over a background that has the max opacity as its alpha, instead of with `opacity`, so that Safari sees the dimmed colour from the first frame. Safari keeps that colour while the drawer is open, so the bars show the backdrop at its max opacity also at a lower snap point.
+- A bar that the sheet touches takes the sheet's background. For this the tray is `position: fixed` and the root has `contain: layout`, so the tray still sits in the root, also in an embedded drawer. A tray with a `backdrop-filter`, such as the iOS theme's glass, gets Safari's own material under the bar.
+
+Content stays between the bars, so the safe-area padding doesn't change. Other browsers don't get this rule. On iOS, an app that sets `opacity` on the backdrop multiplies it with the fade.
+
 ### iOS theme
 
 An optional theme gives the drawer the look of an iOS 26/27 sheet ("Liquid Glass"): a translucent, blurred sheet with a light rim and a darkened edge, large rounded corners on the page-facing side, a dimming backdrop and a grabber bar. Import it after the base styles; it does not import them itself:

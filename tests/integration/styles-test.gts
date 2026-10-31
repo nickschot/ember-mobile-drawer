@@ -669,4 +669,127 @@ module('Integration | styles.css', function (hooks) {
       style.remove();
     }
   });
+
+  /**
+   * The iOS-only block for the Safari 26 bars (#85). Chrome doesn't match its
+   * condition, so the tests check that it is in the layer and not applied,
+   * and then apply a copy of its rules without the condition.
+   */
+  function iosEdgesRule(): CSSSupportsRule {
+    const visit = (
+      rules: CSSRuleList,
+      layer: string | undefined,
+    ): CSSSupportsRule | undefined => {
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSSupportsRule &&
+          rule.conditionText.includes('-webkit-touch-callout: none') &&
+          layer === 'ember-mobile-drawer'
+        ) {
+          return rule;
+        }
+        if (rule instanceof CSSGroupingRule) {
+          const found = visit(
+            rule.cssRules,
+            rule instanceof CSSLayerBlockRule ? rule.name : layer,
+          );
+          if (found) return found;
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      const found = visit(sheet.cssRules, undefined);
+      if (found) return found;
+    }
+    throw new Error('No iOS @supports rule in the ember-mobile-drawer layer');
+  }
+
+  test('the iOS bar rules are in the layer and do not apply in other browsers', async function (assert) {
+    await renderDrawer();
+
+    const rule = iosEdgesRule();
+    assert.true(
+      rule.conditionText.includes('color-mix('),
+      'only where color-mix() is supported',
+    );
+    assert.false(CSS.supports(rule.conditionText), 'Chrome does not match');
+
+    const backdrop = getComputedStyle(el('[data-test-backdrop]'));
+    assert.strictEqual(backdrop.position, 'absolute');
+    assert.strictEqual(backdrop.filter, 'none');
+    assert.strictEqual(backdrop.backgroundColor, 'rgb(0, 0, 0)');
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-tray]')).position,
+      'absolute',
+    );
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-root]')).contain,
+      'none',
+    );
+  });
+
+  test('the iOS bar rules fade the backdrop with a filter and fix the tray in the root', async function (assert) {
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        <div style="position: relative; width: 300px; height: 200px">
+          <div class="mobile-drawer" style="position: absolute" data-test-root>
+            <div class="mobile-drawer__backdrop" data-test-backdrop></div>
+            <div class="mobile-drawer__tray" data-test-tray>
+              <div class="mobile-drawer__content" style="height: 50px"></div>
+            </div>
+          </div>
+        </div>
+      </template>,
+    );
+
+    const inner = Array.from(iosEdgesRule().cssRules)
+      .map((rule) => rule.cssText)
+      .join('\n');
+    const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+    try {
+      const root = el('[data-test-root]');
+      const backdrop = el('[data-test-backdrop]');
+      const tray = el('[data-test-tray]');
+      const computed = getComputedStyle(backdrop);
+
+      assert.strictEqual(getComputedStyle(root).contain, 'layout');
+      assert.strictEqual(getComputedStyle(tray).position, 'fixed');
+      assert.strictEqual(computed.opacity, '1', 'opacity stays 1');
+      assert.strictEqual(computed.filter, 'opacity(0)', 'closed: faded out');
+      assert.strictEqual(
+        computed.backgroundColor,
+        'color(srgb 0 0 0 / 0.4)',
+        'the max opacity is the alpha of the background',
+      );
+
+      backdrop.style.setProperty('--mobile-drawer-progress', '0.5');
+      root.style.setProperty('--mobile-drawer-backdrop-opacity', '0.6');
+      root.style.setProperty('--mobile-drawer-backdrop-color', 'rgb(7 8 9)');
+      assert.strictEqual(computed.filter, 'opacity(0.5)');
+      assert.true(
+        computed.backgroundColor.endsWith(' / 0.6)'),
+        `custom colour and max opacity (${computed.backgroundColor})`,
+      );
+
+      // contain: layout keeps the fixed tray in an embedded root.
+      tray.style.transform = 'none';
+      // Compare boxes: the test container may be scaled.
+      const rootBox = root.getBoundingClientRect();
+      const trayBox = tray.getBoundingClientRect();
+      assert.strictEqual(trayBox.width, rootBox.width, 'as wide as the root');
+      assert.strictEqual(trayBox.bottom, rootBox.bottom, 'on the root bottom');
+      assert.strictEqual(tray.offsetHeight, 50);
+
+      root.style.contain = 'none';
+      assert.notStrictEqual(
+        tray.getBoundingClientRect().width,
+        rootBox.width,
+        'without contain: layout the fixed tray leaves the root',
+      );
+    } finally {
+      style.remove();
+    }
+  });
 });
