@@ -47,6 +47,18 @@
  *                                    element: a sticky element only sticks
  *                                    inside its parent.
  *
+ * .mobile-drawer-theme-ios__page     Optional, off by default. The page
+ *                                    scale effect: put this class and the
+ *                                    `data-mobile-drawer-page` attribute on
+ *                                    the element that holds the page (not
+ *                                    the drawer), e.g. a wrapper around the
+ *                                    application template. While a modal
+ *                                    drawer outside it is open, the page
+ *                                    scales down, moves down and gets
+ *                                    rounded top corners, following the
+ *                                    drawer frame by frame; the area around
+ *                                    it is black. See "Page scale" below.
+ *
  * Light and dark: the colours use light-dark(), so they follow the page's
  * `color-scheme`, like the base styles' Canvas/CanvasText defaults. A page
  * without `color-scheme: light dark` stays light. Browsers without
@@ -88,6 +100,34 @@
  * sheet that opens lower and is then dragged to the top keeps the first
  * colour, and the edge, until the drawer is closed.
  *
+ * Page scale (opt-in, see .mobile-drawer-theme-ios__page): the component
+ * writes `--mobile-drawer-page-progress` (0-1) and
+ * `--mobile-drawer-page-viewport-top` on elements marked
+ * `data-mobile-drawer-page`, only while a modal drawer outside the element
+ * is open (see styles.css). Every rule here uses them without a fallback, so
+ * while no drawer is open the rules don't apply at all: the page has no
+ * transform, and `position: fixed` content in it works as usual. While a
+ * drawer is open the page is transformed, so its `position: fixed` content
+ * is positioned against the page element instead of the viewport. That is
+ * only right when the page element fills the viewport.
+ * - The `transform` (a translate3d and a scale) changes every frame. The
+ *   translate is 3D, so the browser composites the page on a layer of its
+ *   own while it is transformed, and doesn't paint it again on each frame.
+ * - The rounded corners are a `clip-path` at the top of the viewport, with
+ *   a constant radius, so it only changes when the drawer opens.
+ * - The page gets a background (`Canvas` by default, see
+ *   --mobile-drawer-ios-page-background), and `<body>` turns black while a
+ *   modal drawer outside the page is open, when the page is a child of
+ *   `<body>`.
+ * - Off with `prefers-reduced-motion: reduce`: the page doesn't move.
+ * Settings, on the page element or an ancestor:
+ *   --mobile-drawer-ios-page-scale       Scale when fully open. Default 0.92.
+ *   --mobile-drawer-ios-page-offset      How far the page moves down when
+ *                                        fully open. Default the top safe
+ *                                        area plus 10px.
+ *   --mobile-drawer-ios-page-radius      Radius of its top corners. 12px.
+ *   --mobile-drawer-ios-page-background  Page background. Canvas.
+ *
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
  * wins. One exception: the expanded tray's `background` rule has the
@@ -104,6 +144,22 @@
  * Values are approximations: Apple documents the behaviour of sheets and
  * Liquid Glass but not radii, blur amounts or tint opacities.
  */
+
+/*
+ * The page scale properties that the component writes inline on the page
+ * element. Not inherited, so the page's content isn't styled again when
+ * they change on every frame. No initial value: while they are not set,
+ * every declaration that uses them is invalid, so none applies.
+ */
+@property --mobile-drawer-page-progress {
+  syntax: "*";
+  inherits: false;
+}
+
+@property --mobile-drawer-page-viewport-top {
+  syntax: "*";
+  inherits: false;
+}
 
 @layer ember-mobile-drawer {
   /* Solid sheet (light; also the fallback without light-dark()). */
@@ -337,6 +393,53 @@
       ) {
         transition: background-color 0s linear var(--_mobile-drawer-ios-fade);
       }
+    }
+  }
+
+  /*
+   * Page scale (opt-in): see "Page scale" in the header. Each declaration
+   * uses --mobile-drawer-page-progress or --mobile-drawer-page-viewport-top
+   * without a fallback, so it only applies while the component writes them:
+   * while a modal drawer outside the page is open.
+   */
+  @media (prefers-reduced-motion: no-preference) {
+    :where(.mobile-drawer-theme-ios__page) {
+      background-color: var(--mobile-drawer-ios-page-background, Canvas);
+      transform-origin: 50% var(--mobile-drawer-page-viewport-top);
+      /* translate3d, so the page is composited on a layer of its own while
+         it is transformed and isn't painted again on every frame. */
+      transform: translate3d(
+          0,
+          calc(
+            var(--mobile-drawer-page-progress) *
+              var(
+                --mobile-drawer-ios-page-offset,
+                calc(env(safe-area-inset-top, 0px) + 10px)
+              )
+          ),
+          0
+        )
+        scale(
+          calc(
+            1 - var(--mobile-drawer-page-progress) *
+              (1 - var(--mobile-drawer-ios-page-scale, 0.92))
+          )
+        );
+      clip-path: inset(
+        var(--mobile-drawer-page-viewport-top) 0 0 0 round
+          var(--mobile-drawer-ios-page-radius, 12px)
+          var(--mobile-drawer-ios-page-radius, 12px) 0 0
+      );
+    }
+
+    :where(
+      body:has(> .mobile-drawer-theme-ios__page):has(
+          > :not(.mobile-drawer-theme-ios__page)
+            .mobile-drawer[role="dialog"]:not([data-closed]),
+          > .mobile-drawer[role="dialog"]:not([data-closed])
+        )
+    ) {
+      background-color: rgb(0 0 0);
     }
   }
 }
