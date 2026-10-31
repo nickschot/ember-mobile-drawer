@@ -8,6 +8,8 @@ A gesture-enabled drawer component for Ember, built as a v2 addon.
 - Placements: bottom, top, left, right (`left` and `right` are physical and don't flip under `dir="rtl"`)
 - Minimal base styles, with an optional iOS theme
 
+Try it in the [playground](https://nickschot.github.io/ember-mobile-drawer/).
+
 > Work in progress. Planning and progress are tracked in [GitHub issues](https://github.com/nickschot/ember-mobile-drawer/issues).
 
 ## Compatibility

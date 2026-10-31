@@ -1,0 +1,70 @@
+# Builds the demo app (`demo-app/`) and deploys it to GitHub Pages at
+# https://nickschot.github.io/ember-mobile-drawer/ on every push to main.
+#
+# Needs Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# Pull requests that change the demo only build it, without deploying.
+name: Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - "demo-app/**"
+      - "src/**"
+      - "index.html"
+      - "vite.config.mjs"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; don't cancel a deployment that is in progress.
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.head_ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: "Build demo"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build demo
+        run: pnpm build:demo --base=/${{ github.event.repository.name }}/
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist-demo
+
+  deploy:
+    name: "Deploy to GitHub Pages"
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
