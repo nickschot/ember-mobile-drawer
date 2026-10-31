@@ -186,6 +186,35 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
     assert.false(code().includes('@closeOnBackdropClick'));
   });
 
+  test('the modal control toggles @modal, and the backdrop follows it', async function (assert) {
+    await render(<template><DrawerDemo @search="" /></template>);
+    const checkbox = (label: string) => {
+      const match = findAll('.demo-controls label').find((element) =>
+        element.textContent?.includes(label),
+      );
+      return match!.querySelector('input') as HTMLInputElement;
+    };
+    const root = '.demo-playground-drawer > .mobile-drawer';
+    const code = () => find('.demo-code code')!.textContent!;
+
+    assert.true(checkbox('(@modal').checked);
+    assert.false(checkbox('(@modal').disabled);
+    assert.dom(root).hasAttribute('role', 'dialog');
+    assert.dom(root).hasAttribute('aria-labelledby', 'demo-drawer-title');
+    assert.notOk(code().includes('@modal'), 'the default is not in the code');
+
+    await click(checkbox('(@modal'));
+    assert.dom(root).doesNotHaveAttribute('role');
+    assert.dom(`${root} > .mobile-drawer__backdrop`).doesNotExist();
+    assert.false(checkbox('(@backdrop)').checked, 'the backdrop follows');
+    assert.true(code().includes('@modal={{false}}'));
+    assert.false(code().includes('@backdrop'), 'following @modal: unset');
+
+    await click(checkbox('(@backdrop)'));
+    assert.dom(`${root} > .mobile-drawer__backdrop`).exists();
+    assert.true(code().includes('@backdrop={{true}}'));
+  });
+
   for (const closeOnBackdropClick of [true, false]) {
     test(`a tap on the backdrop ${closeOnBackdropClick ? 'closes' : 'keeps'} the drawer with tap-to-close ${closeOnBackdropClick ? 'on' : 'off'}`, async function (assert) {
       drawerEnvironment.prefersReducedMotion = () => true;

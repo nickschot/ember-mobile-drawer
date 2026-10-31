@@ -36,12 +36,13 @@ export default class BottomSheetExample extends Component {
       @activeSnapPoint={{this.active}}
       @onSnapPointChange={{this.setActive}}
       class="demo-drawer example-sheet"
+      aria-labelledby="example-sheet-title"
       as |drawer|
     >
       <div class="example-sheet-header">
         <div class="demo-grabber"></div>
         <div class="example-sheet-title">
-          <h3>Nearby</h3>
+          <h3 id="example-sheet-title">Nearby</h3>
           <button type="button" {{on "click" drawer.close}}>Close</button>
         </div>
       </div>
