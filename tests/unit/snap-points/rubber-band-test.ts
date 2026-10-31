@@ -1,5 +1,9 @@
 import { module, test } from 'qunit';
-import { rubberBand } from '#src/-private/snap-points/index.ts';
+import {
+  dragOffset,
+  rubberBand,
+  unRubberBand,
+} from '#src/-private/snap-points/index.ts';
 
 const dimension = 800;
 
@@ -97,5 +101,121 @@ module('Unit | snap-points | rubberBand', function () {
       /factor must be a finite number >= 0/,
       'negative factor',
     );
+  });
+});
+
+module('Unit | snap-points | unRubberBand', function () {
+  test('undoes rubberBand on both ends', function (assert) {
+    for (const raw of [-900, -100, -1, 0, 50, 399, 400, 401, 450, 1000, 5000]) {
+      const banded = rubberBand(raw, 0, 400, { dimension });
+      const back = unRubberBand(banded, 0, 400, { dimension });
+      assert.true(
+        Math.abs(back - raw) < 1e-6,
+        `${raw} -> ${banded} -> ${back}`,
+      );
+    }
+    for (const raw of [0, 50, 99, 300, 420]) {
+      const banded = rubberBand(raw, 100, 400, { dimension: 24 });
+      const back = unRubberBand(banded, 100, 400, { dimension: 24 });
+      assert.true(Math.abs(back - raw) < 1e-6, `small dimension: ${raw}`);
+    }
+  });
+
+  test('leaves offsets within the range untouched', function (assert) {
+    assert.strictEqual(unRubberBand(250, 0, 400, { dimension }), 250);
+  });
+
+  test('stays finite and moderate at and beyond the dimension', function (assert) {
+    const at = unRubberBand(400 + dimension, 0, 400, { dimension });
+    const beyond = unRubberBand(400 + 2 * dimension, 0, 400, { dimension });
+    assert.true(Number.isFinite(at) && at > 400);
+    assert.strictEqual(beyond, at);
+    // Clamped to MAX_BAND_FRACTION of the band: 999 * dimension / factor.
+    assert.true(at - 400 <= (1000 * dimension) / 0.55, `${at}`);
+
+    const small = unRubberBand(400 + 30, 0, 400, { dimension: 24 });
+    assert.true(small - 400 < 50_000, `small band (${small})`);
+  });
+
+  test('clamps to the range without resistance', function (assert) {
+    assert.strictEqual(unRubberBand(450, 0, 400, { dimension: 0 }), 400);
+    assert.strictEqual(unRubberBand(-50, 0, 400, { dimension, factor: 0 }), 0);
+  });
+
+  test('throws a RangeError for invalid input', function (assert) {
+    assert.throws(
+      () => unRubberBand(NaN, 0, 400, { dimension }),
+      (error: Error) => error instanceof RangeError,
+    );
+  });
+});
+
+module('Unit | snap-points | dragOffset', function () {
+  // Like the drawer: a stiff band past the last snap point.
+  const bands = { below: { dimension: 600 }, above: { dimension: 24 } };
+  const drag = (start: number, delta: number) =>
+    dragOffset(start, delta, 100, 400, bands);
+  const near = (actual: number, expected: number, epsilon = 1e-9) =>
+    Math.abs(actual - expected) <= epsilon;
+
+  test('from inside the range it is the rubber-banded finger', function (assert) {
+    assert.strictEqual(drag(250, 0), 250);
+    assert.strictEqual(drag(250, 100), 350, '1:1 inside');
+    assert.strictEqual(drag(250, 200), rubberBand(450, 100, 400, bands.above));
+    assert.strictEqual(drag(250, -200), rubberBand(50, 100, 400, bands.below));
+  });
+
+  test('caught past the last snap point, it follows 1:1 back in', function (assert) {
+    assert.strictEqual(drag(419, 0), 419, 'no jump');
+    assert.strictEqual(drag(419, -10), 409, '1:1 while outside');
+    assert.strictEqual(drag(419, -19), 400, 'back at the last snap point');
+    assert.strictEqual(drag(419, -119), 300, 'and on inside');
+    assert.strictEqual(
+      drag(419, -400),
+      rubberBand(19, 100, 400, bands.below),
+      'into the band at the other end',
+    );
+  });
+
+  test('caught past the first snap point, it follows 1:1 back in', function (assert) {
+    assert.strictEqual(drag(80, 0), 80, 'no jump');
+    assert.strictEqual(drag(80, 15), 95);
+    assert.strictEqual(drag(80, 120), 200);
+  });
+
+  test('further out, only the remaining band resists', function (assert) {
+    const above = drag(419, 10);
+    assert.true(above > 419 && above < 424, `above (${above})`);
+    assert.true(
+      near(
+        above,
+        rubberBand(
+          unRubberBand(419, 100, 400, bands.above) + 10,
+          100,
+          400,
+          bands.above,
+        ),
+      ),
+      'the band continues where it is',
+    );
+    const below = drag(80, -10);
+    assert.true(below < 80 && below > 70, `below (${below})`);
+  });
+
+  test('caught at or past the band limit, it never jumps', function (assert) {
+    for (const start of [424, 430, 500]) {
+      assert.strictEqual(drag(start, 0), start, `${start}: no jump`);
+      const out = drag(start, 100);
+      assert.true(
+        Number.isFinite(out) && out >= start && out < start + 1,
+        `${start}: barely moves further out (${out})`,
+      );
+      assert.strictEqual(drag(start, -20), start - 20, `${start}: 1:1 back in`);
+    }
+  });
+
+  test('throws a RangeError for non-finite input', function (assert) {
+    assert.throws(() => drag(NaN, 0), RangeError);
+    assert.throws(() => drag(0, Infinity), RangeError);
   });
 });

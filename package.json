@@ -61,7 +61,8 @@
   },
   "dependencies": {
     "@embroider/addon-shim": "^1.8.9",
-    "decorator-transforms": "^2.2.2"
+    "decorator-transforms": "^2.2.2",
+    "ember-gesture-modifiers": "^6.1.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

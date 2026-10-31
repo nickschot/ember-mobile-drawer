@@ -211,16 +211,19 @@ export function findSnapPoint(
 
 /**
  * Default deceleration rate per millisecond, matching iOS
- * `UIScrollView.DecelerationRate.normal`.
+ * `UIScrollView.DecelerationRate.fast`. iOS `.normal` (`0.998`) projects
+ * five times as far, which skips snap points too eagerly on small sheets.
+ * Provisional: to be tuned on a real device.
  */
-export const DEFAULT_DECELERATION_RATE = 0.998;
+export const DEFAULT_DECELERATION_RATE = 0.99;
 
 /**
  * Projects where a release would come to rest if it kept moving and slowed
  * down by exponential decay: each millisecond the velocity is multiplied by
  * `decelerationRate`. Summed over time that adds
  * `velocity / 1000 * rate / (1 - rate)` px, which for the default rate is
- * roughly half the velocity in px/s (a 1000 px/s flick travels ~500px).
+ * roughly a tenth of the velocity in px/s (a 1000 px/s flick travels ~99px;
+ * with `0.998` it would travel ~499px).
  *
  * @param offset Current offset in px.
  * @param velocity Release velocity in px/s along the same axis (positive moves
@@ -252,6 +255,14 @@ export function projectOffset(
 export interface SelectSnapPointOptions {
   /** See {@link projectOffset}. Defaults to {@link DEFAULT_DECELERATION_RATE}. */
   decelerationRate?: number;
+  /**
+   * Speed in px/s, `>= 0`, at or above which a release always moves at least
+   * to the next snap point in the direction of the velocity (when there is
+   * one), even when the projection lands nearer to a snap point behind it.
+   * Without it, a quick but short flick that starts far from the next snap
+   * point can settle against the direction the finger moved. Off by default.
+   */
+  flingVelocity?: number;
 }
 
 /**
@@ -261,6 +272,11 @@ export interface SelectSnapPointOptions {
  *
  * When the projected position is exactly halfway between two snap points the
  * one in the direction of the velocity wins (or the lower one when at rest).
+ *
+ * With {@link SelectSnapPointOptions.flingVelocity}, a release at least that
+ * fast never settles against its direction: if the nearest snap point is not
+ * beyond `offset` in the direction of the velocity, the first snap point that
+ * is beyond it is picked instead.
  *
  * @param resolved Snap points from {@link resolveSnapPoints}; must not be empty.
  * @param offset Offset in px at release.
@@ -281,6 +297,15 @@ export function selectSnapPoint(
       'ember-mobile-drawer: cannot select from zero snap points.',
     );
   }
+  const { flingVelocity } = options;
+  if (
+    flingVelocity !== undefined &&
+    !(Number.isFinite(flingVelocity) && flingVelocity >= 0)
+  ) {
+    throw new RangeError(
+      `ember-mobile-drawer: flingVelocity must be a finite number >= 0, got ${describe(flingVelocity)}.`,
+    );
+  }
   const projected = projectOffset(offset, velocity, options.decelerationRate);
 
   let best = first;
@@ -295,6 +320,20 @@ export function selectSnapPoint(
       best = snapPoint;
       bestDistance = distance;
     }
+  }
+
+  if (
+    flingVelocity !== undefined &&
+    velocity !== 0 &&
+    Math.abs(velocity) >= flingVelocity
+  ) {
+    const forward =
+      velocity > 0
+        ? resolved.find((snapPoint) => snapPoint.offset > offset)
+        : resolved.findLast((snapPoint) => snapPoint.offset < offset);
+    const backwards =
+      velocity > 0 ? best.offset <= offset : best.offset >= offset;
+    if (forward && backwards) best = forward;
   }
   return best;
 }
@@ -375,4 +414,113 @@ export function rubberBand(
     return max + resist(offset - max);
   }
   return offset;
+}
+
+/**
+ * The inverse of {@link rubberBand}: the raw offset that `rubberBand` turns
+ * into `offset`, so a drag that catches a rubber-banded drawer can continue
+ * from where it is shown. `rubberBand(unRubberBand(x, ...), ...)` is `x`
+ * (within floating point error) for every `x` less than
+ * `MAX_BAND_FRACTION * dimension` outside the range.
+ *
+ * `rubberBand` only approaches `dimension`, and near it the inverse grows
+ * without bound. So an overshoot is first clamped to
+ * `MAX_BAND_FRACTION * dimension`, which keeps the result finite and
+ * moderate: at most `999 * dimension / factor` outside the range. With a
+ * `factor` or `dimension` of `0` nothing can be outside the range, so the
+ * offset is clamped to it.
+ *
+ * @throws RangeError for the same input as {@link rubberBand}.
+ */
+export function unRubberBand(
+  offset: number,
+  min: number,
+  max: number,
+  options: RubberBandOptions,
+): number {
+  // Validates the input the same way.
+  rubberBand(offset, min, max, options);
+  const { dimension, factor = DEFAULT_RUBBER_BAND_FACTOR } = options;
+
+  const unresist = (overshoot: number): number => {
+    if (factor <= 0 || dimension <= 0) return 0;
+    const fraction = Math.min(overshoot / dimension, MAX_BAND_FRACTION);
+    return (dimension / factor) * (1 / (1 - fraction) - 1);
+  };
+
+  if (offset < min) {
+    return min - unresist(min - offset);
+  }
+  if (offset > max) {
+    return max + unresist(offset - max);
+  }
+  return offset;
+}
+
+/**
+ * The largest fraction of the rubber-band `dimension` that
+ * {@link unRubberBand} inverts; larger overshoots are clamped to it.
+ */
+export const MAX_BAND_FRACTION = 0.999;
+
+/** The rubber-bands below the first and above the last snap point. */
+export interface DragBands {
+  below: RubberBandOptions;
+  above: RubberBandOptions;
+}
+
+/**
+ * Where a drag puts the drawer when it started at `start` (the offset shown
+ * when the finger caught it) and the finger has since moved `delta` px
+ * (positive opens).
+ *
+ * From inside `[min, max]` this is `rubberBand(start + delta)`. A drag that
+ * catches the drawer outside the range (e.g. springing back from a
+ * rubber-band, or a spring overshoot) continues from where it is shown,
+ * without a jump:
+ *
+ * - towards the range, the drawer follows the finger 1:1 until it is back in
+ *   the range, and from there as from inside;
+ * - further away from the range, only the band that is left resists: the
+ *   increase of the band from where it is. An overshoot at or past the
+ *   band's limit (possible after a spring overshoot when the tray is longer
+ *   than the largest snap point) then barely moves, but never jumps.
+ *
+ * @throws RangeError for non-finite input, or band options
+ *   {@link rubberBand} rejects.
+ */
+export function dragOffset(
+  start: number,
+  delta: number,
+  min: number,
+  max: number,
+  bands: DragBands,
+): number {
+  assertFinite('start', start);
+  assertFinite('delta', delta);
+  const { below, above } = bands;
+  const raw = start + delta;
+
+  if (start > max && delta > 0) {
+    // Further out: the band's increase from its (un-banded) position.
+    const from = unRubberBand(start, min, max, above);
+    return (
+      start +
+      rubberBand(from + delta, min, max, above) -
+      rubberBand(from, min, max, above)
+    );
+  }
+  if (start < min && delta < 0) {
+    const from = unRubberBand(start, min, max, below);
+    return (
+      start +
+      rubberBand(from + delta, min, max, below) -
+      rubberBand(from, min, max, below)
+    );
+  }
+  // Towards the range: 1:1 while still outside it.
+  if ((start > max && raw > max) || (start < min && raw < min)) {
+    return raw;
+  }
+  return rubberBand(raw, min, max, raw > max ? above : below);
 }
