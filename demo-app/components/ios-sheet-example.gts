@@ -68,13 +68,14 @@ export default class IosSheetExample extends Component {
         @activeSnapPoint={{this.active}}
         @onSnapPointChange={{this.setActive}}
         class="example-ios-sheet"
+        aria-labelledby="example-ios-title"
         as |drawer|
       >
         {{#unless this.isTop}}
           <div class="mobile-drawer-theme-ios__grabber"></div>
         {{/unless}}
         <div class="example-ios-title">
-          <h3>Find nearby</h3>
+          <h3 id="example-ios-title">Find nearby</h3>
           <button type="button" {{on "click" drawer.close}}>Done</button>
         </div>
         <ul class="example-ios-list">
