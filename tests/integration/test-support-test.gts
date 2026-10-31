@@ -6,6 +6,7 @@ import { htmlSafe } from '@ember/template';
 import { on } from '@ember/modifier';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { closeDrawer, dragDrawer, openDrawer } from '#src/test-support.ts';
+import { hasPendingWaiters } from '@ember/test-waiters';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import '#src/styles.css';
 
@@ -23,6 +24,7 @@ class State {
   @tracked active: number | undefined = undefined;
   @tracked handleOnly = false;
   @tracked nested = false;
+  @tracked shown = true;
   changes: number[] = [];
 
   onChange = (index: number) => {
@@ -41,45 +43,47 @@ async function renderDrawer(state: State) {
     <template>
       {{! template-lint-disable no-inline-styles }}
       <div style={{containerStyle}}>
-        <MobileDrawer
-          @placement={{state.placement}}
-          @snapPoints={{SNAP_POINTS}}
-          @activeSnapPoint={{state.active}}
-          @onSnapPointChange={{state.onChange}}
-          @handleOnly={{state.handleOnly}}
-          style="position: absolute"
-          aria-label="Outer"
-          data-test-outer
-          as |drawer|
-        >
-          <div style={{contentStyle}}>
-            <div
-              style="width: 40px; height: 40px"
-              data-test-handle
-              {{drawer.handle}}
-            ></div>
-            <button type="button" data-test-open {{on "click" drawer.open}}>
-              Open
-            </button>
-            <output data-test-active>{{drawer.activeSnapPoint}}</output>
-            <output data-test-animating>{{drawer.isAnimating}}</output>
-            {{#if state.nested}}
-              <MobileDrawer
-                @snapPoints={{SNAP_POINTS}}
-                style="position: absolute"
-                aria-label="Inner"
-                data-test-inner
-                as |inner|
-              >
-                <div style={{contentStyle}} data-test-inner-content>
-                  <output data-test-inner-active>
-                    {{inner.activeSnapPoint}}
-                  </output>
-                </div>
-              </MobileDrawer>
-            {{/if}}
-          </div>
-        </MobileDrawer>
+        {{#if state.shown}}
+          <MobileDrawer
+            @placement={{state.placement}}
+            @snapPoints={{SNAP_POINTS}}
+            @activeSnapPoint={{state.active}}
+            @onSnapPointChange={{state.onChange}}
+            @handleOnly={{state.handleOnly}}
+            style="position: absolute"
+            aria-label="Outer"
+            data-test-outer
+            as |drawer|
+          >
+            <div style={{contentStyle}}>
+              <div
+                style="width: 40px; height: 40px"
+                data-test-handle
+                {{drawer.handle}}
+              ></div>
+              <button type="button" data-test-open {{on "click" drawer.open}}>
+                Open
+              </button>
+              <output data-test-active>{{drawer.activeSnapPoint}}</output>
+              <output data-test-animating>{{drawer.isAnimating}}</output>
+              {{#if state.nested}}
+                <MobileDrawer
+                  @snapPoints={{SNAP_POINTS}}
+                  style="position: absolute"
+                  aria-label="Inner"
+                  data-test-inner
+                  as |inner|
+                >
+                  <div style={{contentStyle}} data-test-inner-content>
+                    <output data-test-inner-active>
+                      {{inner.activeSnapPoint}}
+                    </output>
+                  </div>
+                </MobileDrawer>
+              {{/if}}
+            </div>
+          </MobileDrawer>
+        {{/if}}
       </div>
     </template>,
   );
@@ -104,6 +108,20 @@ function openOffset(placement: Placement): number {
     right: 400 - m41,
   }[placement];
 }
+
+/** Waits for `promise`, but fails after 3s instead of hanging the suite. */
+function within<T>(promise: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} hung`)), 3000);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+const nextFrame = () =>
+  new Promise((resolve) => requestAnimationFrame(resolve));
 
 const near = (actual: number, expected: number) =>
   Math.abs(actual - expected) <= 0.01;
@@ -194,6 +212,35 @@ module('Integration | test-support', function (hooks) {
       assert.dom('[data-test-active]').hasText('1');
     });
   }
+
+  test('a drawer removed while it animates leaves no waiter behind', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+
+    el('[data-test-open]').click();
+    await nextFrame();
+    assert.true(hasPendingWaiters(), 'the animation is registered');
+
+    state.shown = false;
+    await within(settled(), 'settled()');
+    assert.dom('[data-test-outer]').doesNotExist();
+    assert.false(hasPendingWaiters());
+  });
+
+  test('a run that is retargeted halfway leaves no waiter behind', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+
+    el('[data-test-open]').click();
+    await nextFrame();
+    await nextFrame();
+    assert.true(hasPendingWaiters(), 'still opening');
+
+    await within(closeDrawer(), 'closeDrawer');
+    assert.false(hasPendingWaiters());
+    assert.true(near(openOffset('bottom'), 0), 'at rest, closed');
+    assert.dom('[data-test-outer]').hasAttribute('data-closed');
+  });
 
   test('dragDrawer catches a moving drawer', async function (assert) {
     const state = new State();
