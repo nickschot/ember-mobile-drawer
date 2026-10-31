@@ -92,11 +92,15 @@ By default the drawer is modal (`@modal={{true}}`), like a dialog. While it is o
 
 - focus moves into it: to the first element with `autofocus`, else the first focusable element, else the tray itself;
 - Tab and Shift+Tab stay inside the drawer, wrapping around at the ends;
-- the rest of the page is [`inert`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert): the siblings of the drawer and of each of its ancestors, up to `<body>`. You can render the drawer anywhere, but render popovers and menus that belong to its content inside the drawer, not elsewhere in `<body>`, or they become inert too. Elements added to the page after the drawer opened are not made inert;
+- the rest of the page is [`inert`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert): the siblings of the drawer and of each of its ancestors, up to `<body>` (see the limits below);
 - the page doesn't scroll. On iOS the body is fixed in place at its scroll position, which is restored on close;
-- Escape closes it, like `close()` (so through `@onSnapPointChange` when `@activeSnapPoint` is set).
+- Escape closes it, like `close()` (so through `@onSnapPointChange` when `@activeSnapPoint` is set). Not while the drawer is being dragged: the release decides where it goes.
 
-When it closes, focus returns to the element that had it when the drawer opened. Several modal drawers can be open at once: the inert page and the scroll lock last until the last one closes, and Escape closes the top one.
+When it closes, focus returns to the element that had it when the drawer opened. If that element is no longer on the page (for example, the drawer deleted the list item it was opened from), focus goes to the first focusable element in the nearest of its former ancestors that is still on the page, but not all the way up to `<body>`; if there is none, focus stays where the browser puts it. Move focus yourself after the close if you want it somewhere else.
+
+Several modal drawers can be open at once: the inert page and the scroll lock last until the last one closes, and Escape closes the top one. A modal drawer inside another drawer is only modal while the outer drawer is open: if your app closes the outer one first, the page is usable again, and focus returns to the outer drawer's trigger.
+
+The drawer only removes the `inert` attributes it added. An element that was already inert when the drawer opened, or on which your app sets or removes `inert` while the drawer is open, is left to your app.
 
 The root gets `role="dialog"`, and `aria-modal="true"` while open. Give it a name with `aria-labelledby` (pointing at a heading in the drawer) or `aria-label`; a modal drawer without one logs a warning in development. A closed drawer is hidden (`visibility: hidden`), also from assistive technology.
 
@@ -109,6 +113,13 @@ With `@modal={{false}}` the drawer doesn't move focus, trap it, make the page in
 ```
 
 A modal drawer with a smallest snap point above `0` is only modal above its peek.
+
+Limits of modal drawers:
+
+- **Content rendered elsewhere becomes inert.** Popovers, dropdowns and menus that belong to the drawer's content must be rendered inside the drawer. Addons that render into a `<body>`-level element (a "wormhole" or portal, such as ember-basic-dropdown and ember-power-select) put their content next to the drawer, where it is inert and can't be clicked. Render them in place (`@renderInPlace={{true}}` for ember-basic-dropdown and ember-power-select). Elements added to `<body>` after the drawer opened are not made inert.
+- **The scroll lock assumes the document scrolls.** It sets `overflow: hidden` on `<html>`. If your app scrolls inside `<body>` or a wrapper element instead (common in app-like layouts), that element keeps scrolling; lock it yourself while the drawer is open. Fixed-position page elements are not adjusted for the scrollbar that disappears.
+- **Content below the visible part of a partly open drawer.** At a snap point below the highest one, Tab can move focus to elements that are off screen. Give keyboard users a way to expand the drawer (for example, open it to its highest snap point when it is opened with the keyboard). See [#83](https://github.com/nickschot/ember-mobile-drawer/issues/83).
+- **Safari doesn't focus buttons on click**, so after opening a drawer with a mouse or touch there, no element gets focus back on close.
 
 Animations respect `prefers-reduced-motion`: with reduced motion the drawer jumps to its snap point instead of animating.
 
