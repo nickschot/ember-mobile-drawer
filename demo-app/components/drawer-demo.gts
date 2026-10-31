@@ -6,29 +6,20 @@ import { htmlSafe } from '@ember/template';
 import type Owner from '@ember/owner';
 import { MobileDrawer, type Placement, type SnapPoint } from '#src/index.ts';
 import { formatSnapPoints, parseSnapPoints } from '../lib/parse-snap-points.ts';
-
-const PLACEMENTS: Placement[] = ['bottom', 'top', 'left', 'right'];
-
-const SNAP_POINT_PRESETS: { label: string; snapPoints: SnapPoint[] }[] = [
-  { label: "0, '50%', '100%'", snapPoints: [0, '50%', '100%'] },
-  { label: "0, 'content'", snapPoints: [0, 'content'] },
-  { label: "0, 120, 'content', '90%'", snapPoints: [0, 120, 'content', '90%'] },
-];
-
-/** The `preset` value of snap points typed into the text field. */
-const CUSTOM = -1;
-
-/** Default of `--mobile-drawer-backdrop-opacity` in the base styles. */
-const DEFAULT_BACKDROP_OPACITY = 0.4;
+import {
+  CUSTOM,
+  DEFAULT_BACKDROP_OPACITY,
+  PLACEMENTS,
+  SNAP_POINT_PRESETS,
+  isPlacement,
+  parsePlaygroundParams,
+} from '../lib/parse-playground-params.ts';
 
 /** Lines of filler for trying out scrolling inside the drawer. */
 const TALL_CONTENT = Array.from(
   { length: 40 },
   (_, index) => `Line ${index + 1} of the tall content`,
 );
-
-const isPlacement = (value: unknown): value is Placement =>
-  PLACEMENTS.includes(value as Placement);
 
 /**
  * The playground: every control here changes an argument of the drawer (or,
@@ -40,35 +31,37 @@ const isPlacement = (value: unknown): value is Placement =>
  * `/?points=0,200,'content'&snap=2&backdrop=0.6`, which is handy for
  * screenshots.
  */
-export default class DrawerDemo extends Component {
-  @tracked placement: Placement = 'bottom';
-  @tracked preset = 0;
-  @tracked snapPoints: SnapPoint[] = SNAP_POINT_PRESETS[0]!.snapPoints;
-  @tracked snapPointsText = formatSnapPoints(this.snapPoints);
-  @tracked snapPointsError?: string;
-  @tracked active = 0;
-  @tracked handleOnly = false;
-  @tracked tall = false;
-  @tracked backdropOpacity = DEFAULT_BACKDROP_OPACITY;
+export default class DrawerDemo extends Component<{
+  Args: {
+    /** The query string to start from. Defaults to the page's own. */
+    search?: string;
+  };
+}> {
+  // The constructor runs during rendering, so each field is assigned exactly
+  // once, from a state parsed up front: reading a tracked field and then
+  // writing it there fails Ember's tracking assertion in development.
+  @tracked placement: Placement;
+  @tracked preset: number;
+  @tracked snapPoints: SnapPoint[];
+  @tracked snapPointsText: string;
+  @tracked snapPointsError: string | undefined;
+  @tracked active: number;
+  @tracked handleOnly: boolean;
+  @tracked tall: boolean;
+  @tracked backdropOpacity: number;
 
-  constructor(owner: Owner, args: object) {
+  constructor(owner: Owner, args: DrawerDemo['args']) {
     super(owner, args);
-    const params = new URLSearchParams(window.location.search);
-    const placement = params.get('placement');
-    if (isPlacement(placement)) this.placement = placement;
-    // The constructor runs during rendering, where reading `active` and then
-    // writing it fails Ember's tracking assertion. It is still 0 here, so the
-    // presets don't need to clamp it.
-    const preset = Number(params.get('preset'));
-    if (SNAP_POINT_PRESETS[preset]) this.selectPreset(preset, false);
-    const points = params.get('points');
-    if (points !== null) this.setSnapPointsText(points, false);
-    const snap = Number(params.get('snap'));
-    if (snap >= 0 && snap < this.snapPoints.length) this.active = snap;
-    this.handleOnly = params.get('handle') === '1';
-    this.tall = params.get('tall') === '1';
-    const backdrop = Number(params.get('backdrop') ?? NaN);
-    if (backdrop >= 0 && backdrop <= 1) this.backdropOpacity = backdrop;
+    const state = parsePlaygroundParams(args.search ?? window.location.search);
+    this.placement = state.placement;
+    this.preset = state.preset;
+    this.snapPoints = state.snapPoints;
+    this.snapPointsText = state.snapPointsText;
+    this.snapPointsError = state.snapPointsError;
+    this.active = state.active;
+    this.handleOnly = state.handleOnly;
+    this.tall = state.tall;
+    this.backdropOpacity = state.backdropOpacity;
   }
 
   get snapPointButtons() {
@@ -111,20 +104,19 @@ export default class DrawerDemo extends Component {
     return lines.join('\n');
   }
 
-  selectPreset(preset: number, clampActive = true) {
+  selectPreset(preset: number) {
     this.preset = preset;
     this.snapPoints = SNAP_POINT_PRESETS[preset]!.snapPoints;
     this.snapPointsText = formatSnapPoints(this.snapPoints);
     this.snapPointsError = undefined;
-    if (clampActive)
-      this.active = Math.min(this.active, this.snapPoints.length - 1);
+    this.active = Math.min(this.active, this.snapPoints.length - 1);
   }
 
   /**
    * Applies typed snap points once they parse. While they don't, the drawer
    * keeps the last valid ones and the error is shown under the field.
    */
-  setSnapPointsText(text: string, clampActive = true) {
+  setSnapPointsText(text: string) {
     this.snapPointsText = text;
     const result = parseSnapPoints(text);
     if (result.error !== undefined) {
@@ -137,8 +129,7 @@ export default class DrawerDemo extends Component {
     this.preset = SNAP_POINT_PRESETS.findIndex(
       (preset) => formatSnapPoints(preset.snapPoints) === formatted,
     );
-    if (clampActive)
-      this.active = Math.min(this.active, this.snapPoints.length - 1);
+    this.active = Math.min(this.active, this.snapPoints.length - 1);
   }
 
   setPlacement = (event: Event) => {
