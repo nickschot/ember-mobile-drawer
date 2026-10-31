@@ -196,6 +196,22 @@ section > h2 {
   width: 2.5rem;
   height: 0.3rem;
   margin: 0 auto 0.75rem;
+  position: relative;
+}
+
+/*
+ * The grabber element is the touch target; the visible bar is drawn by
+ * ::before so it keeps its own size and rounded ends however big the target
+ * grows.
+ */
+.demo-grabber::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2.5rem;
+  height: 0.3rem;
+  transform: translate(-50%, -50%);
   border-radius: 999px;
   background: color-mix(in srgb, currentcolor 25%, transparent);
 }
@@ -214,6 +230,12 @@ section > h2 {
   transform: translateY(-50%);
 }
 
+.demo-grabber[data-placement="left"]::before,
+.demo-grabber[data-placement="right"]::before {
+  width: 0.3rem;
+  height: 2.5rem;
+}
+
 .demo-grabber[data-placement="left"] {
   right: 0.4rem;
 }
@@ -225,7 +247,6 @@ section > h2 {
 /* A bigger target when it is the only place to drag from. */
 .demo-grabber[data-active] {
   padding: 0.6rem 0;
-  background-clip: content-box;
 }
 
 .demo-grabber[data-active][data-placement="left"],
