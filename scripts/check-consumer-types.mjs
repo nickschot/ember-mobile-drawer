@@ -5,7 +5,8 @@
 //   @glimmer/component and @glint/template, the optional peer dependency) from
 //   this repository's node_modules, so no network access is needed,
 // - runs `tsc` with `skipLibCheck: false` on a file that imports the root
-//   exports, the component and the template registry.
+//   exports, the component, the template registry and the test-support
+//   helpers.
 // It runs under `moduleResolution: bundler`, the resolution the package
 // supports (see "TypeScript" in README.md).
 import { execFileSync } from 'node:child_process';
@@ -35,12 +36,22 @@ const consumerSource = `
 import {
   MobileDrawer,
   type MobileDrawerApi,
+  type MobileDrawerDragEndEvent,
+  type MobileDrawerDragStartEvent,
   type MobileDrawerSignature,
+  type MobileDrawerToggleEvent,
   type Placement,
   type SnapPoint,
 } from '${pkg}';
 import MobileDrawerComponent from '${pkg}/components/mobile-drawer';
 import type Registry from '${pkg}/template-registry';
+import {
+  closeDrawer,
+  dragDrawer,
+  openDrawer,
+  type DragDrawerOptions,
+  type DrawerTarget,
+} from '${pkg}/test-support';
 
 export const sameComponent: typeof MobileDrawer = MobileDrawerComponent;
 export const registered: Registry['MobileDrawer'] = MobileDrawerComponent;
@@ -52,7 +63,24 @@ export const args: MobileDrawerSignature['Args'] = {
   snapPoints,
   activeSnapPoint: 1,
   onSnapPointChange: (index: number) => void index,
+  onOpen: ({ snapPoint }: MobileDrawerToggleEvent) => void snapPoint,
+  onClose: ({ snapPoint }: MobileDrawerToggleEvent) => void snapPoint,
+  onDragStart: ({ snapPoint, offset }: MobileDrawerDragStartEvent) =>
+    void (snapPoint + offset),
+  onDragEnd: ({ snapPoint, offset, velocity }: MobileDrawerDragEndEvent) =>
+    void (snapPoint + offset + velocity),
 };
+
+export async function useTestSupport(element: Element): Promise<void> {
+  const target: DrawerTarget = element;
+  const options: DragDrawerOptions = { to: 1, velocity: 500 };
+  await openDrawer();
+  await closeDrawer(target);
+  await dragDrawer('.mobile-drawer', options);
+  await dragDrawer(target, { distance: -40 });
+  // @ts-expect-error either \`to\` or \`distance\`, not both
+  await dragDrawer(target, { to: 1, distance: 40 });
+}
 
 export function useApi(api: MobileDrawerApi): number {
   api.open();
@@ -180,5 +208,5 @@ if (failed) {
 }
 
 console.log(
-  `Consumer types OK: the packed package type-checks under moduleResolution bundler with skipLibCheck false (root exports, components/mobile-drawer, template-registry; ignored ${ignored} errors in other packages' declarations).`,
+  `Consumer types OK: the packed package type-checks under moduleResolution bundler with skipLibCheck false (root exports, components/mobile-drawer, template-registry, test-support; ignored ${ignored} errors in other packages' declarations).`,
 );

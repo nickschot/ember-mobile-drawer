@@ -8,6 +8,7 @@ import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 import { DECISION_SLOP } from '#src/-private/gesture/drag-source.ts';
+import { TouchPointer } from '#src/-private/gesture/touch-pointer.ts';
 import '#src/styles.css';
 
 type Placement = 'bottom' | 'top' | 'left' | 'right';
@@ -103,7 +104,8 @@ const STEP = 4;
 
 /**
  * A one-finger gesture on `target`, as a browser sends it for touch input:
- * pointer events and touch events, `steps` moves of 4 screen px each in
+ * pointer events and touch events (through `TouchPointer`, which
+ * `dragDrawer` from test-support uses too), `steps` moves of 4 screen px each in
  * `direction`, after the moves in `path` (screen px) and `sideways` moves
  * across it. `during(step)` runs after each move. With `outside`, another
  * finger rests outside the drawer the whole time. Unlike `pan()`, events are
@@ -136,51 +138,16 @@ async function gesture(
     2;
   if (options.start) ({ x, y } = options.start);
   const before = rect;
-  const pointerId = 1;
-
-  const touchAt = () =>
-    new Touch({ identifier: pointerId, target, clientX: x, clientY: y });
-  // Another finger resting on the page outside the drawer, listed first.
-  const outside = options.outside
-    ? [
-        new Touch({
-          identifier: 9,
-          target: document.body,
-          clientX: 1,
-          clientY: 1,
-        }),
-      ]
-    : [];
-  const pointer = (type: string) =>
-    target.dispatchEvent(
-      new PointerEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        pointerId,
-        pointerType: 'touch',
-        isPrimary: true,
-        clientX: x,
-        clientY: y,
-      }),
-    );
-  const touch = (type: string, down: boolean) => {
-    const event = new TouchEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      touches: down ? [...outside, touchAt()] : outside,
-      targetTouches: down ? [touchAt()] : [],
-      changedTouches: [touchAt()],
-    });
-    target.dispatchEvent(event);
-    return event.defaultPrevented;
-  };
+  const finger = new TouchPointer(target, x, y, {
+    // Another finger resting on the page outside the drawer, listed first.
+    resting: options.outside
+      ? [{ identifier: 9, target: document.body, x: 1, y: 1 }]
+      : [],
+  });
 
   const prevented: boolean[] = [];
   const move = (dx: number, dy: number) => {
-    x += dx;
-    y += dy;
-    pointer('pointermove');
-    prevented.push(touch('touchmove', true));
+    prevented.push(finger.move(dx, dy));
   };
   const delta = (d: Direction): [number, number] =>
     ({
@@ -192,8 +159,7 @@ async function gesture(
   const across = (d: Direction): [number, number] =>
     d === 'up' || d === 'down' ? [STEP, 0] : [0, STEP];
 
-  pointer('pointerdown');
-  touch('touchstart', true);
+  finger.down();
   for (const [dx, dy] of options.path ?? []) move(dx, dy);
   for (let i = 0; i < (options.sideways ?? 0); i++) move(...across(direction));
   let step = 0;
@@ -217,8 +183,7 @@ async function gesture(
     dragging: el('[data-test-dragging]').textContent === 'true',
     prevented,
   };
-  pointer('pointerup');
-  touch('touchend', false);
+  finger.up();
   await settled();
   return result;
 }

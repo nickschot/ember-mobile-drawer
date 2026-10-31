@@ -41,6 +41,7 @@ export default {
     addon.publicEntrypoints([
       'index.js',
       'template-registry.js',
+      'test-support.js',
       'components/**/*.js',
     ]),
 
