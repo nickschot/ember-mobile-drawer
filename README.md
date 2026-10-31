@@ -257,7 +257,7 @@ Customise it with CSS custom properties, set on `:root`, any ancestor or the dra
 | `--mobile-drawer-radius`           | `0`            | Radius of the tray corners away from its edge   |
 | `--mobile-drawer-shadow`           | subtle shadow  | Tray `box-shadow`                               |
 | `--mobile-drawer-backdrop-color`   | `rgb(0 0 0)`   | Backdrop colour                                 |
-| `--mobile-drawer-backdrop-opacity` | `0.4`          | Backdrop opacity when the drawer is fully open  |
+| `--mobile-drawer-backdrop-opacity` | `0.4`          | Backdrop opacity when the drawer is fully open, a number from 0 to 1 |
 | `--mobile-drawer-z-index`          | `1000`         | Stacking order of the drawer overlay            |
 
 The base styles are easy to override. Every selector is wrapped in `:where()` (zero specificity), and the whole file lives in the `ember-mobile-drawer` cascade layer.
@@ -309,10 +309,14 @@ Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
 
 iOS 26 Safari doesn't let fixed elements paint under the status bar or the floating toolbar. Instead, it fills each bar with a colour that it takes from the fixed element at that edge of the screen. The base styles have an iOS-only rule (in `@supports (-webkit-touch-callout: none)`) that gives Safari the right colours:
 
-- The bars dim with the backdrop. The backdrop fades with `filter: opacity()` over a background that has the max opacity as its alpha, instead of with `opacity`, so that Safari sees the dimmed colour from the first frame. Safari keeps that colour while the drawer is open, so the bars show the backdrop at its max opacity also at a lower snap point.
-- A bar that the sheet touches takes the sheet's background. For this the tray is `position: fixed` and the root has `contain: layout`, so the tray still sits in the root, also in an embedded drawer. A tray with a `backdrop-filter`, such as the iOS theme's glass, gets Safari's own material under the bar.
+- The bars dim with the backdrop. The backdrop fades with `filter: opacity()` over a background that has the max opacity as its alpha, instead of with `opacity`, so that Safari sees the dimmed colour from the first frame.
+- Safari keeps that colour until the drawer is closed (`data-closed`), not only while it is open. So the bars show the backdrop at its max opacity also at a lower snap point, while a drawer with a backdrop rests at a peek, and during the close animation. When the drawer comes to rest closed, the bars change to the page colour in one step. Safari's hit test ignores `pointer-events`, so the backdrop's `pointer-events: none` at the smallest snap point doesn't change this.
+- A bar that the sheet touches takes the sheet's background. For this the tray is `position: fixed` and the root has `contain: layout`, so the tray still sits in the root, also in an embedded drawer.
+- A tray with a `backdrop-filter` gets Safari's own material under the bar. So the glass sheet of the [iOS theme](#ios-theme) still stops at the floating toolbar with a visible edge below its highest snap point.
 
-Content stays between the bars, so the safe-area padding doesn't change. Other browsers don't get this rule. On iOS, an app that sets `opacity` on the backdrop multiplies it with the fade.
+On iOS, set the backdrop's colour and max opacity only with `--mobile-drawer-backdrop-color` and `--mobile-drawer-backdrop-opacity` (a number from 0 to 1). The base background holds the max opacity as its alpha and `opacity` is `1`, so an app's own `background` on the backdrop shows at full strength there, and an app's `opacity` on the backdrop multiplies with the fade.
+
+Content stays between the bars, so the safe-area padding doesn't change. Other browsers don't get this rule.
 
 ### iOS theme
 

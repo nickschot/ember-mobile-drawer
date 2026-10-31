@@ -792,4 +792,29 @@ module('Integration | styles.css', function (hooks) {
       style.remove();
     }
   });
+
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: the iOS bar rules keep the tray box of a full-screen drawer`, async function (assert) {
+      await renderDrawer(placement);
+      const tray = el('[data-test-tray]');
+      tray.style.transform = 'none';
+      const box = () => {
+        const { top, right, bottom, left } = tray.getBoundingClientRect();
+        return { top, right, bottom, left };
+      };
+      const before = box();
+      assert.strictEqual(getComputedStyle(tray).position, 'absolute');
+
+      const inner = Array.from(iosEdgesRule().cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+      try {
+        assert.strictEqual(getComputedStyle(tray).position, 'fixed');
+        assert.deepEqual(box(), before, 'the same box with the iOS rules');
+      } finally {
+        style.remove();
+      }
+    });
+  }
 });

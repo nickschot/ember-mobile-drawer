@@ -70,8 +70,14 @@
  *                           On iOS the same fade uses a different mechanism
  *                           (see "Safari 26 bars" below): the background
  *                           has the max opacity as its alpha, `opacity` is 1
- *                           and `filter: opacity(--mobile-drawer-progress)`
- *                           fades it. The result looks the same.
+ *                           and
+ *                           `filter: opacity(var(--mobile-drawer-progress))`
+ *                           fades it. The result looks the same. On iOS, set
+ *                           the backdrop's colour and max opacity only with
+ *                           the custom properties below: an app's own
+ *                           `background` on the backdrop shows there at full
+ *                           strength (times the progress), without the max
+ *                           opacity.
  * .mobile-drawer__tray      The sheet and scroll container. The component
  *                           writes an inline `touch-action` on it to decide
  *                           between scrolling and dragging (see the README);
@@ -154,7 +160,8 @@
  *                                     away from its edge   (0)
  *   --mobile-drawer-shadow            tray box-shadow      (subtle shadow)
  *   --mobile-drawer-backdrop-color    backdrop colour      (black)
- *   --mobile-drawer-backdrop-opacity  backdrop max opacity (0.4)
+ *   --mobile-drawer-backdrop-opacity  backdrop max opacity, a number
+ *                                     from 0 to 1          (0.4)
  *   --mobile-drawer-z-index           root z-index         (1000)
  *
  * Defaults are given as var() fallbacks rather than declared on the root, so
@@ -173,17 +180,28 @@
  * status bar and the floating toolbar, also with negative insets. It fills
  * the bars with a colour that it samples from the fixed element at each edge
  * (WebKit's `LocalFrameView::fixedContainerEdges`). For a full-viewport layer
- * it keeps the first colour it finds until the drawer closes. A rule in an
+ * it keeps the first colour it finds until no fixed element is at that edge
+ * any more, i.e. until [data-closed] hides the drawer. A rule in an
  * `@supports (-webkit-touch-callout: none)` block (iOS WebKit only) makes
  * that colour right:
  *   - the backdrop fades with `filter: opacity()` instead of `opacity`, so
  *     Safari sees the dimmed colour from the first frame. The bars then show
- *     the backdrop at its max opacity for as long as the drawer is open,
- *     also at a lower snap point.
+ *     the backdrop at its max opacity until the drawer is closed
+ *     ([data-closed]): also at a lower snap point, while a drawer with a
+ *     backdrop rests at a peek, and during the close animation, after which
+ *     the bars change to the page colour in one step. Safari's hit test
+ *     ignores `pointer-events`, so the inline `pointer-events: none` at the
+ *     smallest snap point doesn't change this.
+ *   - set the backdrop's colour and max opacity only with
+ *     `--mobile-drawer-backdrop-color` and `--mobile-drawer-backdrop-opacity`.
+ *     The base `background` holds the max opacity as its alpha and `opacity`
+ *     is 1, so an app's own `background` on the backdrop shows at full
+ *     strength.
  *   - the tray is `position: fixed` (inside the root, which gets
  *     `contain: layout`), so a bar that the sheet touches takes the sheet's
  *     background. A tray with a backdrop-filter (e.g. the iOS theme's glass)
- *     gets Safari's own material there.
+ *     gets Safari's own material there, so such a sheet still stops at the
+ *     floating toolbar with a visible edge.
  * Content can't paint under the bars, so the safe-area padding above is
  * still correct. Other browsers don't get these rules.
  *
