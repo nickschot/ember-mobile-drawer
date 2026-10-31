@@ -1212,9 +1212,57 @@ module(
       return distance;
     };
 
+    /** Screen px per drawer px: the test container may be scaled. */
+    const screenScale = () =>
+      tray().getBoundingClientRect().height / tray().offsetHeight;
+
+    /** How far (drawer px) the tray is open, as shown. */
+    const openOffset = (placement: 'bottom' | 'top') => {
+      const container = el('[data-test-container]').getBoundingClientRect();
+      const rect = tray().getBoundingClientRect();
+      const shown =
+        placement === 'bottom'
+          ? container.bottom - rect.top
+          : rect.bottom - container.top;
+      return Math.round(shown / screenScale());
+    };
+
+    /**
+     * Runs the animation and checks that the scroll position goes from
+     * `distance` to the start in small steps, only towards the start.
+     */
+    const assertSmoothReset = (
+      assert: Assert,
+      placement: Placement,
+      distance: number,
+    ) => {
+      const positions = [distance];
+      while (clock.pendingFrames > 0) {
+        clock.frame();
+        positions.push(fromStart(placement));
+      }
+      const steps = positions
+        .slice(1)
+        .map((position, i) => positions[i]! - position);
+      const largest = Math.max(...steps);
+      assert.true(
+        steps[0]! <= distance * 0.1,
+        `the first frame moves a little (${steps[0]} of ${distance})`,
+      );
+      assert.true(
+        largest <= distance * 0.15,
+        `no frame jumps (largest step ${largest} of ${distance})`,
+      );
+      assert.true(
+        steps.every((step) => step >= 0),
+        'only moves towards the start',
+      );
+      assert.strictEqual(positions[positions.length - 1], 0, 'at the start');
+    };
+
     for (const placement of ['bottom', 'top'] as const) {
       test(`${placement}: the drawer starts at its content start`, async function (assert) {
-        for (const active of [0, 1, 2]) {
+        for (const active of [0, 1]) {
           const state = new State();
           state.placement = placement;
           state.active = active;
@@ -1225,6 +1273,14 @@ module(
             `at snap point ${active}`,
           );
         }
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        assert.strictEqual(
+          tray().scrollTop,
+          0,
+          'at the highest snap point: scrollTop 0',
+        );
       });
 
       test(`${placement}: scrolled at the highest snap point, a close resets once closed and the drawer reopens at the content start`, async function (assert) {
@@ -1251,7 +1307,11 @@ module(
         state.active = 2;
         await settled();
         clock.runUntilIdle();
-        assert.strictEqual(fromStart(placement), 0, 'reopens at the start');
+        assert.strictEqual(
+          tray().scrollTop,
+          0,
+          'reopens at the highest snap point at scrollTop 0',
+        );
 
         scrollAway(assert, placement);
         state.active = 0;
@@ -1353,7 +1413,136 @@ module(
         clock.runUntilIdle();
         assert.strictEqual(fromStart(placement), 0, 'at the start');
       });
+
+      for (const [name, offset] of [
+        ['below', 150],
+        ['just above', 210],
+      ] as const) {
+        test(`${placement}: with @handleOnly, a release ${name} the partial snap point resets without a jump`, async function (assert) {
+          const state = new State();
+          state.placement = placement;
+          state.handleOnly = true;
+          await renderDrawer(state);
+          const distance = scrollAway(assert, placement);
+
+          // Drag the handle from fully open (600) to `offset`, released
+          // without speed: the drawer settles at 200. The drag starts once
+          // the finger has moved past didPan's threshold, so the tray lags
+          // the finger by that much (3 steps).
+          const steps = Math.round(((600 - offset) * screenScale()) / STEP) + 3;
+          await gesture(el('[data-test-handle]'), CLOSING[placement], steps);
+          assert.true(
+            Math.abs(openOffset(placement) - offset) <= 4,
+            `released at ${openOffset(placement)}`,
+          );
+          assert.deepEqual(state.changes, [1], 'towards the partial point');
+          assert.strictEqual(fromStart(placement), distance, 'not yet');
+          assertSmoothReset(assert, placement, distance);
+        });
+      }
+
+      test(`${placement}: a sheet caught while closing and released below the partial snap point resets without a jump`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        const distance = scrollAway(assert, placement);
+
+        state.active = 0;
+        await settled();
+        while (openOffset(placement) > 160) clock.frame();
+        assert.strictEqual(
+          fromStart(placement),
+          distance,
+          'kept while closing',
+        );
+
+        // A touch holds the sheet; a small drag towards open, released
+        // without speed below 200: it settles at 200, above where it is.
+        const result = await gesture(
+          el('[data-test-content]'),
+          OPENING[placement],
+          4,
+        );
+        assert.true(result.dragging, 'caught and dragged');
+        assert.true(openOffset(placement) < 190, `at ${openOffset(placement)}`);
+        assert.deepEqual(state.changes, [1], 'towards the partial point');
+        assert.strictEqual(fromStart(placement), distance, 'not yet');
+        assertSmoothReset(assert, placement, distance);
+      });
+
+      test(`${placement}: a move up from a lower snap point to the highest keeps the scroll position`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        const position = tray().scrollTop;
+        state.active = 2;
+        await settled();
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, position);
+      });
     }
+
+    test('top: at the highest snap point the content starts at scrollTop 0, and a move lower scrolls to the end with the tray', async function (assert) {
+      const state = new State();
+      state.placement = 'top';
+      state.active = 0;
+      await renderDrawer(state);
+      state.active = 2;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'opens at scrollTop 0');
+
+      state.active = 1;
+      await settled();
+      const end = scrollStart(tray(), 'top');
+      const positions: number[] = [];
+      while (clock.pendingFrames > 0) {
+        clock.frame();
+        positions.push(tray().scrollTop);
+      }
+      assert.true(
+        positions.some((position) => position > 0 && position < end),
+        'moves with the tray',
+      );
+      assert.strictEqual(positions[positions.length - 1], end, 'at the end');
+    });
+
+    test('a resize below the highest snap point keeps the scroll position while focus is in the tray', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const input = document.createElement('input');
+      el('.mobile-drawer__content').append(input);
+      input.focus();
+      // As the browser does to show the focused field.
+      tray().scrollTop = 100;
+
+      state.contentSize = 1100;
+      await settled();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 100, 'kept while focused');
+
+      input.blur();
+      state.contentSize = 1200;
+      await settled();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'reset without focus');
+      input.remove();
+    });
+
+    test('the reset is not slowed down by scroll-behavior: smooth', async function (assert) {
+      drawerEnvironment.prefersReducedMotion = () => true;
+      const state = new State();
+      await renderDrawer(state);
+      tray().style.scrollBehavior = 'smooth';
+      tray().scrollTo({ top: 300, behavior: 'instant' });
+      state.active = 1;
+      await settled();
+      assert.strictEqual(tray().scrollTop, 0, 'at the start at once');
+    });
 
     test('top: a partial snap point shows the content end at the leading edge', async function (assert) {
       const state = new State();

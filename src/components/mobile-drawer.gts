@@ -135,6 +135,22 @@ interface Drag {
   offset: number;
 }
 
+/** A scroll reset of the tray, see `#planScrollReset`. */
+interface ScrollReset {
+  /** `scrollTop` of the scroll start. */
+  start: number;
+  /** Which way `scrollTop` moves away from the start. */
+  sign: 1 | -1;
+  /** How far (px) the tray was from its scroll start when planned. */
+  distance: number;
+  /** Offset (px open) the tray was at when planned. */
+  from: number;
+  /** Offset of the run's target. */
+  target: number;
+  /** The part of `distance` left, as last written. */
+  fraction: number;
+}
+
 interface PendingState {
   isAnimating?: boolean;
   isDragging?: boolean;
@@ -293,8 +309,9 @@ const clampIndex = (index: number, count: number) =>
  * and swipes along the axis on it are cancelled there without dragging
  * (see `#onTrayTouchMove`), so the page behind doesn't scroll instead.
  * When a bottom or top drawer leaves its highest snap point, its tray
- * scrolls back to its scroll start, the content start at the leading edge
- * (see `#planScrollReset`).
+ * scrolls back to its scroll start, the content start at the leading edge;
+ * at the highest snap point it opens at `scrollTop` 0 (see
+ * `#planScrollReset`).
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
@@ -376,17 +393,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #atTop = false;
   /**
-   * The tray's scroll reset of the current run to a snap point below the
-   * highest one, see `#planScrollReset`. `distance` is how far the tray was
-   * from its scroll start when the run started, `from` the offset it
-   * started at, `fraction` the part of `distance` that is left.
+   * A scroll reset that follows the tray in `#render`, see
+   * `#planScrollReset`.
    */
-  #scrollReset?: {
-    distance: number;
-    from: number;
-    target: number;
-    fraction: number;
-  };
+  #scrollReset?: ScrollReset;
+  /** The spring of a scroll reset that runs on its own, if any. */
+  #scrollSpring?: Spring;
   /**
    * The elements whose scrolling along the axis is locked, with the inline
    * value of the overflow property they had before. See `#syncScrollLock`.
@@ -602,6 +614,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#endBackdropPointer();
       this.#resizeObserver?.disconnect();
       this.#spring?.stop();
+      this.#stopScrollReset();
       this.#syncScrollLock();
     },
   };
@@ -686,13 +699,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#markExpanded(target);
 
     if (!animate) {
-      // A jump (setup, a new placement): the content starts at its start,
-      // also at the highest snap point.
-      this.#scrollReset = undefined;
+      // A jump (setup, a new placement): the content starts where it starts
+      // at the target, see `#scrollToStart`.
       spring.stop();
       spring.set(target, 0);
       this.#render(target);
-      this.#setScrollDistance(0);
+      this.#scrollToStart(target);
       this.#queueState({ isAnimating: false });
       return;
     }
@@ -727,85 +739,142 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Plans the scroll reset for a run to `target`: below the highest snap
-   * point the tray of a vertical drawer goes back to its scroll start (see
-   * `#scrollDistance`), so the content start is at the leading edge there,
-   * where the content can't be scrolled. Nothing changes at the highest
-   * snap point, and for left and right drawers, whose tray isn't sized by
-   * the snap point along its scroll axis.
+   * point the tray of a vertical drawer goes back to its scroll start (the
+   * content start at the leading edge: `scrollTop` 0 for a bottom drawer,
+   * the end of the scroll range for a top drawer, whose leading edge is its
+   * bottom), where the content can't be scrolled. At the highest snap point
+   * the content starts at `scrollTop` 0 for every placement, so the tray
+   * is put there when it opens from closed to the highest snap point; a
+   * move up from a lower snap point keeps the position. Nothing changes
+   * for left and right drawers, whose tray isn't sized by the snap point
+   * along its scroll axis.
    *
-   * The reset follows the run in `#render`, so the content doesn't jump:
-   * - towards a lower open snap point, the scroll position moves to the
-   *   start in step with the tray, reaching it when the tray reaches the
-   *   target (and never moving back, also when the spring overshoots). With
-   *   reduced motion the run ends at once, and so does the reset;
+   * The reset never jumps while the tray shows:
    * - towards closed (offset `0`), it waits until the tray is closed, when
    *   nothing of it shows, so a closing sheet keeps its content in place;
-   * - when the tray is already at or below the target (it opens from
-   *   closed, or moves up between lower snap points), at once: the content
-   *   is already at its start there, or the tray is hidden.
-   * A drag doesn't reset the scroll position; its release plans a new run.
-   * A drag down from the top of a bottom drawer only starts when the tray
-   * is at its scroll start anyway (see `shouldDrag`); one with `@handleOnly`
-   * may start anywhere, and resets on its release.
+   * - when the tray is hidden (closed), at once;
+   * - when the tray has at least as far to go as the content (`span >=
+   *   distance`, up or down), in step with the tray in `#render`: the
+   *   content reaches its start when the tray reaches the target and never
+   *   moves faster than the tray, or back when the spring overshoots;
+   * - otherwise (the tray is near its target, e.g. released just past it,
+   *   or caught while closing and released below it), on a spring of its
+   *   own with the drawer's spring settings, from rest: it eases in, so no
+   *   frame moves the content far.
+   * With reduced motion both springs end at once, and so does the reset.
+   *
+   * Reads layout only here, so the render loop only writes. A drag or a
+   * touch that holds the drawer stops the reset where it is; the release
+   * plans a new one. A drag down from the top of a bottom drawer only
+   * starts when the tray is at its scroll start anyway (see `shouldDrag`);
+   * one with `@handleOnly` may start anywhere, and resets after its release.
    */
   #planScrollReset(target: number): void {
-    const layout = this.#layout!;
-    if (this.axis !== 'vertical' || target >= layout.maxOffset - EPSILON) {
-      this.#scrollReset = undefined;
+    this.#stopScrollReset();
+    if (this.axis !== 'vertical') return;
+    if (this.#isHighest(target)) {
+      // Opening from closed: start at the content start. A move up from a
+      // lower snap point keeps the position, so nothing jumps.
+      if (this.#renderedOffset <= EPSILON) this.#scrollToStart(target);
       return;
     }
-    this.#scrollReset = {
-      distance: this.#scrollDistance(),
-      from: this.#renderedOffset,
+    const tray = this.#tray!;
+    const top = this.placement === 'top';
+    const start = top ? Math.max(0, tray.scrollHeight - tray.clientHeight) : 0;
+    const distance = Math.abs(tray.scrollTop - start);
+    const open = this.#renderedOffset;
+    const reset: ScrollReset = {
+      start,
+      sign: top ? -1 : 1,
+      distance,
+      from: open,
       target,
       fraction: 1,
     };
-    this.#applyScrollReset(this.#renderedOffset);
+    if (distance <= EPSILON || open <= EPSILON) {
+      // Nothing (much) to do, or nothing of the tray shows: at once.
+      this.#writeScroll(reset, 0);
+      return;
+    }
+    if (target <= EPSILON || Math.abs(open - target) >= distance) {
+      this.#scrollReset = reset;
+      return;
+    }
+    const scrollSpring = new Spring({
+      clock: this.#clock,
+      prefersReducedMotion: drawerEnvironment.prefersReducedMotion,
+      onUpdate: ({ value }) =>
+        this.#writeScroll(reset, clamp(value / distance, 0, 1)),
+    });
+    this.#scrollSpring = scrollSpring;
+    scrollSpring.set(distance, 0);
+    scrollSpring.retarget(0);
+    void scrollSpring.start().then(() => {
+      if (this.#scrollSpring === scrollSpring && !scrollSpring.isAnimating) {
+        this.#scrollSpring = undefined;
+      }
+    });
   }
 
-  /** Moves the tray's scroll position along with the run, see above. */
+  /**
+   * Moves the tray's scroll position along with the run in `#render`, for
+   * a reset that follows the tray (see `#planScrollReset`).
+   */
   #applyScrollReset(open: number): void {
     const reset = this.#scrollReset;
     if (!reset) return;
-    const span = reset.from - reset.target;
     let fraction: number;
-    if (reset.target <= EPSILON) fraction = open <= EPSILON ? 0 : 1;
-    else if (span <= EPSILON) fraction = 0;
-    else fraction = clamp((open - reset.target) / span, 0, 1);
+    if (reset.target <= EPSILON) {
+      fraction = open <= EPSILON ? 0 : 1;
+    } else {
+      // At least `distance`, which is more than EPSILON, when planned.
+      const span = Math.abs(reset.from - reset.target);
+      fraction = clamp(Math.abs(open - reset.target) / span, 0, 1);
+    }
     if (fraction >= reset.fraction) return;
-    reset.fraction = fraction;
-    this.#setScrollDistance(reset.distance * fraction);
+    this.#writeScroll(reset, fraction);
     if (fraction === 0) this.#scrollReset = undefined;
   }
 
   /**
-   * How far (px) the tray is scrolled from its scroll start: the start of
-   * the content, at the tray's leading edge (the edge that faces the page).
-   * That is the top for a bottom drawer (`scrollTop` 0), and the end of the
-   * scroll range for a top drawer, whose leading edge is its bottom.
+   * Scrolls the tray to `fraction` of the reset's distance from its scroll
+   * start, without reading layout. `behavior: 'instant'`, so an app's
+   * `scroll-behavior: smooth` doesn't turn each frame into a smooth scroll.
    */
-  #scrollDistance(): number {
-    const tray = this.#tray!;
-    if (this.placement === 'top') {
-      return Math.max(
-        0,
-        tray.scrollHeight - tray.clientHeight - tray.scrollTop,
-      );
-    }
-    return tray.scrollTop;
+  #writeScroll(reset: ScrollReset, fraction: number): void {
+    reset.fraction = fraction;
+    const top = reset.start + reset.sign * reset.distance * fraction;
+    this.#tray!.scrollTo({ top, behavior: 'instant' });
   }
 
-  /** Scrolls the tray to `distance` px from its scroll start (vertical). */
-  #setScrollDistance(distance: number): void {
+  /** Stops a running scroll reset where it is. */
+  #stopScrollReset(): void {
+    this.#scrollReset = undefined;
+    this.#scrollSpring?.stop();
+    this.#scrollSpring = undefined;
+  }
+
+  /** Whether `offset` is the highest snap point (when it is open at all). */
+  #isHighest(offset: number): boolean {
+    const { maxOffset } = this.#layout!;
+    return maxOffset > 0 && offset >= maxOffset - EPSILON;
+  }
+
+  /**
+   * Scrolls the tray of a vertical drawer at once to where its content
+   * starts at `target`: `scrollTop` 0 at the highest snap point (for every
+   * placement: the content starts at the top there and is read from the
+   * top down), and the scroll start below it (see `#planScrollReset`).
+   */
+  #scrollToStart(target: number): void {
+    this.#stopScrollReset();
     if (this.axis !== 'vertical') return;
     const tray = this.#tray!;
-    const position =
-      this.placement === 'top'
-        ? tray.scrollHeight - tray.clientHeight - distance
-        : distance;
-    if (Math.abs(tray.scrollTop - position) > EPSILON / 2) {
-      tray.scrollTop = position;
-    }
+    const top =
+      this.placement === 'top' && !this.#isHighest(target)
+        ? Math.max(0, tray.scrollHeight - tray.clientHeight)
+        : 0;
+    tray.scrollTo({ top, behavior: 'instant' });
   }
 
   #onResize(): void {
@@ -824,7 +893,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#markExpanded(target);
     // From where the tray and its content are now. Also keeps a top drawer's
     // content end at its leading edge below the top when the content changes.
-    this.#planScrollReset(target);
+    // Not while focus is in the tray: the browser may have scrolled the
+    // focused element into view (e.g. above an Android keyboard that
+    // resizes the page), and the reset would move it out of view again.
+    if (!this.#tray!.contains(document.activeElement)) {
+      this.#planScrollReset(target);
+    }
 
     if (spring.isAnimating) {
       // Keep going from the current position to the new target.
@@ -1213,6 +1287,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     spring.stop();
+    this.#stopScrollReset();
     const end = (up: PointerEvent) => {
       if (up.pointerId !== event.pointerId) return;
       this.#endHold();
@@ -1344,6 +1419,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // Catch a running animation where it is on screen: the rendered offset,
     // not the spring's value, which may be past an edge the render clamps.
     spring.stop();
+    this.#stopScrollReset();
     this.#endHold();
     const offset = this.#renderedOffset;
     // Anchored where didPan recognised the pan (past its threshold), so the
