@@ -168,6 +168,23 @@ section > h2 {
 }
 
 /*
+ * The grabber stays at the tray's page-facing edge while the content
+ * scrolls (which it only does at the highest snap point), so it can always
+ * be reached. A bottom drawer's page-facing edge is its top: the grabber
+ * sticks to the top of the tray's visible area, spanning the content's
+ * padding so the background covers what scrolls under it.
+ */
+.demo-grabber[data-placement="bottom"] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: auto;
+  padding: 1rem 0;
+  margin: -1rem -1rem calc(0.75rem - 1rem);
+  background: var(--mobile-drawer-background, Canvas);
+}
+
+/*
  * A top drawer's page-facing edge is its bottom, so the grabber goes last
  * and sticks to the bottom of the tray's visible area when the content
  * scrolls. The background keeps scrolled content from showing through.
@@ -220,16 +237,38 @@ section > h2 {
 
 /*
  * Side drawers: a vertical bar along the edge that faces the page, centred
- * on the tray (the tray is the containing block).
+ * on the tray's visible area. The tray scrolls vertically (across the axis)
+ * at every snap point, so the bar is sticky rather than absolutely
+ * positioned on the tray, which would scroll it away. The content fills at
+ * least the tray's height, so the bar can stick in the middle of it. The
+ * bar takes no space in the flow (negative bottom margin).
  */
+.demo-drawer[data-placement="left"]
+  > .mobile-drawer__tray
+  > .mobile-drawer__content,
+.demo-drawer[data-placement="right"]
+  > .mobile-drawer__tray
+  > .mobile-drawer__content {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 100%;
+}
+
+.demo-drawer-content[data-placement="left"],
+.demo-drawer-content[data-placement="right"] {
+  flex: 1 0 auto;
+}
+
 .demo-grabber[data-placement="left"],
 .demo-grabber[data-placement="right"] {
-  position: absolute;
-  top: 50%;
+  position: sticky;
+  top: calc(50% - 1.25rem);
+  z-index: 1;
   width: 0.3rem;
   height: 2.5rem;
-  margin: 0;
-  transform: translateY(-50%);
+  margin: 0 0 -2.5rem;
+  background: var(--mobile-drawer-background, Canvas);
 }
 
 .demo-grabber[data-placement="left"]::before,
@@ -238,12 +277,14 @@ section > h2 {
   height: 2.5rem;
 }
 
+/* 0.4rem from the tray's edge, across the content's 1rem padding. */
 .demo-grabber[data-placement="left"] {
-  right: 0.4rem;
+  margin-left: auto;
+  margin-right: -0.6rem;
 }
 
 .demo-grabber[data-placement="right"] {
-  left: 0.4rem;
+  margin-left: -0.6rem;
 }
 
 /* A bigger target when it is the only place to drag from. */
@@ -253,6 +294,12 @@ section > h2 {
   margin-block: -0.6rem calc(0.75rem - 0.6rem);
 }
 
+.demo-grabber[data-active][data-placement="bottom"] {
+  /* Already a large target: the sticky strip across the top. */
+  padding: 1rem 0;
+  margin-block: -1rem calc(0.75rem - 1rem);
+}
+
 .demo-grabber[data-active][data-placement="top"] {
   margin-block: calc(0.75rem - 0.6rem) -0.6rem;
 }
@@ -260,15 +307,15 @@ section > h2 {
 .demo-grabber[data-active][data-placement="left"],
 .demo-grabber[data-active][data-placement="right"] {
   padding: 0 0.6rem;
-  margin: 0;
+  margin-block: 0 -2.5rem;
 }
 
 .demo-grabber[data-active][data-placement="left"] {
-  right: -0.2rem;
+  margin-right: -1.2rem;
 }
 
 .demo-grabber[data-active][data-placement="right"] {
-  left: -0.2rem;
+  margin-left: -1.2rem;
 }
 
 /* Bottom sheet example */

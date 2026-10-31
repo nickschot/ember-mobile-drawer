@@ -112,6 +112,8 @@ async function gesture(
     sideways?: number;
     during?: (step: number) => void;
     then?: { direction: Direction; steps: number };
+    /** Where the finger goes down, instead of the middle of the tray. */
+    start?: { x: number; y: number };
   } = {},
 ): Promise<GestureResult> {
   const container = el('[data-test-container]').getBoundingClientRect();
@@ -124,6 +126,7 @@ async function gesture(
     (Math.max(rect.top, container.top) +
       Math.min(rect.bottom, container.bottom)) /
     2;
+  if (options.start) ({ x, y } = options.start);
   const before = rect;
   const pointerId = 1;
 
@@ -220,6 +223,8 @@ class State {
   /** Size of the content block, in px on both axes. */
   @tracked contentSize = 1000;
   @tracked nested = false;
+  /** Size of a block after the nested scrollers, in px. */
+  @tracked filler = 0;
   changes: number[] = [];
 
   onChange = (index: number) => {
@@ -268,6 +273,7 @@ async function renderDrawer(state: State) {
               <div style={{sizeStyle 1000}} data-test-unmarked-content></div>
             </div>
             <div style={{sizeStyle 60}} data-test-outside></div>
+            <div style={{sizeStyle state.filler}}></div>
           {{else}}
             <div style={{sizeStyle state.contentSize}} data-test-content></div>
           {{/if}}
@@ -391,9 +397,9 @@ module(
         );
         assert.true(opening.dragging, 'towards open drags');
         assert.true(opening.shift > 20, `expands (${opening.shift})`);
-        assert.false(
-          opening.prevented.some(Boolean),
-          'touch-action already rules out scrolling: touchmoves left alone',
+        assert.true(
+          opening.prevented.length > 0 && opening.prevented.every(Boolean),
+          'touchmoves are cancelled, not left to touch-action',
         );
         clock.runUntilIdle();
         await settled();
@@ -406,6 +412,103 @@ module(
         );
         assert.true(closing.dragging, 'towards close drags too');
         assert.true(closing.shift < -20, `closes (${closing.shift})`);
+        assert.true(closing.prevented.every(Boolean), 'touchmoves cancelled');
+      });
+
+      test(`${placement}: below the highest snap point the tray and marked scrollers can't scroll along the axis`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.nested = true;
+        state.filler = 1000;
+        await renderDrawer(state);
+        const nested = el('[data-test-nested]');
+        const unmarked = el('[data-test-unmarked]');
+        const [along, across] = vertical(placement)
+          ? (['overflowY', 'overflowX'] as const)
+          : (['overflowX', 'overflowY'] as const);
+        const overflow = (
+          element: HTMLElement,
+          which: 'overflowX' | 'overflowY',
+        ) => getComputedStyle(element)[which];
+
+        assert.strictEqual(overflow(tray(), along), 'auto', 'top: tray');
+        assert.strictEqual(overflow(nested, along), 'auto', 'top: marked');
+        scrollTo(tray(), placement, 'middle');
+        scrollTo(nested, placement, 'middle');
+        const trayScroll = scrollPosition(tray(), placement);
+        const nestedScroll = scrollPosition(nested, placement);
+        assert.true(trayScroll > 0 && nestedScroll > 0, 'scrolled');
+
+        state.active = 1;
+        await settled();
+        clock.frame();
+        assert.strictEqual(
+          overflow(tray(), along),
+          'hidden',
+          'locked as soon as it leaves the top',
+        );
+        clock.runUntilIdle();
+        assert.strictEqual(overflow(tray(), along), 'hidden', 'tray locked');
+        assert.strictEqual(overflow(nested, along), 'hidden', 'marked locked');
+        assert.strictEqual(overflow(tray(), across), 'auto', 'tray: across');
+        assert.strictEqual(overflow(nested, across), 'auto', 'marked: across');
+        assert.strictEqual(
+          overflow(unmarked, along),
+          'auto',
+          'unmarked scrollers are left alone',
+        );
+        assert.strictEqual(
+          scrollPosition(tray(), placement),
+          trayScroll,
+          'tray keeps its scroll position',
+        );
+        assert.strictEqual(scrollPosition(nested, placement), nestedScroll);
+
+        const result = await gesture(
+          el('[data-test-nested-content]'),
+          OPENING[placement],
+          12,
+        );
+        assert.true(result.dragging, 'a gesture on the marked scroller drags');
+        assert.true(result.prevented.every(Boolean));
+        clock.runUntilIdle();
+        await settled();
+
+        state.active = 2;
+        await settled();
+        clock.frame();
+        assert.strictEqual(overflow(tray(), along), 'hidden', 'until the top');
+        clock.runUntilIdle();
+        assert.strictEqual(overflow(tray(), along), 'auto', 'unlocked');
+        assert.strictEqual(overflow(nested, along), 'auto');
+        assert.strictEqual(
+          nested.style.overflow,
+          'auto',
+          "the scroller's own inline overflow is back",
+        );
+        assert.strictEqual(scrollPosition(tray(), placement), trayScroll);
+        assert.strictEqual(scrollPosition(nested, placement), nestedScroll);
+      });
+
+      test(`${placement}: half open, a drag that turns sideways before it starts is released`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        // 5px along the axis decides a drag; didPan only starts one past
+        // 10px. The swipe then goes across, e.g. a carousel.
+        const across: Direction = vertical(placement) ? 'right' : 'down';
+        const lean: [number, number] = vertical(placement) ? [0, -5] : [-5, 0];
+        const result = await gesture(el('[data-test-content]'), across, 10, {
+          path: [lean],
+        });
+        assert.true(result.prevented[0], 'decided to drag');
+        assert.false(
+          result.prevented.slice(2).some(Boolean),
+          'released once it went sideways',
+        );
+        assert.false(result.dragging, 'never dragged');
+        assert.strictEqual(result.shift, 0);
       });
 
       for (const active of [1, 2]) {
@@ -487,6 +590,27 @@ module(
       const next = await gesture(el('[data-test-content]'), 'down', 30);
       assert.true(next.dragging, 'the next gesture drags');
       assert.true(next.shift < -80, `moves the drawer (${next.shift})`);
+    });
+
+    test('half open, a fast first touchmove from near the tray edge decides and is cancelled', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const handle = el('[data-test-handle]');
+      const rect = handle.getBoundingClientRect();
+      const top = tray().getBoundingClientRect().top;
+      // A grabber-like spot about 12px below the tray's top edge. The first
+      // touchmove jumps 25px straight up, past the tray's edge, before iOS
+      // could have seen a slower start.
+      const start = { x: rect.left + rect.width / 2, y: top + 12 };
+      const result = await gesture(handle, 'up', 10, {
+        start,
+        path: [[0, -25]],
+      });
+      assert.true(result.prevented[0], 'the very first touchmove is cancelled');
+      assert.true(result.prevented.every(Boolean), 'and every one after it');
+      assert.true(result.dragging, 'drags');
+      assert.true(result.shift > 30, `the drawer follows (${result.shift})`);
     });
 
     test('a drag keeps dragging when the finger turns around', async function (assert) {
@@ -617,7 +741,274 @@ module(
         result.dragging,
         'caught below the highest snap point: drags',
       );
-      assert.false(result.prevented.some(Boolean), 'touch-action is enough');
+      assert.true(result.prevented.every(Boolean), 'touchmoves cancelled');
+    });
+
+    test('dragging down from the top locks the content once it leaves the top', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'start');
+      const locks: string[] = [];
+      await gesture(el('[data-test-content]'), 'down', 10, {
+        during: () => locks.push(getComputedStyle(tray()).overflowY),
+      });
+      assert.strictEqual(locks[0], 'auto', 'at the top before the drag');
+      assert.strictEqual(locks[locks.length - 1], 'hidden', 'below it');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, [], 'springs back to the top');
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'auto');
+    });
+
+    test('data-expanded marks resting at or heading for the highest snap point', async function (assert) {
+      const root = () => el('.mobile-drawer');
+      const expanded = () => root().hasAttribute('data-expanded');
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      assert.false(expanded(), 'at rest half open');
+
+      state.active = 2;
+      await settled();
+      clock.frame();
+      assert.true(expanded(), 'set as soon as it heads for the top');
+      clock.runUntilIdle();
+      assert.true(expanded(), 'at rest at the top');
+
+      // Small movements at the top: down a little and back up.
+      scrollTo(tray(), 'bottom', 'start');
+      const during: boolean[] = [];
+      const wobble = await gesture(el('[data-test-content]'), 'down', 8, {
+        then: { direction: 'up', steps: 8 },
+        during: () => during.push(expanded()),
+      });
+      assert.true(wobble.dragging, 'dragged');
+      assert.true(during.every(Boolean), 'kept during the drag');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, []);
+      assert.true(expanded(), 'back at the top');
+
+      const down: boolean[] = [];
+      await gesture(el('[data-test-content]'), 'down', 40, {
+        during: () => down.push(expanded()),
+      });
+      assert.true(down.every(Boolean), 'kept until the drag is released');
+      assert.deepEqual(state.changes, [1], 'released towards half open');
+      assert.false(expanded(), 'removed on release');
+      clock.runUntilIdle();
+      assert.false(expanded());
+
+      state.active = 0;
+      await settled();
+      clock.runUntilIdle();
+      assert.false(expanded(), 'closed');
+    });
+
+    test('data-expanded is not set when the highest snap point is closed', async function (assert) {
+      const state = new State();
+      state.snapPoints = [0];
+      state.active = 0;
+      await renderDrawer(state);
+      assert.false(el('.mobile-drawer').hasAttribute('data-expanded'));
+    });
+
+    test('a marked scroller added below the highest snap point is locked when touched', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const added = document.createElement('div');
+      added.setAttribute('data-mobile-drawer-scroll', '');
+      added.style.cssText = 'height: 100px; overflow-y: scroll';
+      const inner = document.createElement('div');
+      inner.style.height = '500px';
+      added.append(inner);
+      el('.mobile-drawer__content').prepend(added);
+      assert.strictEqual(getComputedStyle(added).overflowY, 'scroll');
+
+      const result = await gesture(inner, 'up', 10);
+      assert.strictEqual(getComputedStyle(added).overflowY, 'hidden');
+      assert.true(result.dragging);
+
+      state.active = 2;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(added.style.overflowY, 'scroll', 'restored');
+      added.remove();
+    });
+
+    test('with @handleOnly the content is locked below the highest snap point too', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      state.handleOnly = true;
+      await renderDrawer(state);
+      assert.strictEqual(
+        getComputedStyle(tray()).overflowY,
+        'hidden',
+        'half open: locked',
+      );
+      assert.strictEqual(tray().style.touchAction, '', 'not a drag source');
+
+      const content = await gesture(el('[data-test-content]'), 'up', 12);
+      assert.false(content.dragging, 'the content does not drag');
+      const handle = await gesture(el('[data-test-handle]'), 'up', 30);
+      assert.true(handle.dragging, 'the handle drags');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, [2], 'opened fully');
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'auto', 'open');
+
+      state.handleOnly = false;
+      await settled();
+      state.active = 1;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'hidden');
+    });
+
+    for (const placement of PLACEMENTS) {
+      test(`${placement}: with @handleOnly at 50%, a swipe along the axis is cancelled without dragging`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        state.handleOnly = true;
+        await renderDrawer(state);
+
+        for (const direction of [OPENING[placement], CLOSING[placement]]) {
+          const result = await gesture(
+            el('[data-test-content]'),
+            direction,
+            12,
+          );
+          assert.true(
+            result.prevented.length > 0 && result.prevented.every(Boolean),
+            `${direction}: touchmoves cancelled, so the page can't scroll`,
+          );
+          assert.false(result.dragging, `${direction}: no drag`);
+          assert.strictEqual(result.shift, 0, `${direction}: the tray stays`);
+        }
+
+        // Sideways, also with a slight lean along the axis first.
+        const across: Direction = vertical(placement) ? 'left' : 'up';
+        for (const [along, sideways] of [
+          [0, 0],
+          [3, -1],
+          [-2, -2],
+        ] as [number, number][]) {
+          const result = await gesture(el('[data-test-content]'), across, 12, {
+            path: [vertical(placement) ? [sideways, along] : [along, sideways]],
+          });
+          assert.false(
+            result.prevented.some(Boolean),
+            `across, lean ${along},${sideways}: left to the browser`,
+          );
+        }
+
+        // Decided along the axis, then sideways before 10px: released.
+        const lean: [number, number] = vertical(placement) ? [0, -5] : [-5, 0];
+        const turned = await gesture(
+          el('[data-test-content]'),
+          vertical(placement) ? 'right' : 'down',
+          10,
+          { path: [lean] },
+        );
+        assert.true(turned.prevented[0], 'decided along the axis');
+        assert.false(
+          turned.prevented.slice(2).some(Boolean),
+          'released once it went sideways',
+        );
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(state.changes, [], 'never moved the drawer');
+      });
+    }
+
+    test('with @handleOnly at the highest snap point, content swipes are left to the browser', async function (assert) {
+      const state = new State();
+      state.handleOnly = true;
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      for (const direction of ['up', 'down'] as const) {
+        const result = await gesture(el('[data-test-content]'), direction, 12);
+        assert.false(result.prevented.some(Boolean), `${direction}: scrolls`);
+        assert.false(result.dragging);
+      }
+    });
+
+    test('the scroll lock follows the placement', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'hidden');
+
+      state.placement = 'left';
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(tray().style.overflowY, '', 'vertical lock removed');
+      assert.strictEqual(getComputedStyle(tray()).overflowX, 'hidden');
+    });
+
+    test('an app that rewrites a locked inline style is locked again, and keeps its own value', async function (assert) {
+      const state = new State();
+      state.nested = true;
+      state.active = 1;
+      await renderDrawer(state);
+      const nested = el('[data-test-nested]');
+      assert.strictEqual(nested.style.overflowY, 'hidden', 'locked');
+
+      // The app rewrites the whole inline style (like a `style=` binding).
+      nested.style.cssText =
+        'width: 300px; height: 150px; overflow: scroll; overscroll-behavior: contain';
+      nested.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, deltaY: 10 }),
+      );
+      assert.strictEqual(nested.style.overflowY, 'hidden', 'a wheel relocks');
+
+      nested.style.overflowY = 'auto';
+      el('[data-test-nested-content]').dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          pointerType: 'mouse',
+        }),
+      );
+      assert.strictEqual(nested.style.overflowY, 'hidden', 'a pointer relocks');
+
+      state.active = 2;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(
+        nested.style.overflowY,
+        'auto',
+        "unlocked to the app's latest value",
+      );
+
+      state.active = 1;
+      await settled();
+      clock.runUntilIdle();
+      nested.style.overflowY = 'scroll';
+      state.active = 2;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(
+        nested.style.overflowY,
+        'scroll',
+        "a value the app set while locked isn't overwritten on unlock",
+      );
+    });
+
+    test('a marked scroller added while locked is locked when focus moves into it', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const added = document.createElement('div');
+      added.setAttribute('data-mobile-drawer-scroll', '');
+      added.style.cssText = 'height: 100px; overflow-y: auto';
+      const input = document.createElement('input');
+      added.append(input);
+      el('.mobile-drawer__content').prepend(added);
+      input.focus();
+      assert.strictEqual(added.style.overflowY, 'hidden');
+      added.remove();
     });
 
     test('a slight move along the axis does not decide the gesture', async function (assert) {

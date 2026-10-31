@@ -224,4 +224,55 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
       }
     });
   }
+
+  for (const placement of ['bottom', 'top', 'left', 'right'] as const) {
+    for (const handle of [false, true]) {
+      const mode = handle ? 'with @handleOnly' : 'without @handleOnly';
+      test(`${placement}, ${mode}: the grabber stays at the leading edge while the content scrolls`, async function (assert) {
+        drawerEnvironment.prefersReducedMotion = () => true;
+        try {
+          const search = `?placement=${placement}&snap=2&tall=1${handle ? '&handle=1' : ''}`;
+          await render(<template><DrawerDemo @search={{search}} /></template>);
+          const root = find('.demo-playground-drawer > .mobile-drawer')!;
+          const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+          const grabber = root.querySelector<HTMLElement>('.demo-grabber')!;
+          assert.true(
+            tray.scrollHeight > tray.clientHeight,
+            'the tall content scrolls',
+          );
+          // A desktop scrollbar runs along a left drawer's leading edge and
+          // takes hits; phones have no such scrollbar, so hide it (before
+          // measuring: a classic scrollbar also takes layout space).
+          tray.style.scrollbarWidth = 'none';
+          tray.scrollTop = tray.scrollHeight;
+          assert.true(tray.scrollTop > 0, 'scrolled');
+
+          const t = tray.getBoundingClientRect();
+          const g = grabber.getBoundingClientRect();
+          const visible =
+            g.top >= t.top - 1 &&
+            g.bottom <= t.bottom + 1 &&
+            g.left >= t.left - 4 &&
+            g.right <= t.right + 4;
+          assert.true(visible, 'in view');
+          // Within 16px of the leading edge (the one facing the page).
+          const gap = {
+            bottom: g.top - t.top,
+            top: t.bottom - g.bottom,
+            left: t.right - g.right,
+            right: g.left - t.left,
+          }[placement];
+          assert.true(gap < 16, `at the leading edge (${gap}px)`);
+          // Nothing scrolled over it: a finger on it hits the grabber.
+          const hit = document.elementFromPoint(
+            g.left + g.width / 2,
+            g.top + g.height / 2,
+          );
+          assert.strictEqual(hit, grabber, 'on top of the content');
+        } finally {
+          delete drawerEnvironment.prefersReducedMotion;
+        }
+      });
+    }
+  }
 });

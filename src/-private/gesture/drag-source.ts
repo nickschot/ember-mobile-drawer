@@ -71,11 +71,6 @@ interface Gesture {
   x: number;
   y: number;
   target: Element | null;
-  /**
-   * Whether `touch-action` let the browser pan along the axis when the
-   * gesture started. Only then does a drag need to cancel its touchmoves.
-   */
-  cancels: boolean;
   /** Whether it drags; `undefined` until it is decided. */
   drags?: boolean;
   /** Whether `didPan` recognised a pan and the drag started. */
@@ -113,13 +108,15 @@ const findTouch = (list: TouchList, id: number | undefined) =>
  * scroll never turns into a drag mid-gesture or the other way around. Only
  * the touch that started on the element counts.
  *
- * Where the element's `touch-action` lets the browser pan along the axis, a
- * gesture that drags calls `preventDefault()` on its cancelable `touchmove`
- * events so the browser doesn't scroll; that needs a non-passive `touchmove`
- * listener, which is only added with `shouldDrag`. Where `touch-action`
- * already rules that out, touchmoves are never cancelled. A gesture that
- * doesn't drag never reaches `onPanStart`; usually the browser takes it
- * over (`pointercancel`) anyway.
+ * Once a gesture is decided as a drag, it calls `preventDefault()` on its
+ * cancelable `touchmove` events so the browser doesn't scroll (or start a
+ * scroll of an ancestor), whatever the element's `touch-action` says: iOS
+ * Safari doesn't reliably honour `touch-action` on a scroll container. That
+ * needs a non-passive `touchmove` listener, which is only added with
+ * `shouldDrag`. Touchmoves before the decision, and after a drag decision
+ * was released to the browser, are never cancelled, so swipes across the
+ * axis keep working. A gesture that doesn't drag never reaches
+ * `onPanStart`; usually the browser takes it over (`pointercancel`) anyway.
  *
  * Extends the modifier class, so it uses `didPan`'s own modifier manager.
  * It relies only on that class being a class-based ember-modifier (its
@@ -165,13 +162,6 @@ class DragSourceModifier extends DidPan {
     element.addEventListener('touchmove', this.#onTouchMove, {
       passive: false,
     });
-  }
-
-  /** Whether the element's `touch-action` lets the browser pan the axis. */
-  #browserPansAxis(): boolean {
-    const touchAction = this.#element?.style.touchAction;
-    const blocked = this.#named?.axis === 'vertical' ? 'pan-x' : 'pan-y';
-    return touchAction !== blocked && touchAction !== 'none';
   }
 
   #onPointerDown = (event: PointerEvent): void => {
@@ -230,11 +220,7 @@ class DragSourceModifier extends DidPan {
     const gesture = this.#gesture;
     const touch = findTouch(event.changedTouches, gesture?.touchId);
     if (!gesture || !touch) return;
-    if (
-      this.#decide(touch.clientX, touch.clientY) &&
-      gesture.cancels &&
-      event.cancelable
-    ) {
+    if (this.#decide(touch.clientX, touch.clientY) && event.cancelable) {
       event.preventDefault();
     }
   };
@@ -256,12 +242,8 @@ class DragSourceModifier extends DidPan {
     }
   };
 
-  #startGesture(gesture: Omit<Gesture, 'cancels' | 'panning'>): void {
-    this.#gesture = {
-      ...gesture,
-      cancels: this.#browserPansAxis(),
-      panning: false,
-    };
+  #startGesture(gesture: Omit<Gesture, 'panning'>): void {
+    this.#gesture = { ...gesture, panning: false };
     document.addEventListener('pointerup', this.#onPointerEnd, CAPTURE);
     document.addEventListener('pointercancel', this.#onPointerEnd, CAPTURE);
     document.addEventListener('touchend', this.#onTouchEnd, CAPTURE);

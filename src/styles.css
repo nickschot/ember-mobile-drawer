@@ -36,6 +36,17 @@
  *                           at rest. Hides the whole drawer (also from
  *                           assistive technology). Remove it before the first
  *                           frame of an opening drag or animation.
+ * [data-expanded]           On the root while the drawer rests at its
+ *                           highest snap point or is animating towards it,
+ *                           and that snap point is open (not 0). Changes
+ *                           only when the drawer's target changes outside a
+ *                           drag: it keeps its value during a drag and while
+ *                           a touch holds the drawer, so it never flickers
+ *                           at the top. A drag down from the top removes it
+ *                           only when released towards a lower snap point.
+ *                           Not used by these base styles; for themes and
+ *                           apps (e.g. an opaque, edge-to-edge sheet when
+ *                           fully open).
  * .mobile-drawer__backdrop  Optional (left out with `@backdrop={{false}}`).
  *                           Fills the root behind the tray. Its
  *                           opacity is the max opacity multiplied by
@@ -51,7 +62,13 @@
  * .mobile-drawer__tray      The sheet and scroll container. The component
  *                           writes an inline `touch-action` on it to decide
  *                           between scrolling and dragging (see the README);
- *                           don't override `touch-action` on it. At
+ *                           don't override `touch-action` on it. It also
+ *                           writes an inline `overflow-y: hidden` (`overflow-x` for left and
+ *                           right) on it, and on the elements marked
+ *                           `data-mobile-drawer-scroll` in it, while the
+ *                           drawer is below its highest snap point, so the
+ *                           content only scrolls along the axis at the
+ *                           highest snap point. At
  *                           `transform: none` it rests flush against its
  *                           edge, i.e. fully open. The component writes an
  *                           inline `transform` every frame that moves it away

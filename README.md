@@ -96,11 +96,33 @@ To drag only from a grabber, for example because the content scrolls, use `@hand
 
 Without `@handleOnly` the `handle` modifier does nothing, so you can keep it on your grabber either way. A handle gets `touch-action: pan-x` (for `bottom` and `top`) or `pan-y` (for `left` and `right`) and always drags.
 
+#### Keep the grabber at the leading edge
+
+Put the grabber (with or without the `handle` modifier) at the tray's leading edge, the edge that faces the page, and make it sticky there, so it doesn't scroll with the content. The tray is the scroll container, and the content scrolls at the highest snap point (also with `@handleOnly`, see [Scrolling content](#scrolling-content)). A grabber that scrolls out of view can't be dragged, and with `@handleOnly` it is the only way to drag the drawer at all. Give it the tray's background, so content doesn't show through as it scrolls under it.
+
+```css
+/* Bottom drawer: the grabber is the first element in the drawer. */
+.grabber {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.75rem 0; /* A larger touch target around a small bar. */
+  background: var(--mobile-drawer-background, Canvas);
+}
+```
+
+For the other placements, stick it to the other leading edges:
+
+- `top`: put the grabber last and use `bottom: 0` instead of `top: 0`.
+- `left` and `right`: a vertical bar along the tray's right (for `left`) or left (for `right`) edge. A sticky element needs room to stay in view, so let the content fill at least the tray's height and stick the bar in the middle of the visible area, for example `top: calc(50% - 1.25rem)` for a 2.5rem bar. The tray of a side drawer scrolls vertically at every snap point, because that is across its axis.
+
+The demo app's playground (`demo-app/styles.css`, `.demo-grabber`) does this for all four placements.
+
 ### Scrolling content
 
 The tray is a scroll container (`overflow: auto`), so content longer than the drawer scrolls. Without `@handleOnly`, each touch gesture on the tray either scrolls or drags the drawer. It is decided once the finger has moved 4px along the drawer's axis, and further along it than across it, and stays that way until the finger lifts. A swipe across the axis (a horizontal carousel in a bottom drawer, a list in a side drawer) is left to the browser, also when it starts with a slight lean along the axis; if a gesture that was going to drag turns sideways before the drag starts (10px), it is left to the browser too.
 
-- While the drawer is below its highest snap point, every gesture along the axis drags it, also on scrollable content. Dragging a half-open bottom drawer up expands it instead of scrolling.
+- While the drawer is below its highest snap point, the content can't scroll along the drawer's axis at all (also with `@handleOnly`, and also with a mouse wheel or the keyboard), and every gesture along the axis drags the drawer. Dragging a half-open bottom drawer up expands it instead of scrolling. The scroll position is kept: the content is where you left it when the drawer gets back to the top.
 - At the highest snap point, a gesture scrolls if the content can scroll the way the finger pushes it, and drags the drawer otherwise. For a bottom drawer: with the content scrolled to the top, dragging down closes the drawer; anywhere else it scrolls. Top, left and right drawers work the same way along their own axis, so a top drawer closes by dragging up once its content is scrolled to the end.
 - A gesture that started as a scroll never turns into a drag, also when the content reaches its start (or its momentum carries it there) while the finger is still down. Lift the finger and drag again to move the drawer.
 
@@ -115,7 +137,7 @@ The tray is the default scroll container. For scrolling elements inside it, add 
 
 A gesture that starts inside a marked element (or the tray) scrolls if any of those between the touched element and the tray can scroll that way. Scrolling elements without the attribute don't count, so gestures on them drag the drawer like any other content. That includes a scrollable `<textarea>`: add `data-mobile-drawer-scroll` to it too. Scrolling across the drawer's axis (e.g. a horizontal carousel in a bottom drawer) is always left to the browser.
 
-How it works: the tray gets `touch-action: pan-x` (`pan-y` for `left` and `right`) while the drawer is below its highest snap point, so the browser never scrolls along the axis there. At the highest snap point it gets `touch-action: pan-x pan-y`, and a gesture that drags cancels its `touchmove` events, which needs a non-passive `touchmove` listener on the tray (handles don't get one). Only the finger that started on the tray counts; other fingers on the screen don't affect the decision. Pinch-zoom doesn't start on the tray. If you'd rather have plain native scrolling with a separate grabber, use `@handleOnly`.
+How it works: below the highest snap point the component writes an inline `overflow-y: hidden` (`overflow-x` for `left` and `right`) on the tray and on the marked elements in it, and removes it again at the highest snap point, putting back any inline `overflow-y`/`overflow-x` the element had. A marked element added while the drawer is below the top, or whose inline style the app rewrote, is locked again when a pointer goes down, a wheel turns or focus moves inside it; on unlock, a value the app set in the meantime is kept. Scrolling across the axis isn't affected. Once a gesture is decided as a drag, at any snap point, its `touchmove` events are cancelled, so the browser can't scroll the content or the page under it; that needs a non-passive `touchmove` listener on the tray (handles don't get one). The tray also gets `touch-action: pan-x` (`pan-y` for `left` and `right`) below the highest snap point and `pan-x pan-y` at it, but iOS Safari doesn't reliably apply `touch-action` to a scroll container, so the drawer doesn't rely on it alone. Only the finger that started on the tray counts; other fingers on the screen don't affect the decision. Pinch-zoom doesn't start on the tray. With `@handleOnly` only the handles drag, and the content still only scrolls along the axis at the highest snap point. Below it, a swipe along the axis on the content has its `touchmove` events cancelled (decided the same way, 4px and further along the axis than across it), without dragging the drawer: otherwise iOS would scroll the page behind the locked tray. Swipes across the axis are left to the browser.
 
 ### Public imports
 
@@ -186,6 +208,22 @@ When a snap point makes the tray larger than its content, the content sits again
 ```
 
 The safe-area insets are padding on the `.mobile-drawer__content` element inside the tray. The base styles set no padding on the tray itself, so padding you add to `.mobile-drawer__tray` adds to the insets instead of replacing them. Don't set padding on `.mobile-drawer__content`, because that would remove the insets. Unlayered resets that set padding on `*` or `div` remove them too, because unlayered CSS always wins over the drawer's layer. In the same way, an unlayered `* { margin: 0 }` reset undoes the leading-edge alignment of top and left drawers. Put such resets in a layer before `ember-mobile-drawer`.
+
+### State attributes
+
+The drawer root (`.mobile-drawer`) carries state attributes you can style on:
+
+- `data-placement`: `bottom`, `top`, `left` or `right`.
+- `data-closed`: while the drawer is fully closed and at rest. The base styles hide the drawer then.
+- `data-expanded`: while the drawer rests at its highest snap point, or is animating towards it. It doesn't change during a drag or while a touch holds the drawer, so small movements at the top don't flicker it: a drag that starts at the top keeps it until the finger lifts, and loses it only if the drawer is then released towards a lower snap point; a drag up from a lower snap point gets it on release, when the drawer heads for the top. It is never set when the highest snap point is closed (`0`). Use it for a look that only applies when the drawer is fully open, for example:
+
+  ```css
+  .mobile-drawer[data-expanded] > .mobile-drawer__tray {
+    --mobile-drawer-radius: 0;
+  }
+  ```
+
+  The scroll lock (see [Scrolling content](#scrolling-content)) doesn't use it: that follows where the drawer is shown, frame by frame.
 
 Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
 
