@@ -30,8 +30,8 @@ import SideDrawerExample from '../components/side-drawer-example.gts';
       <article class="demo-example" aria-labelledby="example-bottom-sheet">
         <h3 id="example-bottom-sheet">Bottom sheet with scrollable content</h3>
         <p class="demo-hint">
-          Snap points [0, '50%', 'content'], dragged by its grabber
-          (@handleOnly) so the list scrolls.
+          Snap points [0, '50%', 'content']. Drag anywhere: the list scrolls
+          once the sheet is fully open, and dragging down at its top closes it.
         </p>
         <div class="demo-buttons"><BottomSheetExample /></div>
       </article>
