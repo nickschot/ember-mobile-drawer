@@ -8,8 +8,10 @@
  *
  * Every helper takes the drawer as a selector (looked up in the test's root
  * element, like `find`) or an element: the drawer's root, or any element in
- * it (the innermost drawer is used). Each one waits for `settled()`, which
- * waits for the drawer's animations.
+ * it (the innermost drawer is used). A selector is only looked up inside
+ * `getRootElement()`; for a drawer rendered outside it (e.g. with
+ * `{{#in-element}}`), pass the element. Each one waits for `settled()`,
+ * which waits for the drawer's animations.
  *
  * @module
  */
@@ -84,7 +86,9 @@ function findDrawer(
   if (typeof target === 'string') {
     element = getRootElement().querySelector(target);
     if (!element) {
-      throw new Error(`${helper}: no element found for '${target}'.`);
+      throw new Error(
+        `${helper}: no element found for '${target}'. Selectors are looked up inside the test's root element; pass an element for a drawer rendered outside it.`,
+      );
     }
   } else if (target instanceof Element) {
     element = target;

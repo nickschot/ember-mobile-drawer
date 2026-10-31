@@ -66,7 +66,10 @@ export interface MobileDrawerApi {
 
 /** What `@onOpen` and `@onClose` are called with. */
 export interface MobileDrawerToggleEvent {
-  /** Index into `@snapPoints` of the snap point the drawer is moving to. */
+  /**
+   * Index into `@snapPoints` of the snap point the drawer is moving to. For
+   * `@onClose` always the smallest snap point.
+   */
   snapPoint: number;
 }
 

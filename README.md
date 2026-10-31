@@ -92,12 +92,12 @@ Each callback gets one object argument. The types are exported from `ember-mobil
 | Argument       | Called                                                                                                               | Argument type                                                                                     |
 | -------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `@onOpen`      | when the drawer opens: its snap point moves from the smallest one to a larger one                                    | `MobileDrawerToggleEvent`: `{ snapPoint }`, the snap point it opens to                            |
-| `@onClose`     | when the drawer closes: its snap point moves back to the smallest one                                                | `MobileDrawerToggleEvent`: `{ snapPoint }`, the snap point it closes to                           |
-| `@onDragStart` | when a drag starts (once a pan along the axis is recognised, when `isDragging` turns `true`)                         | `MobileDrawerDragStartEvent`: `{ snapPoint, offset }`, the active snap point and px open          |
+| `@onClose`     | when the drawer closes: its snap point moves back to the smallest one                                                | `MobileDrawerToggleEvent`: `{ snapPoint }`, always the smallest snap point                           |
+| `@onDragStart` | when a drag starts (once a pan along the axis is recognised; `isDragging` turns `true` right after)                       | `MobileDrawerDragStartEvent`: `{ snapPoint, offset }`, the active snap point and px open          |
 | `@onDragEnd`   | once for every `@onDragStart`, when the finger lifts, before `@onSnapPointChange`                                    | `MobileDrawerDragEndEvent`: `{ snapPoint, offset, velocity }`, see below                          |
 
-- `@onOpen` and `@onClose` are called once per change, whatever caused it: `open()`, `close()`, `snapTo()`, a drag, the backdrop, Escape or a new `@activeSnapPoint`. They are called when the drawer starts to move, not when it arrives (in a microtask, at the same time as the modal behaviour turns on or off), so the drawer is still animating. A move between two open snap points calls neither, and so does a drawer that opens and closes again within the same task. They are not called for the snap point the drawer is inserted at, or when it is removed.
-- `@onDragEnd` gets the snap point the release picked (the one passed to `@onSnapPointChange` if it differs from the active one), the px open at the release, and the release velocity in px/s (positive opens, negative closes; `0` when the browser cancelled the pointer). When `@activeSnapPoint` is set, the drawer only moves to that snap point once you pass it in. A drag that ends without a release, because its handle was removed or `@placement` changed, gives the active snap point and velocity `0`. A drag that is still going when the drawer is removed calls no `@onDragEnd`.
+- `@onOpen` and `@onClose` are called once per change, whatever caused it: `open()`, `close()`, `snapTo()`, a drag, the backdrop, Escape or a new `@activeSnapPoint`. They are called when the drawer starts to move, not when it arrives (in a microtask, at the same time as the modal behaviour turns on or off), so the drawer is still animating. A move between two open snap points calls neither, and so does a drawer that opens and closes again within the same task. They are not called for the snap point the drawer is inserted at (also when it is inserted hidden, for example in a `display: none` container, and shown later), or when it is removed.
+- `@onDragEnd` gets the snap point the release picked (the one passed to `@onSnapPointChange` if it differs from the active one), the px open at the release, and the release velocity in px/s (positive opens, negative closes; `0` when the browser cancelled the pointer). When `@activeSnapPoint` is set, the drawer only moves to that snap point once you pass it in. A drag that ends without a release, because its handle was removed or `@placement` changed, gives the active snap point and velocity `0`. A drag that is still going when the drawer is removed calls no `@onDragEnd`. If you change `@snapPoints` in `@onDragEnd`, the index that `@onSnapPointChange` gets next is an index into the old list.
 - A touch that only stops a moving drawer, without dragging it, calls neither drag callback.
 
 ```gts
@@ -348,7 +348,7 @@ The theme sets the custom properties from the table above on the element with th
 
 ## Testing
 
-The drawer's animations are registered with [`@ember/test-waiters`](https://github.com/emberjs/ember-test-waiters), so `await settled()` (and every helper of `@ember/test-helpers` that waits for it, such as `click`) waits until the drawer is at rest. In production builds the waiter does nothing.
+The drawer's animations are registered with [`@ember/test-waiters`](https://github.com/emberjs/ember-test-waiters), so `await settled()` (and every helper of `@ember/test-helpers` that waits for it, such as `click`) waits until the drawer is at rest. In production builds the waiter does nothing. The animations run on `requestAnimationFrame`, which the browser stops in a hidden tab or a background window: there, `settled()` waits until the test times out. Keep the test browser visible, or run it headless.
 
 `ember-mobile-drawer/test-support` has helpers for rendering and application tests. They need `@ember/test-helpers` (an optional peer dependency, which apps with tests already have).
 
@@ -366,7 +366,7 @@ await dragDrawer('[data-test-cart]', { to: 1 });
 await dragDrawer('[data-test-cart-grabber]', { distance: -80, velocity: -1200 });
 ```
 
-Every helper takes the drawer as a selector (looked up in the test's root element) or an element: the drawer's root element, or any element inside it. For nested drawers, the innermost drawer is used. Each helper waits for `settled()`.
+Every helper takes the drawer as a selector or an element. A selector is only looked up inside the test's root element (`getRootElement()`); for a drawer rendered elsewhere, for example with `{{#in-element}}` outside it, pass the element. The element is the drawer's root element, or any element inside it. For nested drawers, the innermost drawer is used. Each helper waits for `settled()`.
 
 - `openDrawer(target = '.mobile-drawer')`: does what the yielded `open()` does: moves to the largest snap point. When `@activeSnapPoint` is set it only calls `@onSnapPointChange`, like `open()`.
 - `closeDrawer(target = '.mobile-drawer')`: does what `close()` does: moves to the smallest snap point.
