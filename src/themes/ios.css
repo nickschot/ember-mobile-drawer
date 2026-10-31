@@ -81,14 +81,15 @@
  * backdrop-filter it uses its own material instead (see "Safari 26 bars" in
  * styles.css). So the glass sheet stops at the floating toolbar with a
  * visible edge. Safari keeps the colour that it took when the sheet opened,
- * until nothing fixed is at that edge. With motion on, the sheet is always
- * glass when it opens, also on a direct open to its highest snap point
- * (there it fades to opaque, see "Full height"). So the light toolbar area
- * stays until the drawer is closed, also when the sheet is opaque at the
- * top. With reduced motion, a direct open to the highest snap point is
- * opaque from the first frame; with reduced transparency the sheet is
- * always opaque. Then Safari probably takes the sheet colour (not verified
- * in Safari).
+ * until nothing fixed is at that edge. With motion on (and the glass look
+ * on), the sheet is glass when it opens, also on a direct open to its
+ * highest snap point (there it fades to opaque, see "Full height"). So the
+ * toolbar area keeps the first-frame colour (light-coloured in light mode;
+ * dark mode is not checked) until the drawer is closed, also when the sheet
+ * is opaque at the top. With reduced motion, a direct open to the highest
+ * snap point is opaque from the first frame; with reduced transparency or
+ * increased contrast the sheet is always opaque. Then Safari probably takes
+ * the sheet colour (not verified in Safari).
  *
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always

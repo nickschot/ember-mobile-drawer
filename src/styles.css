@@ -202,13 +202,14 @@
  *     background. A tray with a backdrop-filter (e.g. the iOS theme's glass)
  *     gets Safari's own material there, so such a sheet still stops at the
  *     floating toolbar with a visible edge. Safari keeps the colour it took
- *     when the sheet opened. With motion on, the iOS theme's sheet is glass
- *     when it opens, also on a direct open to its highest snap point (it
- *     fades to opaque there), so the light toolbar area stays until the
- *     drawer is closed. With reduced motion (direct open to the highest
- *     snap point) or reduced transparency the sheet is opaque from the
- *     first frame, so Safari probably takes the sheet colour (not verified
- *     in Safari).
+ *     when the sheet opened. With motion on (and the glass look on), the iOS
+ *     theme's sheet is glass when it opens, also on a direct open to its
+ *     highest snap point (it fades to opaque there), so the toolbar area
+ *     keeps the first-frame colour (light-coloured in light mode; dark mode
+ *     is not checked) until the drawer is closed. With reduced motion
+ *     (direct open to the highest snap point), reduced transparency or
+ *     increased contrast the sheet is opaque from the first frame, so Safari
+ *     probably takes the sheet colour (not verified in Safari).
  * Content can't paint under the bars, so the safe-area padding above is
  * still correct. Other browsers don't get these rules.
  *
