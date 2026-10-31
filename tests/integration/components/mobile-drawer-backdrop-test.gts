@@ -98,6 +98,7 @@ class State {
   @tracked active: number | undefined = 2;
   @tracked backdrop: boolean | undefined;
   @tracked closeOnBackdropClick: boolean | undefined;
+  @tracked modal: boolean | undefined;
   @tracked maxOpacity: number | undefined;
   changes: number[] = [];
   /** Whether the parent accepts changes requested by the drawer. */
@@ -130,6 +131,8 @@ async function renderDrawer(state: State) {
             @onSnapPointChange={{state.onChange}}
             @backdrop={{state.backdrop}}
             @closeOnBackdropClick={{state.closeOnBackdropClick}}
+            @modal={{state.modal}}
+            aria-label="Drawer"
             style="position: absolute"
             data-test-drawer
             as |drawer|
@@ -398,6 +401,8 @@ module('Integration | Component | mobile-drawer | backdrop', function (hooks) {
   test('@backdrop={{false}} renders no backdrop and leaves the page interactive', async function (assert) {
     const state = new State();
     state.backdrop = false;
+    // Non-modal: a modal drawer makes the page inert, backdrop or not.
+    state.modal = false;
     state.active = 0;
     await renderDrawer(state);
     assert.dom('.mobile-drawer__backdrop').doesNotExist();
