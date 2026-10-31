@@ -115,11 +115,6 @@ function isTransparent(color: string): boolean {
   return color === 'transparent' || /[,/]\s*0\)$/.test(color);
 }
 
-/** The theme's transitions only run without reduced motion. */
-function transitionsRun(): boolean {
-  return matchMedia('(prefers-reduced-motion: no-preference)').matches;
-}
-
 const TALL_LINES = Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`);
 
 /**
@@ -191,15 +186,67 @@ async function renderDrawer({
  * style element when done.
  */
 function applyReducedTransparency(): HTMLStyleElement {
-  const media = themeMediaRule('prefers-reduced-transparency: reduce');
+  return applyThemeMedia('prefers-reduced-transparency: reduce');
+}
+
+/**
+ * Applies the rules inside the theme's @media block with the given condition
+ * as if it matched: same layer, later in source order. Remove the returned
+ * style element when done.
+ */
+function applyThemeMedia(condition: string): HTMLStyleElement {
+  const media = themeMediaRule(condition);
   const inner = Array.from(media.cssRules)
     .map((rule) => rule.cssText)
     .join('\n');
   return addStyles(`@layer ember-mobile-drawer { ${inner} }`);
 }
 
+/**
+ * Turns on the theme's transitions, also on a machine with reduced motion,
+ * by applying the rules of its `prefers-reduced-motion: no-preference`
+ * block. Remove the returned style element when done.
+ */
+function applyMotion(): HTMLStyleElement {
+  return applyThemeMedia('prefers-reduced-motion: no-preference');
+}
+
+/**
+ * The text of the base styles' layer block (styles.css), from the loaded
+ * style sheets. Adding it again after the theme loads the base styles after
+ * the theme.
+ */
+function baseLayerText(): string {
+  const found: string[] = [];
+  const visit = (rules: CSSRuleList) => {
+    for (const rule of Array.from(rules)) {
+      if (
+        rule instanceof CSSLayerBlockRule &&
+        rule.cssText.includes(':where(.mobile-drawer__tray)') &&
+        !rule.cssText.includes('mobile-drawer-theme-ios')
+      ) {
+        found.push(rule.cssText);
+      } else if (rule instanceof CSSGroupingRule) {
+        visit(rule.cssRules);
+      }
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    visit(sheet.cssRules);
+  }
+  if (!found[0]) throw new Error('No base styles layer block');
+  return found[0];
+}
+
 module('Integration | themes/ios.css', function (hooks) {
   setupRenderingTest(hooks);
+
+  /** Style elements a test added; removed after each test. */
+  let styles: HTMLStyleElement[] = [];
+  hooks.afterEach(function () {
+    for (const style of styles) style.remove();
+    styles = [];
+  });
 
   test('without the theme class nothing changes', async function (assert) {
     await renderDrawer({ themed: false });
@@ -438,10 +485,8 @@ module('Integration | themes/ios.css', function (hooks) {
   });
 
   test('towards the top the glass fades to opaque before the strip and the blur change; away from it they change at once', async function (assert) {
-    if (!transitionsRun()) {
-      assert.true(true, 'reduced motion: no transitions');
-      return;
-    }
+    // Forced, so the test also runs on a machine with reduced motion.
+    styles.push(applyMotion());
     await renderDrawer({ tall: true });
     const root = el('[data-test-root]');
     const tray = el('[data-test-tray]');
@@ -495,6 +540,80 @@ module('Integration | themes/ios.css', function (hooks) {
       getComputedStyle(tray).backgroundColor,
       GLASS.light.background,
       'glass again',
+    );
+  });
+
+  test('the strip and the blur wait exactly as long as the sheet fades, from one custom property', async function (assert) {
+    styles.push(applyMotion());
+    await renderDrawer({ tall: true, expanded: true });
+
+    const timing = () => {
+      const tray = getComputedStyle(el('[data-test-tray]'));
+      const strip = getComputedStyle(el('[data-test-grabber]'));
+      const property = tray.transitionProperty.split(', ');
+      const duration = tray.transitionDuration.split(', ');
+      const delay = tray.transitionDelay.split(', ');
+      const at = (name: string) => property.indexOf(name);
+      return {
+        fade: duration[at('background-color')],
+        blurDelay: delay[at('backdrop-filter')],
+        stripDelay: strip.transitionDelay,
+      };
+    };
+
+    assert.deepEqual(timing(), {
+      fade: '0.25s',
+      blurDelay: '0.25s',
+      stripDelay: '0.25s',
+    });
+
+    styles.push(
+      addStyles(
+        '.mobile-drawer-theme-ios { --_mobile-drawer-ios-fade: 0.4s; }',
+      ),
+    );
+    assert.deepEqual(
+      timing(),
+      { fade: '0.4s', blurDelay: '0.4s', stripDelay: '0.4s' },
+      'all three follow the one property',
+    );
+  });
+
+  test('the expanded sheet is opaque also when the base styles load after the theme', async function (assert) {
+    // The base styles' tray background, later in the same layer.
+    styles.push(addStyles(baseLayerText()));
+    await renderDrawer({ tall: true, expanded: true });
+    finishTransitions();
+
+    const tray = getComputedStyle(el('[data-test-tray]'));
+    assert.strictEqual(rgb(tray.backgroundColor), SOLID.light, 'opaque');
+    assert.strictEqual(tray.backdropFilter, 'none');
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-grabber]')).backgroundColor,
+      tray.backgroundColor,
+      'no band',
+    );
+
+    el('[data-test-root]').removeAttribute('data-expanded');
+    finishTransitions();
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-tray]')).backgroundColor,
+      GLASS.light.background,
+      'not expanded: glass',
+    );
+  });
+
+  test('unlayered app CSS still wins over the expanded tray background', async function (assert) {
+    await renderDrawer({ tall: true, expanded: true });
+    styles.push(
+      addStyles('.mobile-drawer__tray { background: rgb(1, 2, 3); }', {
+        prepend: true,
+      }),
+    );
+    finishTransitions();
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-tray]')).backgroundColor,
+      'rgb(1, 2, 3)',
     );
   });
 
