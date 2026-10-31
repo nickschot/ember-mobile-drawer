@@ -133,10 +133,12 @@ for (const [appPath, file] of Object.entries(appJs)) {
 // - a shared chunk, which rollup names `-private/[name]-[hash].js`.
 // Anything else means `publicEntrypoints` (or `appReexports`) emits more than
 // intended, e.g. `-private/spring/spring.js` when it is widened to `**/*.js`.
-// CSS under `-private/` is not expected: stylesheets ship as standalone files
-// (`standaloneStylesheets` in rollup.config.mjs), and importing CSS from a
-// module currently fails the build. If that changes, allow `-private/**/*.css`
-// here; `exports` blocks it like any other `-private` file.
+// CSS under `-private/` is not expected. Importing a CSS file from a module
+// does not fail the build: rollup (via `keepAssets`) emits the file under
+// `dist/-private/` and the importing module imports it at runtime. Stylesheets
+// must ship as standalone files (`standaloneStylesheets` in
+// rollup.config.mjs) instead. If that changes, allow `-private/**/*.css` here;
+// `exports` blocks it like any other `-private` file.
 const chunkPattern = /^-private\/[^/]+-[\w-]{8}\.js(\.map)?$/;
 const distFiles = readdirSync(distDir, { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile())
@@ -147,7 +149,11 @@ const distFiles = readdirSync(distDir, { recursive: true, withFileTypes: true })
 for (const file of distFiles) {
   const source = file.endsWith('.map') ? file.slice(0, -'.map'.length) : file;
   if (file.startsWith('-private/')) {
-    if (!chunkPattern.test(file)) {
+    if (file.endsWith('.css') || file.endsWith('.css.map')) {
+      failures.push(
+        `dist/${file}: CSS imported from a module; ship stylesheets through standaloneStylesheets in rollup.config.mjs instead`,
+      );
+    } else if (!chunkPattern.test(file)) {
       failures.push(
         `dist/${file} is not a hashed shared chunk (was publicEntrypoints widened?)`,
       );
