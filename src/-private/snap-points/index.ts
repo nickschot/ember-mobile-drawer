@@ -211,16 +211,19 @@ export function findSnapPoint(
 
 /**
  * Default deceleration rate per millisecond, matching iOS
- * `UIScrollView.DecelerationRate.normal`.
+ * `UIScrollView.DecelerationRate.fast`. iOS `.normal` (`0.998`) projects
+ * five times as far, which skips snap points too eagerly on small sheets.
+ * Provisional: to be tuned on a real device.
  */
-export const DEFAULT_DECELERATION_RATE = 0.998;
+export const DEFAULT_DECELERATION_RATE = 0.99;
 
 /**
  * Projects where a release would come to rest if it kept moving and slowed
  * down by exponential decay: each millisecond the velocity is multiplied by
  * `decelerationRate`. Summed over time that adds
  * `velocity / 1000 * rate / (1 - rate)` px, which for the default rate is
- * roughly half the velocity in px/s (a 1000 px/s flick travels ~500px).
+ * roughly a tenth of the velocity in px/s (a 1000 px/s flick travels ~99px;
+ * with `0.998` it would travel ~499px).
  *
  * @param offset Current offset in px.
  * @param velocity Release velocity in px/s along the same axis (positive moves
