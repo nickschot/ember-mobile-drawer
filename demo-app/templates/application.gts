@@ -2,6 +2,7 @@ import { pageTitle } from 'ember-page-title';
 import DrawerDemo from '../components/drawer-demo.gts';
 import BottomSheetExample from '../components/bottom-sheet-example.gts';
 import SideDrawerExample from '../components/side-drawer-example.gts';
+import IosSheetExample from '../components/ios-sheet-example.gts';
 
 <template>
   {{pageTitle "ember-mobile-drawer"}}
@@ -46,12 +47,12 @@ import SideDrawerExample from '../components/side-drawer-example.gts';
 
       <article class="demo-example" aria-labelledby="example-ios">
         <h3 id="example-ios">iOS theme</h3>
-        {{! The iOS theme example goes here once #29 lands. }}
-        <p class="demo-placeholder">
-          Coming with the optional iOS theme (<a
-            href="https://github.com/nickschot/ember-mobile-drawer/issues/29"
-          >#29</a>).
+        <p class="demo-hint">
+          The optional theme from ember-mobile-drawer/themes/ios.css, opted in
+          with the mobile-drawer-theme-ios class on an ancestor. Snap points [0,
+          '40%', 'content'].
         </p>
+        <div class="demo-buttons"><IosSheetExample /></div>
       </article>
     </section>
   </main>
