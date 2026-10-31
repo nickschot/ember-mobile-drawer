@@ -110,7 +110,13 @@
     "vite": "^7.1.9"
   },
   "peerDependencies": {
+    "@glint/template": ">= 1.0.0",
     "ember-source": ">= 5.12"
+  },
+  "peerDependenciesMeta": {
+    "@glint/template": {
+      "optional": true
+    }
   },
   "packageManager": "pnpm@10.34.6",
   "ember": {
