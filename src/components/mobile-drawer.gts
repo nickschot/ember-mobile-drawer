@@ -2,7 +2,12 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { hash } from '@ember/helper';
 import { assert, warn } from '@ember/debug';
-import { Spring, type FrameClock } from '../-private/spring/spring.ts';
+import { buildWaiter } from '@ember/test-waiters';
+import {
+  Spring,
+  type FrameClock,
+  type SpringResult,
+} from '../-private/spring/spring.ts';
 import {
   dragOffset,
   findSnapPoint,
@@ -30,8 +35,21 @@ import {
   initialFocus,
   tabbables,
 } from '../-private/modal/focus.ts';
+import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
 
-import type { MobileDrawerApi, Placement } from '../types.ts';
+import type {
+  MobileDrawerApi,
+  MobileDrawerDragEndEvent,
+  MobileDrawerDragStartEvent,
+  MobileDrawerToggleEvent,
+  Placement,
+} from '../types.ts';
+
+/**
+ * Keeps `settled()` from `@ember/test-helpers` waiting while the drawer
+ * animates, see `#startSpring`. A no-op in production builds.
+ */
+const animationWaiter = buildWaiter('ember-mobile-drawer:animation');
 
 const PLACEMENTS: readonly Placement[] = ['bottom', 'top', 'left', 'right'];
 
@@ -238,6 +256,34 @@ export interface MobileDrawerSignature {
      * while focus is inside it. Default `true`.
      */
     modal?: boolean;
+    /**
+     * Called when the drawer opens: its active snap point moves from the
+     * smallest snap point to a larger one (by any means: an action, a drag,
+     * `@activeSnapPoint`). Called once per change, in a microtask after it,
+     * together with the modal behaviour (see `@modal`), so when the drawer
+     * starts to move rather than when it arrives. Not called when the drawer
+     * is inserted open, nor for a move between two open snap points. A
+     * drawer that opens and closes again within the same task calls
+     * neither `@onOpen` nor `@onClose`.
+     */
+    onOpen?: (event: MobileDrawerToggleEvent) => void;
+    /**
+     * Called when the drawer closes: its active snap point moves back to the
+     * smallest snap point. Like `@onOpen`, once per change, when the drawer
+     * starts to move. Not called when the drawer is removed while open.
+     */
+    onClose?: (event: MobileDrawerToggleEvent) => void;
+    /**
+     * Called when a drag starts: once a pan along the drawer's axis is
+     * recognised, when `isDragging` turns `true`.
+     */
+    onDragStart?: (event: MobileDrawerDragStartEvent) => void;
+    /**
+     * Called once for every `@onDragStart`, when the drag ends, before
+     * `@onSnapPointChange`. Not called when the drawer is removed during
+     * the drag.
+     */
+    onDragEnd?: (event: MobileDrawerDragEndEvent) => void;
   };
   Blocks: {
     default: [drawer: MobileDrawerApi];
@@ -472,6 +518,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * behaviour and focus follow in a microtask, see `#applyOpen`.
    */
   #open = false;
+  /**
+   * `#open` as last reported through `@onOpen`/`@onClose`; the value on
+   * insertion counts as reported. See `#applyOpen`.
+   */
+  #reportedOpen = false;
   /** The element to focus again when the drawer closes. */
   #returnFocus?: HTMLElement | SVGElement;
   /** Its ancestors when the drawer opened, see `#returnFocusAfterClose`. */
@@ -622,7 +673,22 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#measure();
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
+      this.#reportedOpen = this.#open;
       this.#syncScrollLock();
+      registerDrawer({
+        root,
+        tray: this.#tray,
+        placement: () => this.placement,
+        isDragging: () => this.#drag !== undefined,
+        offset: () => this.#renderedOffset,
+        offsetOf: (index) =>
+          this.#layout
+            ? findSnapPoint(this.#layout.resolved, index)?.offset
+            : undefined,
+        screenScale: () => (this.#layout ? this.#screenScale() : 1),
+        open: this.open,
+        close: this.close,
+      });
       const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
         tray.addEventListener(
@@ -664,7 +730,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           this.#syncOpen();
           return;
         }
-        this.#endDrag();
+        const drag = this.#endDrag()!;
+        // Not during rendering. The drawer jumps to the active snap point.
+        queueMicrotask(() => {
+          if (this.#destroyed) return;
+          this.args.onDragEnd?.({
+            snapPoint: this.activeSnapPoint,
+            offset: drag.offset,
+            velocity: 0,
+          });
+        });
       }
       // A new placement is a different layout: jump instead of animating
       // along the new axis from the old position.
@@ -690,6 +765,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#syncScrollLock();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
       mountedDrawers.delete(this);
+      if (this.#root) unregisterDrawer(this.#root);
       // Undone right away, so nothing outlives the drawer. Focus can only
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
@@ -799,7 +875,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     if (spring.isAnimating) return; // Retargeted; the run continues.
 
-    void spring.start().then(() => {
+    void this.#startSpring(spring).then(() => {
       if (!spring.isAnimating) this.#queueState({ isAnimating: false });
     });
     // With reduced motion the run ends synchronously.
@@ -899,7 +975,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#scrollSpring = scrollSpring;
     scrollSpring.set(distance, 0);
     scrollSpring.retarget(0);
-    void scrollSpring.start().then(() => {
+    void this.#startSpring(scrollSpring).then(() => {
       if (this.#scrollSpring === scrollSpring && !scrollSpring.isAnimating) {
         this.#scrollSpring = undefined;
       }
@@ -935,6 +1011,21 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     reset.fraction = fraction;
     const top = reset.start + reset.sign * reset.distance * fraction;
     this.#tray!.scrollTo({ top, behavior: 'instant' });
+  }
+
+  /**
+   * Starts a run of `spring` and registers it with the test waiter, so
+   * `await settled()` waits until it ends (it comes to rest or is stopped).
+   * Not with an injected clock: the addon's own tests then run the frames
+   * themselves, and `settled()` would wait for frames that never come.
+   */
+  #startSpring(spring: Spring): Promise<SpringResult> {
+    const run = spring.start();
+    if (spring.isAnimating && !this.#clock) {
+      const token = animationWaiter.beginAsync();
+      void run.then(() => animationWaiter.endAsync(token));
+    }
+    return run;
   }
 
   /** Stops a running scroll reset where it is. */
@@ -1342,6 +1433,24 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#closedWithFocusInside = undefined;
       this.#returnFocusAfterClose(focusInside, wasModal);
     }
+    this.#reportOpen();
+  }
+
+  /**
+   * Calls `@onOpen` or `@onClose` when `#open` differs from what was last
+   * reported. Runs in `#applyOpen`, so a drawer that opens and closes again
+   * before it runs reports neither.
+   */
+  #reportOpen(): void {
+    const open = this.#open;
+    if (open === this.#reportedOpen) return;
+    this.#reportedOpen = open;
+    const event = { snapPoint: this.activeSnapPoint };
+    if (open) {
+      this.args.onOpen?.(event);
+    } else {
+      this.args.onClose?.(event);
+    }
   }
 
   #activateModal(): void {
@@ -1583,6 +1692,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * event time stamps can't be set.
    */
   #timeOf(event: Event | undefined): number {
+    const { dragTime } = drawerEnvironment;
+    if (dragTime) return dragTime();
     if (this.#clock) return this.#clock.now();
     return event?.timeStamp ?? performance.now();
   }
@@ -1807,6 +1918,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#velocity.add(this.#timeOf(data.originalEvent), offset);
     this.#queueState({ isDragging: true });
     this.#render(offset);
+    this.args.onDragStart?.({ snapPoint: this.activeSnapPoint, offset });
   };
 
   private onPan = (data: PanData, source: HTMLElement): void => {
@@ -1895,6 +2007,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.uncontrolledVersion++;
     }
     this.#moveToActive(true);
+    this.args.onDragEnd?.({ snapPoint: index, offset, velocity });
     if (index !== previous) this.args.onSnapPointChange?.(index);
   }
 

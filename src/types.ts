@@ -63,3 +63,38 @@ export interface MobileDrawerApi {
    */
   progress: number;
 }
+
+/** What `@onOpen` and `@onClose` are called with. */
+export interface MobileDrawerToggleEvent {
+  /** Index into `@snapPoints` of the snap point the drawer is moving to. */
+  snapPoint: number;
+}
+
+/** What `@onDragStart` is called with. */
+export interface MobileDrawerDragStartEvent {
+  /** Index into `@snapPoints` of the active snap point when the drag started. */
+  snapPoint: number;
+  /** How far open the drawer was when the drag started, in px. */
+  offset: number;
+}
+
+/** What `@onDragEnd` is called with. */
+export interface MobileDrawerDragEndEvent {
+  /**
+   * Index into `@snapPoints` of the snap point the release picked: the one
+   * passed to `@onSnapPointChange` when it differs from the active one. When
+   * the drawer is controlled, it only moves there once the parent passes it
+   * in. A drag that ends without a release (its handle was removed, or
+   * `@placement` changed) gives the active snap point, where the drawer
+   * stays.
+   */
+  snapPoint: number;
+  /** How far open the drawer was when it was let go, in px. */
+  offset: number;
+  /**
+   * The release velocity in px/s along the drawer's axis: positive opens,
+   * negative closes. `0` when the drag ended without a release or the
+   * browser cancelled the pointer.
+   */
+  velocity: number;
+}
