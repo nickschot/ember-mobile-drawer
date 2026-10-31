@@ -1,17 +1,20 @@
 import type { FrameClock } from './spring/spring.ts';
 
 /**
- * Overrides for the environment the drawer animates in. Every field is
- * optional; unset fields use the browser defaults of {@link Spring}
+ * Overrides for the environment the drawer runs in. Every field is optional;
+ * unset fields use the browser defaults: those of {@link Spring}
  * (`performance.now` + `requestAnimationFrame`, and the
- * `prefers-reduced-motion` media query).
+ * `prefers-reduced-motion` media query) and, for the body scroll lock, iOS
+ * detection from `navigator`.
  *
  * Read when a drawer is inserted into the DOM, so set it before rendering.
  *
  * @internal Not public API. The addon's own tests use it to drive animations
- *   frame by frame with a fake clock.
+ *   frame by frame with a fake clock, and to try the iOS scroll lock.
  */
 export const drawerEnvironment: {
   clock?: FrameClock;
   prefersReducedMotion?: () => boolean;
+  /** Whether to lock body scrolling the iOS way, see `lockBodyScroll`. */
+  isIOS?: () => boolean;
 } = {};

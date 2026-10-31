@@ -34,10 +34,11 @@ export default class SideDrawerExample extends Component {
       @activeSnapPoint={{this.active}}
       @onSnapPointChange={{this.setActive}}
       class="demo-drawer"
+      aria-labelledby="example-nav-title"
       as |drawer|
     >
       <nav class="example-nav" aria-label="Example navigation">
-        <h3>Mail</h3>
+        <h3 id="example-nav-title">Mail</h3>
         <ul>
           {{#each LINKS as |link|}}
             <li>

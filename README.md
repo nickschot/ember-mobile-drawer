@@ -52,8 +52,10 @@ export default class Example extends Component {
       @snapPoints={{this.snapPoints}}
       @activeSnapPoint={{this.active}}
       @onSnapPointChange={{this.setActive}}
+      aria-labelledby="drawer-title"
       as |drawer|
     >
+      <h2 id="drawer-title">Details</h2>
       <button type="button" {{on "click" drawer.open}}>Expand</button>
       <button type="button" {{on "click" drawer.close}}>Close</button>
     </MobileDrawer>
@@ -68,16 +70,58 @@ Arguments:
 - `@activeSnapPoint`: the index into `@snapPoints` the drawer should be at. Changing it animates the drawer there. Leave it out to let the drawer keep track of its snap point itself (it then starts at index `0`, or stays where it was if you stop passing it). Update it together with `@snapPoints`: an index that doesn't exist is clamped to the nearest valid one, with a warning in development.
 - `@onSnapPointChange`: called with the new index when the drawer wants to move (through `snapTo`, `open`, `close` or a drag). When `@activeSnapPoint` is set, the drawer only moves once you pass the new index back in.
 - `@handleOnly`: only start a drag on elements with the yielded `handle` modifier. Default `false`: the whole tray drags.
-- `@backdrop`: whether to render the backdrop behind the tray. Default `true`. With `@backdrop={{false}}` nothing covers the page, so it stays interactive while the drawer is open.
+- `@modal`: whether the drawer is a modal dialog while it is open. Default `true`. See [Accessibility](#accessibility).
+- `@backdrop`: whether to render the backdrop behind the tray. Defaults to the value of `@modal`: `true`, unless the drawer is non-modal. With `@backdrop={{false}}` nothing covers the page.
 - `@closeOnBackdropClick`: whether a tap or click on the backdrop closes the drawer (like `close()`, so through `@onSnapPointChange` when `@activeSnapPoint` is set). Default `true`.
+
+Attributes such as `class`, `aria-label` and `aria-labelledby` go on the drawer's root element.
 
 The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), the `handle` modifier, and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
 
 ### Backdrop
 
-The backdrop covers the page behind the drawer. Its opacity follows the drawer as it moves, from transparent when closed to `--mobile-drawer-backdrop-opacity` (default `0.4`) at the largest snap point; set its colour with `--mobile-drawer-backdrop-color` (see [Styles](#styles)). While the drawer is open the backdrop catches taps, so the page behind it can't be clicked; a tap closes the drawer. A pointer that moves more than 10px before it lifts (a drag or a scroll that happens to start on the backdrop) doesn't count as a tap. Once the drawer is closed, or while the backdrop is fully transparent, it doesn't block the page.
+The backdrop covers the page behind the drawer. Its opacity follows the drawer as it moves, from transparent when closed to `--mobile-drawer-backdrop-opacity` (default `0.4`) at the largest snap point; set its colour with `--mobile-drawer-backdrop-color` (see [Styles](#styles)). While the drawer is open the backdrop catches taps, so the page behind it can't be clicked; a tap closes the drawer. A pointer that moves more than 10px before it lifts (a drag or a scroll that happens to start on the backdrop) doesn't count as a tap. At its smallest snap point the backdrop doesn't block the page: not when the drawer is closed, and not for a "peek" drawer whose smallest snap point is above `0` (for example `[120, '100%']`), so the page stays usable next to the peeking drawer.
 
-Turn off tap-to-close with `@closeOnBackdropClick={{false}}`, or leave the backdrop out entirely with `@backdrop={{false}}`.
+Turn off tap-to-close with `@closeOnBackdropClick={{false}}`, or leave the backdrop out entirely with `@backdrop={{false}}`. Non-modal drawers have no backdrop unless you pass `@backdrop={{true}}`.
+
+### Accessibility
+
+A drawer is "open" while it is above its smallest snap point.
+
+By default the drawer is modal (`@modal={{true}}`), like a dialog. While it is open:
+
+- focus moves into it: to the first element with `autofocus`, else the first focusable element, else the tray itself;
+- Tab and Shift+Tab stay inside the drawer, wrapping around at the ends;
+- the rest of the page is [`inert`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert): the siblings of the drawer and of each of its ancestors, up to `<body>` (see the limits below);
+- the page doesn't scroll. On iOS the body is fixed in place at its scroll position, which is restored on close;
+- Escape closes it, like `close()` (so through `@onSnapPointChange` when `@activeSnapPoint` is set). Not while the drawer is being dragged: the release decides where it goes.
+
+When it closes, focus returns to the element that had it when the drawer opened. If that element is no longer on the page (for example, the drawer deleted the list item it was opened from), focus goes to the first focusable element in the nearest of its former ancestors that is still on the page, but not all the way up to `<body>`; if there is none, focus stays where the browser puts it. Move focus yourself after the close if you want it somewhere else.
+
+Several modal drawers can be open at once: the inert page and the scroll lock last until the last one closes, and Escape closes the top one. A modal drawer inside another drawer is only modal while the outer drawer is open: if your app closes the outer one first, the page is usable again, and focus returns to the outer drawer's trigger.
+
+The drawer only removes the `inert` attributes it added. An element that was already inert when the drawer opened, or on which your app sets or removes `inert` while the drawer is open, is left to your app.
+
+The root gets `role="dialog"`, and `aria-modal="true"` while open. Give it a name with `aria-labelledby` (pointing at a heading in the drawer) or `aria-label`; a modal drawer without one logs a warning in development. A closed drawer is hidden (`visibility: hidden`), also from assistive technology.
+
+With `@modal={{false}}` the drawer doesn't move focus, trap it, make the page inert or lock scrolling, and has no role (add one yourself if it fits, for example a `<nav>` inside a side drawer). Escape closes it while focus is inside it, and focus then returns to where it was when the drawer opened. Use it for drawers that sit next to the page, such as a peek drawer:
+
+```gts
+<MobileDrawer @modal={{false}} @snapPoints={{array 120 "100%"}}>
+  …
+</MobileDrawer>
+```
+
+A modal drawer with a smallest snap point above `0` is only modal above its peek.
+
+Limits of modal drawers:
+
+- **Content rendered elsewhere becomes inert.** Popovers, dropdowns and menus that belong to the drawer's content must be rendered inside the drawer. Addons that render into a `<body>`-level element (a "wormhole" or portal, such as ember-basic-dropdown and ember-power-select) put their content next to the drawer, where it is inert and can't be clicked. Render them in place (`@renderInPlace={{true}}` for ember-basic-dropdown and ember-power-select). Elements added to `<body>` after the drawer opened are not made inert.
+- **The scroll lock assumes the document scrolls.** It sets `overflow: hidden` on `<html>`. If your app scrolls inside `<body>` or a wrapper element instead (common in app-like layouts), that element keeps scrolling; lock it yourself while the drawer is open. Fixed-position page elements are not adjusted for the scrollbar that disappears.
+- **Content below the visible part of a partly open drawer.** At a snap point below the highest one, Tab can move focus to elements that are off screen. Give keyboard users a way to expand the drawer (for example, open it to its highest snap point when it is opened with the keyboard). See [#83](https://github.com/nickschot/ember-mobile-drawer/issues/83).
+- **Safari doesn't focus buttons on click**, so after opening a drawer with a mouse or touch there, no element gets focus back on close.
+
+Animations respect `prefers-reduced-motion`: with reduced motion the drawer jumps to its snap point instead of animating.
 
 ### Dragging
 

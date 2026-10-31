@@ -78,12 +78,18 @@ importers:
       '@types/qunit':
         specifier: ^2.19.12
         version: 2.19.14
+      axe-core:
+        specifier: ^4.14.0
+        version: 4.14.0
       babel-plugin-ember-template-compilation:
         specifier: ^4.0.0
         version: 4.0.1
       concurrently:
         specifier: ^9.0.1
         version: 9.2.5
+      ember-a11y-testing:
+        specifier: ^8.0.1
+        version: 8.0.1(@babel/core@7.29.7)(@ember/test-helpers@5.7.0(@babel/core@7.29.7))(@ember/test-waiters@4.1.2)(axe-core@4.14.0)(qunit@2.26.0)
       ember-page-title:
         specifier: ^9.0.3
         version: 9.0.3
@@ -1829,6 +1835,10 @@ packages:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
 
+  axe-core@4.14.0:
+    resolution: {integrity: sha512-9WTZxEjsZ7b13TH8JPmbV2z8CHbl80/2hm3XPEG4JgNdQLK81IBRXmSxHfMAOkSqQeRxT/0dwNDz2GOm3zzpcQ==}
+    engines: {node: '>=4'}
+
   babel-import-util@2.1.1:
     resolution: {integrity: sha512-3qBQWRjzP9NreSH/YrOEU1Lj5F60+pWSLP0kIdCWxjFHH7pX2YPHIxQ67el4gnMNfYoDxSDGcT0zpVlZ+gVtQA==}
     engines: {node: '>= 12.*'}
@@ -2508,6 +2518,18 @@ packages:
 
   electron-to-chromium@1.5.463:
     resolution: {integrity: sha512-nVWNU6ltFjopvOdD44J4zoBkgO0M+WZiFKKFV7EjebOH9z0KNphk6bCEjplXtJofL21ARIuuwWOCsFkBVklm6w==}
+
+  ember-a11y-testing@8.0.1:
+    resolution: {integrity: sha512-irO7yrqz3nnJrBPFlMw4xvdPL7ElwC7fuQYSL4TbtMGk4gqnY+4dkKiNOqCIAg+AF7tBrjXDASkvpHrAHnmVMg==}
+    engines: {node: '>= 18', pnpm: '>= 10'}
+    peerDependencies:
+      '@ember/test-helpers': ^3.0.3 || ^4.0.2 || ^5.0.0
+      '@ember/test-waiters': ^2.4.3 || ^3.0.0 || ^4.0.0
+      axe-core: ^4.0.0
+      qunit: '>= 2'
+    peerDependenciesMeta:
+      qunit:
+        optional: true
 
   ember-cli-babel-plugin-helpers@1.1.1:
     resolution: {integrity: sha512-sKvOiPNHr5F/60NLd7SFzMpYPte/nnGkq/tMIfXejfKHIhaiIkYFqX8Z9UFTKWLLn+V7NOaby6niNPZUdvKCRw==}
@@ -7283,6 +7305,8 @@ snapshots:
     dependencies:
       possible-typed-array-names: 1.1.0
 
+  axe-core@4.14.0: {}
+
   babel-import-util@2.1.1: {}
 
   babel-import-util@3.0.1: {}
@@ -7946,6 +7970,19 @@ snapshots:
   ee-first@1.1.1: {}
 
   electron-to-chromium@1.5.463: {}
+
+  ember-a11y-testing@8.0.1(@babel/core@7.29.7)(@ember/test-helpers@5.7.0(@babel/core@7.29.7))(@ember/test-waiters@4.1.2)(axe-core@4.14.0)(qunit@2.26.0):
+    dependencies:
+      '@ember/test-helpers': 5.7.0(@babel/core@7.29.7)
+      '@ember/test-waiters': 4.1.2
+      '@embroider/addon-shim': 1.10.3
+      axe-core: 4.14.0
+      decorator-transforms: 2.4.0(@babel/core@7.29.7)
+    optionalDependencies:
+      qunit: 2.26.0
+    transitivePeerDependencies:
+      - '@babel/core'
+      - supports-color
 
   ember-cli-babel-plugin-helpers@1.1.1: {}
 

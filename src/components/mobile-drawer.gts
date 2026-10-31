@@ -23,6 +23,13 @@ import {
 } from '../-private/lifecycle-modifier.ts';
 import { noop } from '../-private/noop-modifier.ts';
 import { VelocityTracker } from '../-private/gesture/velocity.ts';
+import { inertOutside } from '../-private/modal/inert.ts';
+import { lockBodyScroll } from '../-private/modal/scroll-lock.ts';
+import {
+  focusWithoutScrolling,
+  initialFocus,
+  tabbables,
+} from '../-private/modal/focus.ts';
 
 import type { MobileDrawerApi, Placement } from '../types.ts';
 
@@ -94,6 +101,15 @@ const TAP_SLOP = 10;
  * by rounding.
  */
 const CLICK_MATCH = 2;
+
+/**
+ * The open modal drawers, in the order they became modal. Only the last one
+ * handles Escape and Tab on the document.
+ */
+const modalStack: object[] = [];
+
+/** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
+const mountedDrawers = new Set<object>();
 
 /**
  * Whether `element` can scroll along the axis in the direction a finger that
@@ -200,7 +216,8 @@ export interface MobileDrawerSignature {
     /**
      * Whether to render the backdrop behind the tray. Without it nothing
      * covers the page, so the page stays interactive while the drawer is
-     * open. Default `true`.
+     * open. Default: the value of `@modal`, so `true` unless the drawer is
+     * non-modal.
      */
     backdrop?: boolean;
     /**
@@ -210,6 +227,17 @@ export interface MobileDrawerSignature {
      * isn't a tap. Default `true`.
      */
     closeOnBackdropClick?: boolean;
+    /**
+     * Whether the drawer is a modal dialog while it is open (above its
+     * smallest snap point): focus moves into it and stays there, the rest of
+     * the page is `inert`, the page doesn't scroll, Escape closes it and
+     * focus returns to where it was when it closes. The root gets
+     * `role="dialog"` (label it with `aria-label` or `aria-labelledby`) and,
+     * while open, `aria-modal="true"`. With `@modal={{false}}` the page stays
+     * usable while the drawer is open, and Escape only closes the drawer
+     * while focus is inside it. Default `true`.
+     */
+    modal?: boolean;
   };
   Blocks: {
     default: [drawer: MobileDrawerApi];
@@ -325,6 +353,14 @@ const clampIndex = (index: number, count: number) =>
  * is not a drag source: touching it doesn't hold a running animation, and
  * a drag on it doesn't move the drawer.
  *
+ * Modal (`@modal`, default): "open" means the active snap point is above
+ * the smallest one. While open, the rest of the page is inert (the siblings
+ * of the root and of each of its ancestors up to `<body>`), body scrolling is
+ * locked, Tab wraps around inside the tray and Escape calls `close`. Focus
+ * moves in when it opens and back to the previously focused element when it
+ * closes, before `data-closed` hides the drawer. All of that is applied in a
+ * microtask after rendering (`#syncOpen`), and undone right away on teardown.
+ *
  * Snap points are re-measured when the root or `.mobile-drawer__content`
  * changes size, and when an argument changes. The tray itself is not
  * observed (the component sizes it), so a change to only the tray's own
@@ -350,6 +386,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * everything that reads `activeSnapPoint` updates.
    */
   @tracked uncontrolledVersion = 0;
+  /** Whether the modal behaviour is on, for `aria-modal`. */
+  @tracked modalActive = false;
 
   /**
    * The snap point when uncontrolled. Not tracked (see `uncontrolledVersion`)
@@ -424,6 +462,30 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
   /**
+   * Whether the last `#render` was above the smallest snap point, where the
+   * backdrop catches pointers, see `#paintBackdrop`.
+   */
+  #backdropBlocks = false;
+  /**
+   * Whether the active snap point is above the smallest one, i.e. the drawer
+   * is open or opening. Updated during rendering by `#syncOpen`; the modal
+   * behaviour and focus follow in a microtask, see `#applyOpen`.
+   */
+  #open = false;
+  /** The element to focus again when the drawer closes. */
+  #returnFocus?: HTMLElement | SVGElement;
+  /** Its ancestors when the drawer opened, see `#returnFocusAfterClose`. */
+  #returnFocusPath: Element[] = [];
+  /**
+   * Set when the drawer closed and `#applyOpen` has yet to return focus:
+   * whether focus was inside the drawer when it closed.
+   */
+  #closedWithFocusInside?: boolean;
+  #applyQueued = false;
+  /** Undoes the modal behaviour while it is on. */
+  #releaseModal?: () => void;
+  #warnedLabel = false;
+  /**
    * The pointer that went down on the backdrop, from its `pointerdown` until
    * its click, its `pointercancel` or the next pointer down. `moved` once it
    * went further than `TAP_SLOP`: its click then isn't a tap. `up` is where
@@ -456,8 +518,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return this.args.handleOnly === true;
   }
 
+  get isModal(): boolean {
+    return this.args.modal !== false;
+  }
+
+  /** Unset, the backdrop follows `@modal`. */
   get showBackdrop(): boolean {
-    return this.args.backdrop !== false;
+    return this.args.backdrop ?? this.isModal;
   }
 
   get closeOnBackdropClick(): boolean {
@@ -550,6 +617,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         onUpdate: ({ value }) => this.#render(value),
       });
       this.#placement = this.placement;
+      root.addEventListener('keydown', this.#onKeyDown);
+      mountedDrawers.add(this);
       this.#measure();
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
@@ -591,7 +660,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         // The finger wins until it lets go; the release then picks a snap
         // point (and asks the parent, when controlled). A new placement is a
         // new axis, so that drag is over.
-        if (!placementChanged) return;
+        if (!placementChanged) {
+          this.#syncOpen();
+          return;
+        }
         this.#endDrag();
       }
       // A new placement is a different layout: jump instead of animating
@@ -616,6 +688,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#spring?.stop();
       this.#stopScrollReset();
       this.#syncScrollLock();
+      this.#root?.removeEventListener('keydown', this.#onKeyDown);
+      mountedDrawers.delete(this);
+      // Undone right away, so nothing outlives the drawer. Focus can only
+      // move back once the drawer is gone from the DOM.
+      const wasModal = this.#releaseModal !== undefined;
+      this.#deactivateModal();
+      if (this.#open) {
+        this.#open = false;
+        const focusInside = this.#hasFocus();
+        queueMicrotask(() =>
+          this.#returnFocusAfterClose(focusInside, wasModal),
+        );
+      }
     },
   };
 
@@ -691,7 +776,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const index = this.activeSnapPoint;
     // Remember a controlled index, so dropping @activeSnapPoint keeps it.
     this.#uncontrolledSnapPoint = index;
-    if (!spring || !this.#layout || this.#destroyed || this.#drag) return;
+    if (!spring || !this.#layout || this.#destroyed) return;
+    this.#syncOpen();
+    if (this.#drag) return;
 
     const target = this.#offsetOf(index);
     this.#queueState({ progress: this.#progressOf(target) });
@@ -717,6 +804,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     });
     // With reduced motion the run ends synchronously.
     this.#queueState({ isAnimating: spring.isAnimating });
+    // Show the drawer now rather than at the first frame, so focus can move
+    // into an opening drawer right away.
+    if (spring.isAnimating) this.#root!.removeAttribute('data-closed');
   }
 
   /**
@@ -888,6 +978,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
 
+    this.#syncOpen();
     const target = this.#offsetOf(this.activeSnapPoint);
     this.#queueState({ progress: this.#progressOf(target) });
     this.#markExpanded(target);
@@ -953,6 +1044,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (!this.#drag) this.#applyScrollReset(open);
     this.#backdropProgress = this.#progressOf(open);
+    this.#backdropBlocks = open > layout.resolved[0]!.offset;
     this.#paintBackdrop();
     root.toggleAttribute(
       'data-closed',
@@ -1044,15 +1136,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * Writes the progress of the last render on the backdrop, if there is one:
    * `--mobile-drawer-progress` for its opacity, and `pointer-events: none`
-   * at progress 0, so an invisible backdrop (e.g. while the drawer closes,
-   * before `data-closed` hides it) never blocks the page.
+   * at or below the smallest snap point. So an invisible backdrop (e.g.
+   * while the drawer closes, before `data-closed` hides it) never blocks the
+   * page, and neither does the backdrop of a "peek" drawer (smallest snap
+   * point above 0) resting at its peek.
    */
   #paintBackdrop(): void {
     const backdrop = this.#backdrop;
     if (!backdrop) return;
     const progress = this.#backdropProgress;
     backdrop.style.setProperty('--mobile-drawer-progress', String(progress));
-    const pointerEvents = progress > 0 ? '' : 'none';
+    const pointerEvents = this.#backdropBlocks ? '' : 'none';
     if (backdrop.style.pointerEvents !== pointerEvents) {
       backdrop.style.pointerEvents = pointerEvents;
     }
@@ -1061,9 +1155,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * The backdrop is optional (`@backdrop`), so it registers itself. It is a
    * pointer convenience and deliberately not focusable or a button: a
-   * keyboard closes the drawer through the app's own controls (and Escape
-   * once modal drawers land), so its listeners are added here rather than
-   * with `{{on}}`.
+   * keyboard closes the drawer with Escape or the app's own controls, so its
+   * listeners are added here rather than with `{{on}}`.
    */
   backdropHooks: LifecycleHooks = {
     install: (backdrop) => {
@@ -1184,6 +1277,284 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (own && pointer?.moved) return;
     this.close();
   };
+
+  /**
+   * Notes whether the active snap point is above the smallest one, and
+   * queues `#applyOpen` for the modal behaviour and focus, which must not run
+   * during rendering. Called whenever the target may have changed (and on
+   * every argument change, which covers `@modal`).
+   */
+  #syncOpen(): void {
+    const layout = this.#layout;
+    if (!layout || this.#destroyed) return;
+    const open =
+      this.#offsetOf(this.activeSnapPoint) > layout.resolved[0]!.offset;
+    if (open && !this.#open) {
+      this.#open = true;
+      // Reopened before the close was applied: keep where focus came from.
+      const reopened = this.#closedWithFocusInside !== undefined;
+      this.#closedWithFocusInside = undefined;
+      const active = document.activeElement;
+      if (
+        (active instanceof HTMLElement || active instanceof SVGElement) &&
+        active !== document.body &&
+        !this.#root!.contains(active)
+      ) {
+        this.#returnFocus = active;
+        this.#returnFocusPath = this.#ancestorsOf(active);
+      } else if (!reopened) {
+        this.#returnFocus = undefined;
+        this.#returnFocusPath = [];
+      }
+    } else if (!open && this.#open) {
+      this.#open = false;
+      // Read now: a drawer that closes without animating is hidden (and
+      // loses focus) before the microtask runs.
+      this.#closedWithFocusInside = this.#hasFocus();
+    }
+    if (this.#applyQueued) return;
+    this.#applyQueued = true;
+    queueMicrotask(() => {
+      this.#applyQueued = false;
+      this.#applyOpen();
+    });
+  }
+
+  /**
+   * Turns the modal behaviour on or off to match `#open` and `@modal`, and
+   * moves focus: into a modal drawer that opens, back to where it came from
+   * when the drawer closes.
+   */
+  #applyOpen(): void {
+    if (this.#destroyed) return;
+    const modal = this.#open && this.isModal && !this.#insideClosedDrawer();
+    const wasModal = this.#releaseModal !== undefined;
+    if (modal && !wasModal) {
+      this.#activateModal();
+    } else if (!modal && wasModal) {
+      this.#deactivateModal();
+    }
+    // Before focus returns: an open modal drawer inside this one would keep
+    // the element to return to inert.
+    this.#applyNested();
+    const focusInside = this.#closedWithFocusInside;
+    if (focusInside !== undefined) {
+      this.#closedWithFocusInside = undefined;
+      this.#returnFocusAfterClose(focusInside, wasModal);
+    }
+  }
+
+  #activateModal(): void {
+    const root = this.#root!;
+    const tray = this.#tray!;
+    const releaseInert = inertOutside(root);
+    const releaseScroll = lockBodyScroll(tray);
+    modalStack.push(this);
+    document.addEventListener('keydown', this.#onDocumentKeyDown);
+    this.#releaseModal = () => {
+      document.removeEventListener('keydown', this.#onDocumentKeyDown);
+      modalStack.splice(modalStack.indexOf(this), 1);
+      releaseScroll();
+      releaseInert();
+    };
+    this.modalActive = true;
+
+    if (
+      !this.#warnedLabel &&
+      !root.hasAttribute('aria-label') &&
+      !root.hasAttribute('aria-labelledby')
+    ) {
+      this.#warnedLabel = true;
+      warn(
+        '<MobileDrawer>: a modal drawer is a dialog and needs an accessible name. Add `aria-label` or `aria-labelledby` to <MobileDrawer>.',
+        false,
+        { id: 'ember-mobile-drawer.modal-label' },
+      );
+    }
+
+    if (!this.#hasFocus()) focusWithoutScrolling(initialFocus(tray, tray));
+  }
+
+  /** Undoes `#activateModal`, if it is on. Leaves focus alone. */
+  #deactivateModal(): void {
+    const release = this.#releaseModal;
+    if (!release) return;
+    this.#releaseModal = undefined;
+    release();
+    if (!this.#destroyed) this.modalActive = false;
+  }
+
+  /** Whether focus is inside the drawer. */
+  #hasFocus(): boolean {
+    const active = document.activeElement;
+    return !!active && !!this.#root?.contains(active);
+  }
+
+  /**
+   * Focuses the element that had focus when the drawer opened again, if
+   * focus was inside the drawer when it closed (or, for a modal drawer, was
+   * dropped onto `<body>`). Runs after the modal behaviour was undone, so the
+   * element is no longer inert.
+   *
+   * If that element has left the page (e.g. the drawer deleted the list item
+   * it was opened from), focus goes to the first tabbable element in the
+   * nearest of its former ancestors that is still on the page, outside the
+   * drawer, but never all the way up to `<body>`: focus then stays where the
+   * browser put it.
+   */
+  #returnFocusAfterClose(focusInside: boolean, wasModal: boolean): void {
+    const target = this.#returnFocus;
+    const path = this.#returnFocusPath;
+    this.#returnFocus = undefined;
+    this.#returnFocusPath = [];
+    if (!target) return;
+    const active = document.activeElement;
+    const dropped = !active || active === document.body;
+    if (!(focusInside || this.#hasFocus() || (wasModal && dropped))) return;
+    if (target.isConnected) {
+      target.focus();
+      return;
+    }
+    const root = this.#root;
+    const ancestor = path.find((element) => element.isConnected);
+    if (!ancestor) return;
+    tabbables(ancestor)
+      .find((element) => !root?.contains(element))
+      ?.focus();
+  }
+
+  /**
+   * The ancestors of `element` from its parent up to (not including)
+   * `<body>`, for the fallback in `#returnFocusAfterClose`.
+   */
+  #ancestorsOf(element: Element): Element[] {
+    const path: Element[] = [];
+    for (
+      let node = element.parentElement;
+      node && node !== document.body && node !== document.documentElement;
+      node = node.parentElement
+    ) {
+      path.push(node);
+    }
+    return path;
+  }
+
+  /**
+   * Whether the drawer is inside another drawer that is closed or closing,
+   * whose `data-closed` hides it (or soon will): its modal behaviour is then
+   * off, so it never keeps the page inert and locked from inside a hidden
+   * drawer. It comes back when that drawer opens again.
+   */
+  #insideClosedDrawer(): boolean {
+    const root = this.#root;
+    if (!root) return false;
+    for (const other of mountedDrawers as Set<MobileDrawer>) {
+      if (other !== this && !other.#open && other.#root?.contains(root)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Re-applies the open state of the drawers inside this one. */
+  #applyNested(): void {
+    const root = this.#root;
+    if (!root) return;
+    for (const other of mountedDrawers as Set<MobileDrawer>) {
+      if (other !== this && other.#root && root.contains(other.#root)) {
+        other.#applyOpen();
+      }
+    }
+  }
+
+  /**
+   * Escape closes an open drawer while focus is inside it, modal or not.
+   * Events another handler already took care of (`preventDefault`) are left
+   * alone, so of nested drawers only the innermost one closes. Ignored while
+   * the drawer is dragged: the release decides where it goes, so the parent
+   * never sees a close and a reopen.
+   */
+  #onKeyDown = (event: KeyboardEvent): void => {
+    if (
+      event.key !== 'Escape' ||
+      event.defaultPrevented ||
+      event.isComposing ||
+      !this.#open ||
+      this.#drag ||
+      this.#destroyed
+    ) {
+      return;
+    }
+    event.preventDefault();
+    this.close();
+  };
+
+  /**
+   * While modal, for the topmost modal drawer only: Escape closes the drawer
+   * also when focus is outside it (e.g. on `<body>` after a click on the
+   * backdrop), and Tab and Shift+Tab wrap around inside the tray.
+   */
+  #onDocumentKeyDown = (event: KeyboardEvent): void => {
+    if (
+      event.defaultPrevented ||
+      modalStack[modalStack.length - 1] !== this ||
+      this.#destroyed
+    ) {
+      return;
+    }
+    if (event.key === 'Escape') {
+      // Not during a drag: the release decides where the drawer goes.
+      if (event.isComposing || !this.#open || this.#drag) return;
+      event.preventDefault();
+      this.close();
+    } else if (
+      event.key === 'Tab' &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      this.#trapTab(event);
+    }
+  };
+
+  /**
+   * Keeps Tab inside the tray: from the last tabbable element (or from
+   * outside the tray) it moves to the first, Shift+Tab the other way round.
+   * In between the browser moves focus as usual; the rest of the page is
+   * inert, so focus can't leave the drawer.
+   */
+  #trapTab(event: KeyboardEvent): void {
+    const tray = this.#tray!;
+    const items = tabbables(tray);
+    const active = document.activeElement;
+    const inside = !!active && tray.contains(active);
+    const first = items[0];
+    const last = items[items.length - 1];
+    // Whether a tabbable element comes after (or before) the focused one,
+    // also when that isn't tabbable itself (e.g. a focused `tabindex="-1"`
+    // status message after the last button).
+    const any = (position: number) =>
+      !!active &&
+      items.some((item) => active.compareDocumentPosition(item) & position);
+    let next: HTMLElement | undefined;
+    if (!first || !last) {
+      next = tray;
+    } else if (event.shiftKey) {
+      if (
+        !inside ||
+        active === tray ||
+        !any(Node.DOCUMENT_POSITION_PRECEDING)
+      ) {
+        next = last;
+      }
+    } else if (!inside || !any(Node.DOCUMENT_POSITION_FOLLOWING)) {
+      next = first;
+    }
+    if (next) {
+      event.preventDefault();
+      next.focus();
+    }
+  }
 
   /**
    * Screen px per px of drawer offset along the axis: `1`, unless an
@@ -1568,12 +1939,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       class="mobile-drawer"
       data-placement={{this.placement}}
       data-closed
+      role={{if this.isModal "dialog"}}
+      aria-modal={{if this.modalActive "true"}}
       ...attributes
       {{lifecycle
         this.hooks
         this.placement
         this.snapPoints
         this.activeSnapPoint
+        this.isModal
       }}
     >
       {{#if this.showBackdrop}}
@@ -1584,6 +1958,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       {{/if}}
       <div
         class="mobile-drawer__tray"
+        tabindex={{if this.isModal "-1"}}
         {{(if
           this.handleOnly
           noop

@@ -50,6 +50,7 @@ export default class DrawerDemo extends Component<{
   @tracked tall: boolean;
   @tracked backdropOpacity: number;
   // Not settable from the URL, so they start at the drawer's defaults.
+  @tracked modal = true;
   @tracked backdrop = true;
   @tracked closeOnBackdropClick = true;
 
@@ -92,7 +93,11 @@ export default class DrawerDemo extends Component<{
       '@activeSnapPoint={{this.active}}',
       '@onSnapPointChange={{this.setActive}}',
       ...(this.handleOnly ? ['@handleOnly={{true}}'] : []),
-      ...(this.backdrop ? [] : ['@backdrop={{false}}']),
+      ...(this.modal ? [] : ['@modal={{false}}']),
+      // Unset, @backdrop follows @modal.
+      ...(this.backdrop === this.modal
+        ? []
+        : [`@backdrop={{${this.backdrop}}}`]),
       ...(this.backdrop && !this.closeOnBackdropClick
         ? ['@closeOnBackdropClick={{false}}']
         : []),
@@ -161,6 +166,12 @@ export default class DrawerDemo extends Component<{
     this.tall = (event.target as HTMLInputElement).checked;
   };
 
+  /** Like the drawer's default, the backdrop follows the modal setting. */
+  setModal = (event: Event) => {
+    this.modal = (event.target as HTMLInputElement).checked;
+    this.backdrop = this.modal;
+  };
+
   setBackdrop = (event: Event) => {
     this.backdrop = (event.target as HTMLInputElement).checked;
   };
@@ -189,9 +200,11 @@ export default class DrawerDemo extends Component<{
         @activeSnapPoint={{this.active}}
         @onSnapPointChange={{this.onSnapPointChange}}
         @handleOnly={{this.handleOnly}}
+        @modal={{this.modal}}
         @backdrop={{this.backdrop}}
         @closeOnBackdropClick={{this.closeOnBackdropClick}}
         class="demo-drawer"
+        aria-labelledby="demo-drawer-title"
         as |drawer|
       >
         <div class="demo-drawer-content" data-placement={{this.placement}}>
@@ -201,7 +214,7 @@ export default class DrawerDemo extends Component<{
             data-active={{if this.handleOnly "true"}}
             {{drawer.handle}}
           ></div>
-          <h2>Drawer ({{this.placement}})</h2>
+          <h2 id="demo-drawer-title">Drawer ({{this.placement}})</h2>
           <p>
             Snap point
             {{drawer.activeSnapPoint}}
@@ -317,6 +330,14 @@ export default class DrawerDemo extends Component<{
       <label>
         <input
           type="checkbox"
+          checked={{this.modal}}
+          {{on "change" this.setModal}}
+        />
+        Modal (@modal: focus trap, inert page, Escape closes)
+      </label>
+      <label>
+        <input
+          type="checkbox"
           checked={{this.backdrop}}
           {{on "change" this.setBackdrop}}
         />
@@ -360,15 +381,6 @@ export default class DrawerDemo extends Component<{
       <p class="demo-hint">
         These options land with later issues and show up here once they do.
       </p>
-      <div class="demo-pending">
-        <label>
-          <input type="checkbox" />
-          Modal (@modal: focus trap, inert page, Escape closes)
-        </label>
-        <a
-          href="https://github.com/nickschot/ember-mobile-drawer/issues/26"
-        >#26</a>
-      </div>
       <div class="demo-pending">
         <label>
           Spring
