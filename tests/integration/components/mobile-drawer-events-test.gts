@@ -35,6 +35,8 @@ class State {
   @tracked placement: Placement = 'bottom';
   @tracked handleOnly = false;
   @tracked showHandle = true;
+  /** Whether the container is `display: none`. */
+  @tracked hidden = false;
   log: string[] = [];
   dragStarts: MobileDrawerDragStartEvent[] = [];
   dragEnds: MobileDrawerDragEndEvent[] = [];
@@ -68,16 +70,17 @@ class State {
   }
 }
 
-const containerStyle = htmlSafe(
-  'position: relative; width: 400px; height: 600px',
-);
+const containerStyle = (hidden: boolean) =>
+  htmlSafe(
+    `position: relative; width: 400px; height: 600px${hidden ? '; display: none' : ''}`,
+  );
 const contentStyle = htmlSafe('height: 80px');
 
 async function renderDrawer(state: State) {
   await render(
     <template>
       {{! template-lint-disable no-inline-styles }}
-      <div style={{containerStyle}}>
+      <div style={{containerStyle state.hidden}}>
         <MobileDrawer
           @placement={{state.placement}}
           @snapPoints={{SNAP_POINTS}}
@@ -202,6 +205,29 @@ module('Integration | Component | mobile-drawer | events', function (hooks) {
     await renderDrawer(state);
     await settle();
     assert.deepEqual(state.toggles, []);
+  });
+
+  test('a drawer inserted open while hidden calls nothing when it is shown', async function (assert) {
+    const state = new State();
+    state.active = 2;
+    state.hidden = true;
+    await renderDrawer(state);
+    await settle();
+
+    state.hidden = false;
+    await settled();
+    // The resize observer measures the drawer once it has a size.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await settle();
+    assert
+      .dom('.mobile-drawer')
+      .doesNotHaveAttribute('data-closed', 'measured and shown open');
+    assert.deepEqual(state.toggles, []);
+
+    state.active = 0;
+    await settle();
+    assert.deepEqual(state.toggles, ['close:0'], 'later changes are reported');
   });
 
   test('@onOpen and @onClose follow @activeSnapPoint changes from outside', async function (assert) {

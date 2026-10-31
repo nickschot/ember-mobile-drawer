@@ -262,26 +262,31 @@ export interface MobileDrawerSignature {
      * `@activeSnapPoint`). Called once per change, in a microtask after it,
      * together with the modal behaviour (see `@modal`), so when the drawer
      * starts to move rather than when it arrives. Not called when the drawer
-     * is inserted open, nor for a move between two open snap points. A
+     * is inserted open (also when it is inserted hidden, e.g. in a
+     * `display: none` container, and then shown), nor for a move between
+     * two open snap points. A
      * drawer that opens and closes again within the same task calls
      * neither `@onOpen` nor `@onClose`.
      */
     onOpen?: (event: MobileDrawerToggleEvent) => void;
     /**
      * Called when the drawer closes: its active snap point moves back to the
-     * smallest snap point. Like `@onOpen`, once per change, when the drawer
-     * starts to move. Not called when the drawer is removed while open.
+     * smallest snap point, which is always the `snapPoint` it gets. Like
+     * `@onOpen`, once per change, when the drawer starts to move. Not called
+     * when the drawer is removed while open.
      */
     onClose?: (event: MobileDrawerToggleEvent) => void;
     /**
      * Called when a drag starts: once a pan along the drawer's axis is
-     * recognised, when `isDragging` turns `true`.
+     * recognised. Called synchronously, before the yielded `isDragging`
+     * turns `true` (in a microtask right after).
      */
     onDragStart?: (event: MobileDrawerDragStartEvent) => void;
     /**
      * Called once for every `@onDragStart`, when the drag ends, before
      * `@onSnapPointChange`. Not called when the drawer is removed during
-     * the drag.
+     * the drag. `@onSnapPointChange` then gets an index into `@snapPoints`
+     * as they were at the release, also if `@onDragEnd` changes them.
      */
     onDragEnd?: (event: MobileDrawerDragEndEvent) => void;
   };
@@ -519,10 +524,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #open = false;
   /**
-   * `#open` as last reported through `@onOpen`/`@onClose`; the value on
-   * insertion counts as reported. See `#applyOpen`.
+   * `#open` as last reported through `@onOpen`/`@onClose`. The first value
+   * `#syncOpen` computes (on insertion, or at the first successful measure
+   * of a drawer inserted while hidden) counts as reported. See `#applyOpen`.
    */
   #reportedOpen = false;
+  /** Whether `#reportedOpen` has its first value, see `#syncOpen`. */
+  #hasReportBaseline = false;
   /** The element to focus again when the drawer closes. */
   #returnFocus?: HTMLElement | SVGElement;
   /** Its ancestors when the drawer opened, see `#returnFocusAfterClose`. */
@@ -673,7 +681,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#measure();
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
-      this.#reportedOpen = this.#open;
       this.#syncScrollLock();
       registerDrawer({
         root,
@@ -1380,6 +1387,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!layout || this.#destroyed) return;
     const open =
       this.#offsetOf(this.activeSnapPoint) > layout.resolved[0]!.offset;
+    if (!this.#hasReportBaseline) {
+      // The first open state the drawer knows (on insertion, or once a
+      // drawer inserted while hidden is measured) is not a change.
+      this.#hasReportBaseline = true;
+      this.#reportedOpen = open;
+    }
     if (open && !this.#open) {
       this.#open = true;
       // Reopened before the close was applied: keep where focus came from.
