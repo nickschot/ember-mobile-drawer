@@ -62,9 +62,8 @@
  * .mobile-drawer__tray      The sheet and scroll container. The component
  *                           writes an inline `touch-action` on it to decide
  *                           between scrolling and dragging (see the README);
- *                           don't override `touch-action` on it. Unless
- *                           `@handleOnly` is set, it also writes an inline
- *                           `overflow-y: hidden` (`overflow-x` for left and
+ *                           don't override `touch-action` on it. It also
+ *                           writes an inline `overflow-y: hidden` (`overflow-x` for left and
  *                           right) on it, and on the elements marked
  *                           `data-mobile-drawer-scroll` in it, while the
  *                           drawer is below its highest snap point, so the
