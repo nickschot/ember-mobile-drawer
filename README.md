@@ -591,7 +591,7 @@ When a snap point makes the tray larger than its content, the content sits again
 }
 ```
 
-The safe-area insets are padding on the `.mobile-drawer__content` element inside the tray. The base styles set no padding on the tray itself, so padding you add to `.mobile-drawer__tray` adds to the insets instead of replacing them. Don't set padding on `.mobile-drawer__content`, because that would remove the insets. Unlayered resets that set padding on `*` or `div` remove them too, because unlayered CSS always wins over the drawer's layer. In the same way, an unlayered `* { margin: 0 }` reset undoes the leading-edge alignment of top and left drawers. Put such resets in a layer before `ember-mobile-drawer`.
+The safe-area insets are padding on the `.mobile-drawer__content` element inside the tray. The base styles set no padding on the tray itself, so padding you add to `.mobile-drawer__tray` adds to the insets instead of replacing them. Padding that you set on `.mobile-drawer__content` replaces the insets (the iOS theme does this for its side padding, see below), so add the insets back if you need them. Unlayered resets that set padding on `*` or `div` remove them too, because unlayered CSS always wins over the drawer's layer. In the same way, an unlayered `* { margin: 0 }` reset undoes the leading-edge alignment of top and left drawers. Put such resets in a layer before `ember-mobile-drawer`.
 
 ### State attributes
 
@@ -916,7 +916,7 @@ The block gets one value, of type `MobileDrawerApi`:
 | ----------------------------- | ----------------------- | ---------- |
 | `MobileDrawerToggleEvent`     | `@onOpen`, `@onClose`   | `snapPoint`: index of the snap point the drawer moves to (for `@onClose` always the smallest one). |
 | `MobileDrawerDragStartEvent`  | `@onDragStart`          | `snapPoint`: the active snap point when the drag started. `offset`: how far open the drawer was, in px. |
-| `MobileDrawerDragEndEvent`    | `@onDragEnd`            | `snapPoint`: the snap point the release picked. `offset`: how far open the drawer was at the release, in px. `velocity`: the release velocity in px/s along the axis, positive opens. |
+| `MobileDrawerDragEndEvent`    | `@onDragEnd`            | `snapPoint`: the snap point the release picked. `offset`: how far open the drawer was at the release, in px: where the finger put it (right after a drag starts, the tray can still be a few px behind it). `velocity`: the release velocity in px/s along the axis, positive opens. |
 
 ### Root element
 
@@ -957,8 +957,8 @@ See [State attributes](#state-attributes) for details.
 | `.mobile-drawer__backdrop`      | Covers the page behind the tray. The component writes `--mobile-drawer-progress` on it. |
 | `.mobile-drawer__backdrop-tint` | iOS Safari 26 only: colours the bar at the far edge. See [iOS Safari 26 bars](#ios-safari-26-bars). |
 | `.mobile-drawer__sheet`         | Clips the tray. Floats with `--mobile-drawer-inset`. The component writes `--mobile-drawer-expand-progress` on it. |
-| `.mobile-drawer__tray`          | The visible drawer and its scroll container. The component writes its `transform`, `touch-action` and, below the highest snap point, `overflow`. |
-| `.mobile-drawer__content`       | Your block. Has the safe-area padding: don't set padding on it. |
+| `.mobile-drawer__tray`          | The visible drawer and its scroll container. The component writes its `transform` and, below the highest snap point and during the bounce past fully open, `overflow`. It writes `touch-action` only when the tray is a drag source (not with `@handleOnly`). |
+| `.mobile-drawer__content`       | Your block. Has the safe-area padding. If you set padding on it, you replace the insets (the iOS theme sets its own side padding here). |
 | `.mobile-drawer__bar-tint`      | iOS Safari 26 only: colours the bar at the sheet's edge. |
 | `.mobile-drawer-nested`         | Not in the root: the `display: contents` element that the yielded `Nested` renders into. Gets `data-closed` with its drawer. |
 | `.mobile-drawer__dim`           | Not in the root: the dim layer before the root, with `@transparentStatusBar` only. |
@@ -994,7 +994,7 @@ Written by the component; read them, but don't set them:
 | Property                             | On | Value |
 | ------------------------------------ | -- | ----- |
 | `--mobile-drawer-progress`           | `.mobile-drawer__backdrop`, the tints, `.mobile-drawer__dim` | `0` (closed) to `1` (largest snap point), every frame. |
-| `--mobile-drawer-expand-progress`    | `.mobile-drawer__sheet` (the tray inherits it), the tints | `0` at and below the second-highest snap point to `1` at the highest, every frame. Not inherited by the content. |
+| `--mobile-drawer-expand-progress`    | `.mobile-drawer__sheet` (the tray inherits it), `.mobile-drawer__backdrop`, the tints, `.mobile-drawer__dim` | `0` at and below the second-highest snap point to `1` at the highest, every frame. Not inherited by the content. |
 | `--mobile-drawer-page-progress`      | the `data-mobile-drawer-page` element | The progress of the open modal bottom drawers, while one is open. |
 | `--mobile-drawer-page-viewport-top`  | the `data-mobile-drawer-page` element | The top of the viewport in that element, in px. |
 
