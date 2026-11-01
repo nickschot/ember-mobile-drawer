@@ -1,6 +1,6 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { find, render, settled } from '@ember/test-helpers';
+import { clearRender, find, render, settled } from '@ember/test-helpers';
 import { tracked } from '@glimmer/tracking';
 import { array } from '@ember/helper';
 import { htmlSafe } from '@ember/template';
@@ -23,18 +23,41 @@ function el(selector: string): HTMLElement {
 
 const tray = () => el('[data-test-drawer] > .mobile-drawer__tray');
 
+/** Gives the input before a focus, see `focus`. */
+function inputBefore(element: HTMLElement, visible: boolean): () => void {
+  if (visible) {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Shift',
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return () => {};
+  }
+  const init = { bubbles: true, composed: true, pointerId: 1 };
+  element.dispatchEvent(new PointerEvent('pointerdown', init));
+  return () => element.dispatchEvent(new PointerEvent('pointerup', init));
+}
+
 /**
- * Focuses `element` as the keyboard (`visible`, with a focus ring) or a
- * pointer does: test events are not trusted, so they don't count for the
- * browser's `:focus-visible` heuristics. `focusVisible` isn't in
- * TypeScript's `FocusOptions` yet; the tests check `:focus-visible`.
+ * Focuses `element` as the keyboard (`visible`) or a pointer does. A key
+ * press or a pointer that goes down comes first (the drawer reads the last
+ * input, see `focusInputOf`): a `keydown` of Shift (a key the drawer doesn't
+ * handle, unlike Tab, so the test moves focus itself) on the element that
+ * has focus, or a `pointerdown` on `element` (with its `pointerup` after the
+ * focus, as a tap). Test events are not trusted, so they don't count for the
+ * browser's `:focus-visible` heuristics: the focus also asks for a focus
+ * ring or not. `focusVisible` isn't in TypeScript's `FocusOptions` yet.
  */
 function focus(
   element: HTMLElement,
   visible: boolean,
   preventScroll = false,
 ): void {
+  const up = inputBefore(element, visible);
   element.focus({ focusVisible: visible, preventScroll } as FocusOptions);
+  up();
 }
 
 /**
@@ -566,14 +589,103 @@ module(
       field.setAttribute('aria-label', 'Partly visible');
       straddle(field);
       assert.false(isVisible(field), 'partly off screen');
-      // A tap focuses a text field with `:focus-visible` in every browser.
-      // Synthetic pointer events don't count for it, so a plain focus.
-      field.focus();
-      assert.true(field.matches(':focus-visible'), 'a text field has it');
+      // A tap: pointer focus. The field opens an on-screen keyboard, so it
+      // moves the drawer without a focus ring too.
+      focus(field, false);
+      assert.false(field.matches(':focus-visible'), 'no focus ring');
       await settle();
       assert.deepEqual(state.changes, [2]);
       assert.true(isVisible(field), 'on screen');
       field.remove();
+    });
+
+    test('a tap on a partly visible readonly text field does not move the drawer, also with :focus-visible', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const field = Object.assign(document.createElement('input'), {
+        readOnly: true,
+      });
+      field.setAttribute('aria-label', 'Partly visible');
+      straddle(field);
+      assert.false(isVisible(field), 'partly off screen');
+      // As a tap or a click does in Chrome: a pointer goes down, and the
+      // field gets focus with a focus ring. It opens no keyboard.
+      const init = { bubbles: true, pointerId: 1 };
+      field.dispatchEvent(new PointerEvent('pointerdown', init));
+      field.focus({ focusVisible: true } as FocusOptions);
+      field.dispatchEvent(new PointerEvent('pointerup', init));
+      assert.true(field.matches(':focus-visible'), 'a focus ring');
+      await settle();
+      await nextFrames();
+      assert.deepEqual(state.changes, []);
+      assert.strictEqual(root().scrollTop, 0, 'the root is not scrolled');
+      field.remove();
+    });
+
+    test('keyboard focus on a partly visible readonly text field moves the drawer', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const field = Object.assign(document.createElement('input'), {
+        readOnly: true,
+      });
+      field.setAttribute('aria-label', 'Partly visible');
+      straddle(field);
+      focus(field, true);
+      await settle();
+      assert.deepEqual(state.changes, [2]);
+      assert.true(isVisible(field), 'on screen');
+      field.remove();
+    });
+
+    test('focus that the app moves after a key press moves the drawer, also without :focus-visible', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const last = el('[data-test-last]');
+      assert.false(isVisible(last), 'off screen at 40%');
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      // The key press counts, not the browser's focus ring, so the result
+      // is the same in every browser.
+      last.focus({ focusVisible: false } as FocusOptions);
+      assert.false(last.matches(':focus-visible'), 'no focus ring');
+      await settle();
+      assert.deepEqual(state.changes, [2]);
+      assert.true(isVisible(last), 'on screen');
+    });
+
+    test('focus without input long after a tap uses :focus-visible', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const last = el('[data-test-last]');
+      assert.false(isVisible(last), 'off screen at 40%');
+      // An earlier tap on the page.
+      const init = { bubbles: true, pointerId: 1 };
+      document.body.dispatchEvent(new PointerEvent('pointerdown', init));
+      document.body.dispatchEvent(new PointerEvent('pointerup', init));
+      clock.time += 1000;
+      // As a screen reader or switch access moves focus: no key or pointer
+      // event on the page, and the browser gives it a focus ring.
+      last.focus({ focusVisible: true } as FocusOptions);
+      assert.true(last.matches(':focus-visible'), 'a focus ring');
+      await settle();
+      assert.deepEqual(state.changes, [2]);
+      assert.true(isVisible(last), 'on screen');
+    });
+
+    test('focus right after a tap is pointer focus, also with :focus-visible', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const last = el('[data-test-last]');
+      const init = { bubbles: true, pointerId: 1 };
+      document.body.dispatchEvent(new PointerEvent('pointerdown', init));
+      document.body.dispatchEvent(new PointerEvent('pointerup', init));
+      clock.time += 999;
+      last.focus({ focusVisible: true } as FocusOptions);
+      assert.true(last.matches(':focus-visible'), 'a focus ring');
+      await settle();
+      await nextFrames();
+      assert.deepEqual(state.changes, []);
     });
 
     test('a tap on a partly visible button does not move the drawer', async function (assert) {
@@ -604,6 +716,164 @@ module(
       await settle();
       assert.deepEqual(state.changes, []);
       assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-expanded');
+    });
+  },
+);
+
+module(
+  'Integration | Component | mobile-drawer | input type listeners',
+  function (hooks) {
+    setupRenderingTest(hooks);
+
+    let clock: FakeClock;
+    /**
+     * The capture `keydown` and `pointerdown` listeners on the window, as
+     * `[type, listener]`.
+     */
+    let listeners: [string, EventListenerOrEventListenerObject][];
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+
+    /** Whether the test counts this listener. */
+    const counts = (
+      type: string,
+      options?: boolean | EventListenerOptions,
+    ): boolean =>
+      (type === 'keydown' || type === 'pointerdown') &&
+      (typeof options === 'boolean' ? options : (options?.capture ?? false));
+
+    const indexOf = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+    ): number => listeners.findIndex(([t, l]) => t === type && l === listener);
+
+    hooks.beforeEach(function () {
+      clock = new FakeClock();
+      drawerEnvironment.clock = clock;
+      drawerEnvironment.prefersReducedMotion = () => false;
+      listeners = [];
+      window.addEventListener = (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) => {
+        if (counts(type, options) && indexOf(type, listener) === -1) {
+          listeners.push([type, listener]);
+        }
+        add(type, listener, options);
+      };
+      window.removeEventListener = (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | EventListenerOptions,
+      ) => {
+        const index = counts(type, options) ? indexOf(type, listener) : -1;
+        if (index !== -1) listeners.splice(index, 1);
+        remove(type, listener, options);
+      };
+    });
+
+    hooks.afterEach(function () {
+      // @ts-expect-error: back to the method of the prototype.
+      delete window.addEventListener;
+      // @ts-expect-error: back to the method of the prototype.
+      delete window.removeEventListener;
+      delete drawerEnvironment.clock;
+      delete drawerEnvironment.prefersReducedMotion;
+    });
+
+    async function settle() {
+      await settled();
+      clock.runUntilIdle();
+      await settled();
+    }
+
+    test('one set of listeners while drawers show, none when no drawer shows', async function (assert) {
+      const state = new State();
+      state.active = 0;
+      await renderDrawer(state);
+      await settle();
+      assert.strictEqual(listeners.length, 0, 'none while closed');
+
+      state.active = 1;
+      await settle();
+      assert.strictEqual(listeners.length, 2, 'keydown and pointerdown');
+
+      state.nestedShown = true;
+      await settle();
+      assert.strictEqual(listeners.length, 2, 'shared with a second drawer');
+
+      state.active = 0;
+      await settle();
+      assert.strictEqual(listeners.length, 2, 'the nested drawer still shows');
+
+      state.nestedShown = false;
+      await settle();
+      assert.strictEqual(listeners.length, 0, 'removed');
+
+      state.active = 1;
+      await settle();
+      assert.strictEqual(listeners.length, 2, 'added again');
+    });
+
+    test('a drawer at a peek listens too', async function (assert) {
+      const state = new State();
+      state.snapPoints = [80, '40%', '100%'];
+      state.active = 0;
+      await renderDrawer(state);
+      await settle();
+      assert.strictEqual(listeners.length, 2);
+    });
+
+    test('the listeners go when the last drawer is destroyed', async function (assert) {
+      const state = new State();
+      state.nestedShown = true;
+      await renderDrawer(state);
+      await settle();
+      assert.strictEqual(listeners.length, 2);
+
+      state.nestedShown = false;
+      await settle();
+      assert.strictEqual(listeners.length, 2, 'the outer drawer still shows');
+
+      await clearRender();
+      assert.strictEqual(listeners.length, 0, 'removed');
+    });
+
+    test('the last input is forgotten when no drawer shows', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await settle();
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      state.active = 0;
+      await settle();
+      // No drawer listens now.
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      state.active = 1;
+      await settle();
+
+      // No input since the drawer showed: the browser decides, and a
+      // readonly text field never counts as keyboard focus then.
+      const field = Object.assign(document.createElement('input'), {
+        readOnly: true,
+      });
+      field.setAttribute('aria-label', 'Partly visible');
+      straddle(field);
+      field.focus({ focusVisible: true } as FocusOptions);
+      assert.true(field.matches(':focus-visible'), 'a focus ring');
+      await settle();
+      assert.deepEqual(state.changes, [], 'not keyboard focus');
+
+      // A key press now counts.
+      field.blur();
+      focus(field, true);
+      await settle();
+      assert.deepEqual(state.changes, [2], 'keyboard focus');
+      field.remove();
     });
   },
 );
