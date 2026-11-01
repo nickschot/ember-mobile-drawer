@@ -372,14 +372,21 @@ const NON_TEXT_INPUTS = new Set([
  * Whether `element` is a field the user edits: a text input, a textarea, a
  * select, or contenteditable content. Focus on one of them can open an
  * on-screen keyboard or picker, and the browser then scrolls the field into
- * view. An iframe counts too: the element focused inside it is unknown.
+ * view. An iframe counts too: the element focused inside it is unknown. A
+ * `readonly` or `disabled` text field opens no keyboard, so it doesn't count.
  */
 function isEditable(element: Element): boolean {
-  if (element instanceof HTMLInputElement) {
-    return !NON_TEXT_INPUTS.has(element.type);
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    if (element.readOnly || element.disabled) return false;
+    return (
+      element instanceof HTMLTextAreaElement ||
+      !NON_TEXT_INPUTS.has(element.type)
+    );
   }
   return (
-    element instanceof HTMLTextAreaElement ||
     element instanceof HTMLSelectElement ||
     element instanceof HTMLIFrameElement ||
     (element instanceof HTMLElement && element.isContentEditable)
@@ -1162,16 +1169,26 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Whether focus is on an editable element in the tray (see `isEditable`),
-   * also inside an open shadow root in it.
+   * Whether focus in the tray holds a resize's scroll reset: focus on an
+   * editable element (see `isEditable`), or keyboard focus
+   * (`:focus-visible`) on any element in it, which the browser scrolled into
+   * view. Not the tray itself, which a modal drawer focuses when it opens.
+   * Also inside an open shadow root in the tray.
    */
-  #editingInTray(): boolean {
+  #focusHoldsReset(): boolean {
+    const tray = this.#tray!;
     let active = document.activeElement;
-    if (!active || !this.#tray!.contains(active)) return false;
+    if (!active || active === tray || !tray.contains(active)) return false;
     while (active.shadowRoot?.activeElement) {
       active = active.shadowRoot.activeElement;
     }
-    return isEditable(active);
+    if (isEditable(active)) return true;
+    try {
+      return active.matches(':focus-visible');
+    } catch {
+      // A browser without `:focus-visible` (Safari before 15.4).
+      return false;
+    }
   }
 
   #onResize(): void {
@@ -1191,11 +1208,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#markExpanded(target);
     // From where the tray and its content are now. Also keeps a top drawer's
     // content end at its leading edge below the top when the content changes.
-    // Not while a field in the tray has focus: the browser may have
-    // scrolled it into view (e.g. above an Android keyboard that resizes
-    // the page), and the reset would move it out of view again. Other
-    // focused elements (e.g. a tapped button) don't hold the reset.
-    if (!this.#editingInTray()) this.#planScrollReset(target);
+    // Not while a field in the tray has focus, or an element has keyboard
+    // focus: the browser may have scrolled it into view (e.g. above an
+    // Android keyboard that resizes the page, or on Tab), and the reset
+    // would move it out of view again. Other focused elements (e.g. a
+    // tapped button) don't hold the reset.
+    if (!this.#focusHoldsReset()) this.#planScrollReset(target);
 
     if (spring.isAnimating) {
       // Keep going from the current position to the new target.

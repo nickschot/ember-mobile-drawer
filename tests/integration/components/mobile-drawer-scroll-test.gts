@@ -50,6 +50,15 @@ function el(selector: string): HTMLElement {
 
 const tray = () => el('.mobile-drawer__tray');
 
+/**
+ * Focuses `element` as the keyboard (`visible`, with a focus ring) or a
+ * pointer does: test events are not trusted, so they don't count for the
+ * browser's `:focus-visible` heuristics. `focusVisible` isn't in
+ * TypeScript's `FocusOptions` yet; the tests check `:focus-visible`.
+ */
+const focus = (element: HTMLElement, visible: boolean) =>
+  element.focus({ focusVisible: visible } as FocusOptions);
+
 /** Scrolls `element` along the drawer's axis to its start, middle or end. */
 function scrollTo(
   element: HTMLElement,
@@ -1547,16 +1556,29 @@ module(
         () =>
           Object.assign(document.createElement('input'), { type: 'checkbox' }),
       ],
+      [
+        'a readonly text input',
+        () =>
+          Object.assign(document.createElement('input'), { readOnly: true }),
+      ],
+      [
+        'a readonly textarea',
+        () =>
+          Object.assign(document.createElement('textarea'), { readOnly: true }),
+      ],
     ] as const) {
-      test(`a resize below the highest snap point resets the scroll position while ${name} in the tray has focus`, async function (assert) {
+      test(`a resize below the highest snap point resets the scroll position while ${name} in the tray has pointer focus`, async function (assert) {
         const state = new State();
         state.active = 1;
         await renderDrawer(state);
         const element = create();
         el('.mobile-drawer__content').prepend(element);
-        // As a tap on it does in Chrome, Firefox and Android.
-        element.focus();
+        // As a tap on it does in Chrome, Firefox and Android: focus without
+        // a focus ring. Synthetic pointer events don't count for the
+        // browser's `:focus-visible` heuristics, so the test asks for it.
+        focus(element, false);
         assert.strictEqual(document.activeElement, element, 'focused');
+        assert.false(element.matches(':focus-visible'), 'no keyboard focus');
         tray().scrollTop = 100;
 
         await resize(state, 1100);
@@ -1566,6 +1588,49 @@ module(
         element.remove();
       });
     }
+
+    test('a resize below the highest snap point keeps the scroll position while a button in the tray has keyboard focus', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const button = document.createElement('button');
+      button.textContent = 'At the end';
+      el('.mobile-drawer__content').append(button);
+      // As Tab does: focus with a focus ring. The browser scrolls the button
+      // into view.
+      focus(button, true);
+      assert.strictEqual(document.activeElement, button, 'focused');
+      assert.true(button.matches(':focus-visible'), 'keyboard focus');
+      tray().scrollTop = 100;
+
+      await resize(state, 1100);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 100, 'kept');
+
+      button.blur();
+      await resize(state, 1200);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'reset after the blur');
+      button.remove();
+    });
+
+    test('a disabled text input in the tray does not hold the reset', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const input = document.createElement('input');
+      el('.mobile-drawer__content').prepend(input);
+      focus(input, false);
+      // The app disables the field while it has focus. Browsers that blur it
+      // then leave focus on the body, which doesn't hold the reset either.
+      input.disabled = true;
+      tray().scrollTop = 100;
+
+      await resize(state, 1100);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'reset');
+      input.remove();
+    });
 
     /**
      * Starts the reset's own spring: the drawer rests at its partial snap
