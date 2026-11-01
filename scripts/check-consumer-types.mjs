@@ -5,8 +5,8 @@
 //   @glimmer/component and @glint/template, the optional peer dependency) from
 //   this repository's node_modules, so no network access is needed,
 // - runs `tsc` with `skipLibCheck: false` on a file that imports the root
-//   exports, the component, the template registry and the test-support
-//   helpers.
+//   exports (including the spring presets), the component, the template
+//   registry and the test-support helpers.
 // It runs under `moduleResolution: bundler`, the resolution the package
 // supports (see "TypeScript" in README.md).
 import { execFileSync } from 'node:child_process';
@@ -39,9 +39,13 @@ import {
   type MobileDrawerDragEndEvent,
   type MobileDrawerDragStartEvent,
   type MobileDrawerSignature,
+  type MobileDrawerSpring,
   type MobileDrawerToggleEvent,
   type Placement,
   type SnapPoint,
+  type SpringDuration,
+  springFromDuration,
+  springPresets,
 } from '${pkg}';
 import MobileDrawerComponent from '${pkg}/components/mobile-drawer';
 import type Registry from '${pkg}/template-registry';
@@ -69,7 +73,25 @@ export const args: MobileDrawerSignature['Args'] = {
     void (snapPoint + offset),
   onDragEnd: ({ snapPoint, offset, velocity }: MobileDrawerDragEndEvent) =>
     void (snapPoint + offset + velocity),
+  spring: springPresets.ios,
 };
+
+const duration: SpringDuration = { duration: 0.5, bounce: 0.15 };
+export const snappy: Readonly<MobileDrawerSpring> = springFromDuration(duration);
+export const withSnappy: MobileDrawerSignature['Args'] = { spring: snappy };
+// @ts-expect-error the result of springFromDuration is read-only
+snappy.stiffness = 1;
+// @ts-expect-error the preset springs are read-only
+springPresets.iosBouncy.damping = 1;
+export const stiffer: MobileDrawerSignature['Args'] = {
+  spring: { stiffness: 600 },
+};
+// @ts-expect-error not a preset
+export const badPreset: MobileDrawerSpring = springPresets.android;
+// @ts-expect-error the presets are read-only
+springPresets.ios = snappy;
+// @ts-expect-error not a spring parameter
+export const badSpring: MobileDrawerSignature['Args'] = { spring: { tension: 1 } };
 
 export async function useTestSupport(element: Element): Promise<void> {
   const target: DrawerTarget = element;

@@ -33,13 +33,28 @@
   }
 }
 
-body {
+/*
+ * The page colour is on <html> and the page element, not on <body>: the iOS
+ * theme's page scale effect turns <body> black behind the scaled page, and
+ * an unlayered background on <body> would win over it.
+ */
+html {
   background: var(--demo-page);
+}
+
+body {
   color: var(--demo-text);
   margin: 0;
-  padding: 1rem;
   font-family: system-ui, sans-serif;
   line-height: 1.4;
+}
+
+.demo-page {
+  box-sizing: border-box;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 1rem;
+  background: var(--demo-page);
 }
 
 a {
@@ -110,17 +125,6 @@ section > h2 {
 
 .demo-snap-points[aria-invalid="true"] {
   outline: 2px solid var(--demo-error);
-}
-
-.demo-pending {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.5rem;
-}
-
-.demo-controls:disabled {
-  opacity: 0.7;
 }
 
 .demo-code pre {
@@ -389,8 +393,22 @@ section > h2 {
 }
 
 /* iOS theme example: spacing and type only; the look comes from the theme. */
+.example-ios-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .example-ios-sheet {
   font-family: -apple-system, system-ui, sans-serif;
+}
+
+/*
+ * With the page scale effect, leave a gap above the sheet at full height,
+ * as iOS does, so the scaled page shows behind it as a card.
+ */
+.example-ios-sheet--card[data-placement="bottom"] > .mobile-drawer__tray {
+  max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px);
 }
 
 .example-ios-title {

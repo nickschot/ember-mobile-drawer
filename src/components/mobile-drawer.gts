@@ -4,6 +4,7 @@ import { hash } from '@ember/helper';
 import { assert, warn } from '@ember/debug';
 import { buildWaiter } from '@ember/test-waiters';
 import {
+  DEFAULT_SPRING_CONFIG,
   Spring,
   type FrameClock,
   type SpringResult,
@@ -36,6 +37,8 @@ import {
   tabbables,
 } from '../-private/modal/focus.ts';
 import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
+import { setPageProgress } from '../-private/page-progress.ts';
+import type { MobileDrawerSpring } from '../springs.ts';
 
 import type {
   MobileDrawerApi,
@@ -289,6 +292,16 @@ export interface MobileDrawerSignature {
      * as they were at the release, also if `@onDragEnd` changes them.
      */
     onDragEnd?: (event: MobileDrawerDragEndEvent) => void;
+    /**
+     * The spring that moves the drawer to a snap point: `stiffness`,
+     * `damping` and `mass`, for example `springPresets.ios`. Keys that are
+     * left out keep the default (`springPresets.default`). Read when an
+     * animation starts, so a change applies from the next one. Values must
+     * be finite numbers greater than `0`: development builds assert that,
+     * production builds ignore other values. With reduced motion the drawer
+     * jumps to its snap point whatever the spring.
+     */
+    spring?: Partial<MobileDrawerSpring>;
   };
   Blocks: {
     default: [drawer: MobileDrawerApi];
@@ -476,6 +489,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * never pulls it further off its edge.
    */
   #overshoot = 0;
+  /**
+   * Set when a run of the spring towards the highest snap point has
+   * reached it; the render then holds the tray there for the rest of that
+   * run (see `#render`). Cleared when the run ends, a drag starts or the
+   * target changes.
+   */
+  #arrivedAtHighest = false;
   /**
    * Whether the tray was at (or past) the highest snap point at the last
    * render, i.e. whether its content may scroll. See `#trayTouchAction`.
@@ -671,6 +691,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       const { clock } = drawerEnvironment;
       this.#clock = clock;
       this.#spring = new Spring({
+        ...this.#springConfig(),
         clock,
         prefersReducedMotion: drawerEnvironment.prefersReducedMotion,
         onUpdate: ({ value }) => this.#render(value),
@@ -772,7 +793,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#syncScrollLock();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
       mountedDrawers.delete(this);
-      if (this.#root) unregisterDrawer(this.#root);
+      if (this.#root) {
+        setPageProgress(this.#root, 0);
+        unregisterDrawer(this.#root);
+      }
       // Undone right away, so nothing outlives the drawer. Focus can only
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
@@ -974,6 +998,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     const scrollSpring = new Spring({
+      ...this.#springConfig(),
       clock: this.#clock,
       prefersReducedMotion: drawerEnvironment.prefersReducedMotion,
       onUpdate: ({ value }) =>
@@ -1027,12 +1052,38 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * themselves, and `settled()` would wait for frames that never come.
    */
   #startSpring(spring: Spring): Promise<SpringResult> {
+    if (!spring.isAnimating) spring.configure(this.#springConfig());
     const run = spring.start();
     if (spring.isAnimating && !this.#clock) {
       const token = animationWaiter.beginAsync();
       void run.then(() => animationWaiter.endAsync(token));
     }
     return run;
+  }
+
+  /**
+   * The spring parameters from `@spring`, with the defaults for the keys it
+   * leaves out. Development builds assert that every value is valid;
+   * production builds use the default instead of an invalid value.
+   */
+  #springConfig(): MobileDrawerSpring {
+    const { stiffness, damping, mass } = DEFAULT_SPRING_CONFIG;
+    const config: MobileDrawerSpring = { stiffness, damping, mass };
+    const spring = this.args.spring;
+    if (!spring) return config;
+    for (const key of ['stiffness', 'damping', 'mass'] as const) {
+      const value: unknown = spring[key];
+      if (value === undefined) continue;
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        config[key] = value;
+      } else {
+        const shown = typeof value === 'number' ? String(value) : typeof value;
+        assert(
+          `<MobileDrawer>: @spring.${key} must be a finite number greater than 0, got ${shown}`,
+        );
+      }
+    }
+    return config;
   }
 
   /** Stops a running scroll reset where it is. */
@@ -1117,7 +1168,25 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // overshoot, but never pulls the tray further off its edge than where
     // the finger left it.
     const max = this.#drag ? Infinity : layout.trayLength + this.#overshoot;
-    const open = clamp(offset, 0, max);
+    let open = clamp(offset, 0, max);
+    // A spring that bounces comes back below its target after it overshoots
+    // it. At the highest snap point that would lock the content's scrolling
+    // again for a moment (and make a touch drag instead of scroll), so once a
+    // run towards the highest snap point gets there, the tray stays there
+    // for the rest of the run. The undershoot is a fraction of a percent of
+    // the move, so this doesn't show.
+    const spring = this.#spring!;
+    if (
+      this.#drag ||
+      !spring.isAnimating ||
+      layout.maxOffset <= 0 ||
+      Math.abs(spring.target - layout.maxOffset) > EPSILON
+    ) {
+      this.#arrivedAtHighest = false;
+    } else if (this.#arrivedAtHighest || open >= layout.maxOffset - EPSILON) {
+      this.#arrivedAtHighest = true;
+      open = Math.max(open, layout.maxOffset);
+    }
     if (!this.#drag) {
       this.#overshoot = clamp(open - layout.trayLength, 0, this.#overshoot);
     }
@@ -1142,8 +1211,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (!this.#drag) this.#applyScrollReset(open);
     this.#backdropProgress = this.#progressOf(open);
-    this.#backdropBlocks = open > layout.resolved[0]!.offset;
+    const smallest = layout.resolved[0]!.offset;
+    this.#backdropBlocks = open > smallest;
     this.#paintBackdrop();
+    // For the page behind (`data-mobile-drawer-page`, see
+    // `setPageProgress`): from the smallest snap point (0) to the largest
+    // (1), for modal bottom drawers only. A non-modal drawer leaves the page
+    // as it is, usable; and like on iOS, only a sheet from the bottom moves
+    // the page back, not a top or side drawer.
+    setPageProgress(
+      root,
+      this.isModal && this.placement === 'bottom' && layout.maxOffset > smallest
+        ? clamp((open - smallest) / (layout.maxOffset - smallest), 0, 1)
+        : 0,
+    );
     root.toggleAttribute(
       'data-closed',
       open <= 0 && !this.#spring!.isAnimating && !this.#drag,

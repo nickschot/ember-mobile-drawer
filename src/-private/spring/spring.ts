@@ -146,6 +146,24 @@ function assertPositive(name: string, value: number): void {
 }
 
 /**
+ * `base` with the defined values of `overrides`, validated and frozen.
+ *
+ * @throws RangeError when a value is not a finite number greater than 0.
+ */
+function mergeConfig(
+  base: Readonly<SpringConfig>,
+  overrides: Partial<SpringConfig>,
+): Readonly<SpringConfig> {
+  const config: SpringConfig = { ...base };
+  for (const key of Object.keys(config) as (keyof SpringConfig)[]) {
+    const value = overrides[key];
+    if (value !== undefined) config[key] = value;
+    assertPositive(key, config[key]);
+  }
+  return Object.freeze(config);
+}
+
+/**
  * Advances a damped spring by `dt` seconds using the closed-form solution.
  * `displacement` is the position relative to the target.
  *
@@ -227,7 +245,7 @@ export function stepSpring(
  * ```
  */
 export class Spring {
-  readonly config: Readonly<SpringConfig>;
+  #config: Readonly<SpringConfig>;
 
   #value: number;
   #velocity: number;
@@ -253,23 +271,35 @@ export class Spring {
       ...overrides
     } = options;
 
-    const config: SpringConfig = { ...DEFAULT_SPRING_CONFIG };
-    for (const key of Object.keys(config) as (keyof SpringConfig)[]) {
-      const value = overrides[key];
-      if (value !== undefined) config[key] = value;
-      assertPositive(key, config[key]);
-    }
+    const config = mergeConfig(DEFAULT_SPRING_CONFIG, overrides);
     assertFinite('from', from);
     assertFinite('to', to);
     assertFinite('velocity', velocity);
 
-    this.config = Object.freeze(config);
+    this.#config = config;
     this.#value = from;
     this.#velocity = velocity;
     this.#target = to;
     this.#onUpdate = onUpdate;
     this.#clock = clock;
     this.#prefersReducedMotion = prefersReducedMotion;
+  }
+
+  /** The physical parameters in use, see {@link Spring.configure}. */
+  get config(): Readonly<SpringConfig> {
+    return this.#config;
+  }
+
+  /**
+   * Changes physical parameters; keys that are left out or `undefined` keep
+   * their current value. Position, velocity and target are kept. A run in
+   * progress continues with the new parameters from its next frame.
+   *
+   * @throws RangeError when a value is not a finite number greater than 0;
+   *   the parameters are then unchanged.
+   */
+  configure(overrides: Partial<SpringConfig>): void {
+    this.#config = mergeConfig(this.#config, overrides);
   }
 
   /** Current position in px. */
@@ -382,7 +412,7 @@ export class Spring {
         this.#value - this.#target,
         this.#velocity,
         dt,
-        this.config,
+        this.#config,
       );
       const value = this.#target + next.displacement;
       if (!Number.isFinite(value) || !Number.isFinite(next.velocity)) {
@@ -424,8 +454,8 @@ export class Spring {
   #isAtRest(): boolean {
     return (
       Math.abs(this.#value - this.#target) <=
-        this.config.restDisplacementThreshold &&
-      Math.abs(this.#velocity) <= this.config.restVelocityThreshold
+        this.#config.restDisplacementThreshold &&
+      Math.abs(this.#velocity) <= this.#config.restVelocityThreshold
     );
   }
 

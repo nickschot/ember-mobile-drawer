@@ -11,6 +11,19 @@ module('Unit | demo-app | parsePlaygroundParams', function () {
     assert.strictEqual(state.backdropOpacity, 0.4);
     assert.false(state.handleOnly);
     assert.false(state.tall);
+    assert.strictEqual(state.spring, 'default');
+  });
+
+  test('?spring picks a spring preset by name', function (assert) {
+    assert.strictEqual(parsePlaygroundParams('?spring=ios').spring, 'ios');
+    assert.strictEqual(
+      parsePlaygroundParams('?spring=iosBouncy').spring,
+      'iosBouncy',
+    );
+    assert.strictEqual(
+      parsePlaygroundParams('?spring=android').spring,
+      'default',
+    );
   });
 
   test("the docs' example", function (assert) {
