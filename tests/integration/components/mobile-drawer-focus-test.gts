@@ -50,6 +50,30 @@ function isVisible(element: HTMLElement): boolean {
   return rect.top >= top - 0.5 && rect.bottom <= bottom + 0.5;
 }
 
+const root = () => el('[data-test-drawer]');
+
+/** Waits for two frames, so the browser has sent its scroll events. */
+async function nextFrames(): Promise<void> {
+  for (let i = 0; i < 2; i++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
+/**
+ * Puts `element` in the drawer's content (after the first button) so that
+ * it crosses the end of the visible part of the tray: partly on screen.
+ */
+function straddle(element: HTMLElement): void {
+  el('[data-test-first]').after(element);
+  const rect = element.getBoundingClientRect();
+  const trayRect = tray().getBoundingClientRect();
+  const rootRect = root().getBoundingClientRect();
+  const scale = rootRect.height / root().offsetHeight;
+  const end = Math.min(trayRect.bottom, rootRect.bottom);
+  const margin = (end - rect.height / 2 - rect.top) / scale;
+  element.style.cssText = `display: block; margin-top: ${margin}px`;
+}
+
 class State {
   @tracked active = 1;
   @tracked modal: boolean | undefined;
@@ -303,16 +327,97 @@ module(
       assert.true(isVisible(last), 'on screen');
     });
 
-    test('a drawer at its peek does not move', async function (assert) {
+    for (const modal of [false, true]) {
+      test(`a ${modal ? 'modal' : 'non-modal'} drawer at its peek opens to its highest snap point`, async function (assert) {
+        const state = new State();
+        state.modal = modal;
+        state.snapPoints = [120, '100%'];
+        state.active = 0;
+        await setup(state);
+        const last = el('[data-test-last]');
+        assert.false(isVisible(last), 'off screen at the peek');
+        focus(last, true);
+        await settled();
+        assert.deepEqual(state.changes, [1], 'asks for the highest');
+        assert.strictEqual(root().scrollTop, 0, 'the root is not scrolled');
+        clock.runUntilIdle();
+        await settled();
+        assert.dom('[data-test-drawer]').hasAttribute('data-expanded');
+        assert.strictEqual(state.opens, 1, '@onOpen: the drawer opened');
+        assert.strictEqual(document.activeElement, last, 'keeps focus');
+        assert.true(isVisible(last), 'on screen');
+        if (modal) {
+          assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+        }
+      });
+    }
+
+    test('the root scrolls back when the drawer does not move', async function (assert) {
       const state = new State();
-      state.snapPoints = ['40%', '100%'];
+      state.modal = false;
+      state.snapPoints = [120, '100%'];
       state.active = 0;
       await setup(state);
-      const last = el('[data-test-last]');
-      focus(last, true);
-      await settle();
-      assert.deepEqual(state.changes, []);
+      state.accept = false;
+      focus(el('[data-test-last]'), true);
+      await settled();
+      assert.deepEqual(state.changes, [1], 'asked');
+      // The scroll event of the browser's scroll comes with the next frame.
+      await nextFrames();
+      assert.strictEqual(root().scrollTop, 0, 'the root is not scrolled');
       assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-expanded');
+    });
+
+    test('a root scroll after the move started is undone too', async function (assert) {
+      const state = new State();
+      await setup(state);
+      focus(el('[data-test-last]'), true, true);
+      await settled();
+      assert.deepEqual(state.changes, [2]);
+      const before = tray().getBoundingClientRect().top;
+      // As a browser that scrolls the focused element into view after the
+      // focus events.
+      root().scrollTop = 300;
+      assert.strictEqual(root().scrollTop, 300, 'scrolled');
+      await nextFrames();
+      assert.strictEqual(root().scrollTop, 0, 'scrolled back');
+      assert.strictEqual(tray().getBoundingClientRect().top, before);
+      clock.runUntilIdle();
+      await settled();
+      assert.dom('[data-test-drawer]').hasAttribute('data-expanded');
+    });
+
+    test('a tap on a partly visible text field moves the drawer', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const field = document.createElement('input');
+      field.setAttribute('aria-label', 'Partly visible');
+      straddle(field);
+      assert.false(isVisible(field), 'partly off screen');
+      // A tap focuses a text field with `:focus-visible` in every browser.
+      // Synthetic pointer events don't count for it, so a plain focus.
+      field.focus();
+      assert.true(field.matches(':focus-visible'), 'a text field has it');
+      await settle();
+      assert.deepEqual(state.changes, [2]);
+      assert.true(isVisible(field), 'on screen');
+      field.remove();
+    });
+
+    test('a tap on a partly visible button does not move the drawer', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const button = document.createElement('button');
+      button.textContent = 'Partly visible';
+      straddle(button);
+      assert.false(isVisible(button), 'partly off screen');
+      focus(button, false);
+      assert.false(button.matches(':focus-visible'), 'no keyboard focus');
+      await settle();
+      await nextFrames();
+      assert.deepEqual(state.changes, []);
+      assert.strictEqual(root().scrollTop, 0, 'the root is not scrolled');
+      button.remove();
     });
 
     test('keyboard focus in a nested drawer does not move the drawer around it', async function (assert) {

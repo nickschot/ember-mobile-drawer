@@ -498,8 +498,9 @@ const clampIndex = (index: number, count: number) =>
  * closes, before `data-closed` hides the drawer. All of that is applied in a
  * microtask after rendering (`#syncOpen`), and undone right away on teardown.
  *
- * Keyboard focus on an element in the tray that is off screen moves an open
- * drawer (modal or not) to its highest snap point, see `#onTrayFocusIn`.
+ * Keyboard focus on an element in the tray that is off screen moves the
+ * drawer (modal or not, also from a peek) to its highest snap point, see
+ * `#onTrayFocusIn`. The root never scrolls, see `#resetRootScroll`.
  *
  * Snap points are re-measured when the root or `.mobile-drawer__content`
  * changes size, and when an argument changes. The tray itself is not
@@ -792,6 +793,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       });
       this.#placement = this.placement;
       root.addEventListener('keydown', this.#onKeyDown);
+      root.addEventListener('scroll', this.#onRootScroll, { passive: true });
       mountedDrawers.add(this);
       this.#measure();
       // Appear at the initial snap point without animating in.
@@ -889,6 +891,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#stopScrollReset();
       this.#syncScrollLock();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
+      this.#root?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
       if (this.#root) {
         setPageProgress(this.#root, 0);
@@ -2117,21 +2120,27 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Keyboard focus on an element in the tray that isn't fully visible at
-   * the active snap point moves an open drawer below its highest snap point
-   * to its highest snap point, like `open`: uncontrolled it moves there,
-   * controlled it asks the parent through `@onSnapPointChange`, as after a
-   * drag. Below the highest snap point the content can't scroll along the
-   * axis, so this is the only way to show it. Modal or not: the focused
-   * element is hidden either way. When the drawer arrives, the tray scrolls
-   * the element into view if the browser didn't (see `#revealFocus`).
+   * the active snap point moves a visible drawer below its highest snap
+   * point to its highest snap point, like `open`: uncontrolled it moves
+   * there, controlled it asks the parent through `@onSnapPointChange`, as
+   * after a drag. Below the highest snap point the content can't scroll
+   * along the axis, so this is the only way to show it. Modal or not: the
+   * focused element is hidden either way. Also at a peek (a smallest snap
+   * point above `0`), where Tab reaches the content from the page: the
+   * drawer then opens, as after a drag up, so `@onOpen` is called and a
+   * modal drawer turns modal (focus stays on the element). Not while the
+   * drawer closes to `0`. When the drawer arrives, the tray scrolls the
+   * element into view if the browser didn't (see `#revealFocus`).
    *
    * Only keyboard focus (`:focus-visible`, also for programmatic focus after
    * a key press, such as the Tab wrap and the initial focus of a drawer
    * opened with the keyboard): a tap focuses what is under the finger,
-   * which shows. Not at a peek (the smallest snap point, above `0`): the
-   * drawer isn't open there, and a move would open it. Not during a drag
-   * or while a touch holds the drawer, and not for the tray itself or for
-   * the content of a drawer nested in this one, whose own tray handles it.
+   * which shows. Browsers give text fields `:focus-visible` for every focus,
+   * so a tap on a text field that is only partly visible moves the drawer
+   * too, which shows the field above an on-screen keyboard. Not during a
+   * drag or while a touch holds the drawer, and not for the tray itself or
+   * for the content of a drawer nested in this one, whose own tray handles
+   * it.
    *
    * Visibility is checked where the element will be once the drawer rests
    * at its active snap point, not where it is now: a drawer that opens moves
@@ -2148,7 +2157,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#destroyed ||
       this.#drag ||
       this.#hold ||
-      !this.#open ||
+      this.#hidden ||
       target === tray ||
       !(target instanceof Element) ||
       target.closest('.mobile-drawer__tray') !== tray
@@ -2163,15 +2172,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const offset = this.#offsetOf(this.activeSnapPoint);
     if (this.#isHighest(offset) || this.#isVisibleAt(element, offset)) return;
     this.#reveal = element;
-    // Not during rendering (an app may focus an element as it renders), and
-    // after the browser's own scroll into view, which some browsers do
-    // after the focus events.
+    // Not during rendering (an app may focus an element as it renders).
     queueMicrotask(() => {
       if (
         this.#destroyed ||
         this.#reveal !== element ||
         this.#drag ||
-        !this.#open ||
+        this.#hidden ||
         this.#isHighest(this.#offsetOf(this.activeSnapPoint))
       ) {
         return;
@@ -2186,7 +2193,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * never meant to scroll, but a browser that scrolls a focused element into
    * view scrolls it too: below the highest snap point part of the tray is
    * outside the root, so the browser moves the whole drawer (tray and
-   * backdrop) up to show the element, and the tray leaves its edge.
+   * backdrop) up to show the element, and the tray leaves its edge, while
+   * the drawer stays at its snap point. Called before a move for keyboard
+   * focus (Chrome scrolls before the focus events), and on every `scroll`
+   * of the root (`#onRootScroll`), for browsers that scroll after them and
+   * for focus that doesn't move the drawer (a tap on a partly visible
+   * button, a peek of a drawer whose parent declines the move).
    */
   #resetRootScroll(): void {
     const root = this.#root!;
@@ -2194,6 +2206,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       root.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     }
   }
+
+  #onRootScroll = (): void => {
+    if (!this.#destroyed) this.#resetRootScroll();
+  };
 
   /**
    * Whether `element` has keyboard focus: it matches `:focus-visible`. A
