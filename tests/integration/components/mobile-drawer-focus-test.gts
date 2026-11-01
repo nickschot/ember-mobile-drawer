@@ -21,7 +21,8 @@ function el(selector: string): HTMLElement {
   return element;
 }
 
-const tray = () => el('[data-test-drawer] > .mobile-drawer__tray');
+const tray = () =>
+  el('[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__tray');
 
 /** Gives the input before a focus, see `focus`. */
 function inputBefore(element: HTMLElement, visible: boolean): () => void {
@@ -233,6 +234,12 @@ module(
         el('[data-test-drawer]').scrollTop,
         0,
         'the root is back at its start',
+      );
+      // The sheet clips the tray, so Chrome scrolls it instead of the page.
+      assert.strictEqual(
+        el('[data-test-drawer] > .mobile-drawer__sheet').scrollTop,
+        0,
+        'the sheet is back at its start',
       );
       assert.strictEqual(
         tray().getBoundingClientRect().top,
@@ -563,7 +570,7 @@ module(
       assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-expanded');
     });
 
-    test('a root scroll after the move started is undone too', async function (assert) {
+    test('a sheet scroll after the move started is undone too', async function (assert) {
       const state = new State();
       await setup(state);
       focus(el('[data-test-last]'), true, true);
@@ -571,11 +578,13 @@ module(
       assert.deepEqual(state.changes, [2]);
       const before = tray().getBoundingClientRect().top;
       // As a browser that scrolls the focused element into view after the
-      // focus events.
-      root().scrollTop = 300;
-      assert.strictEqual(root().scrollTop, 300, 'scrolled');
+      // focus events. The sheet clips the tray, so the browser scrolls it,
+      // not the root.
+      const sheet = el('[data-test-drawer] > .mobile-drawer__sheet');
+      sheet.scrollTop = 300;
+      assert.strictEqual(sheet.scrollTop, 300, 'scrolled');
       await nextFrames();
-      assert.strictEqual(root().scrollTop, 0, 'scrolled back');
+      assert.strictEqual(sheet.scrollTop, 0, 'scrolled back');
       assert.strictEqual(tray().getBoundingClientRect().top, before);
       clock.runUntilIdle();
       await settled();

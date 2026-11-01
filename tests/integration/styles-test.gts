@@ -62,13 +62,13 @@ function baseRule(selector: string): CSSStyleRule {
 
 function trayRule(placement: Placement): CSSStyleRule {
   return baseRule(
-    `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__tray`,
+    `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__sheet > .mobile-drawer__tray`,
   );
 }
 
 function contentRule(placement: Placement): CSSStyleRule {
   return baseRule(
-    `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__tray > .mobile-drawer__content`,
+    `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content`,
   );
 }
 
@@ -125,11 +125,13 @@ async function renderDrawer(placement?: Placement, closed = false) {
       >
         <div class="mobile-drawer__backdrop" data-test-backdrop></div>
         <div class="mobile-drawer__backdrop-tint" data-test-backdrop-tint></div>
-        <div class="mobile-drawer__tray" data-test-tray>
-          <div class="mobile-drawer__content" data-test-content-wrapper>
-            {{! template-lint-disable no-inline-styles }}
-            <div style="width: 100px; height: 80px" data-test-content>
-              Content
+        <div class="mobile-drawer__sheet">
+          <div class="mobile-drawer__tray" data-test-tray>
+            <div class="mobile-drawer__content" data-test-content-wrapper>
+              {{! template-lint-disable no-inline-styles }}
+              <div style="width: 100px; height: 80px" data-test-content>
+                Content
+              </div>
             </div>
           </div>
         </div>
@@ -577,7 +579,9 @@ module('Integration | styles.css', function (hooks) {
         >
           <div class="mobile-drawer" data-test-root>
             <div class="mobile-drawer__backdrop" data-test-backdrop></div>
-            <div class="mobile-drawer__tray" data-test-tray></div>
+            <div class="mobile-drawer__sheet">
+              <div class="mobile-drawer__tray" data-test-tray></div>
+            </div>
           </div>
         </div>
       </template>,
@@ -931,8 +935,10 @@ module('Integration | styles.css', function (hooks) {
         {{! template-lint-disable no-inline-styles }}
         <div style="position: relative; width: 300px; height: 200px">
           <div class="mobile-drawer" style="position: absolute" data-test-root>
-            <div class="mobile-drawer__tray">
-              <div class="mobile-drawer__content"></div>
+            <div class="mobile-drawer__sheet">
+              <div class="mobile-drawer__tray">
+                <div class="mobile-drawer__content"></div>
+              </div>
             </div>
             <div class="mobile-drawer__bar-tint" data-test-bar-tint></div>
           </div>
@@ -957,8 +963,10 @@ module('Integration | styles.css', function (hooks) {
         <div style="position: relative; width: 300px; height: 200px">
           <div class="mobile-drawer" style="position: absolute" data-test-root>
             <div class="mobile-drawer__backdrop" data-test-backdrop></div>
-            <div class="mobile-drawer__tray" data-test-tray>
-              <div class="mobile-drawer__content" style="height: 50px"></div>
+            <div class="mobile-drawer__sheet">
+              <div class="mobile-drawer__tray" data-test-tray>
+                <div class="mobile-drawer__content" style="height: 50px"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -1004,7 +1012,11 @@ module('Integration | styles.css', function (hooks) {
       assert.strictEqual(trayBox.bottom, rootBox.bottom, 'on the root bottom');
       assert.strictEqual(tray.offsetHeight, 50);
 
+      // The sheet is the fixed tray's containing block, so it clips it.
+      const sheet = tray.parentElement!;
+      assert.strictEqual(getComputedStyle(sheet).contain, 'layout');
       root.style.contain = 'none';
+      sheet.style.contain = 'none';
       assert.notStrictEqual(
         tray.getBoundingClientRect().width,
         rootBox.width,

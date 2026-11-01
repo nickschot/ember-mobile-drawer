@@ -268,9 +268,11 @@ section > h2 {
  * bar takes no space in the flow (negative bottom margin).
  */
 .demo-drawer[data-placement="left"]
+  > .mobile-drawer__sheet
   > .mobile-drawer__tray
   > .mobile-drawer__content,
 .demo-drawer[data-placement="right"]
+  > .mobile-drawer__sheet
   > .mobile-drawer__tray
   > .mobile-drawer__content {
   display: flex;
@@ -427,7 +429,9 @@ section > h2 {
  * With the page scale effect, leave a gap above the sheet at full height,
  * as iOS does, so the scaled page shows behind it as a card.
  */
-.example-ios-sheet--card[data-placement="bottom"] > .mobile-drawer__tray {
+.example-ios-sheet--card[data-placement="bottom"]
+  > .mobile-drawer__sheet
+  > .mobile-drawer__tray {
   max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px);
 }
 

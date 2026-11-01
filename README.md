@@ -279,7 +279,7 @@ How it works: below the highest snap point the component writes an inline `overf
 Classic scrollbars: during the bounce past fully open (see [Dragging](#dragging)) the tray's overflow along the axis is `hidden` too, as below the highest snap point. With classic (not overlay) scrollbars, for example on a Windows touch laptop, the tray's vertical scrollbar then goes away for the moment, and the content gets wider by the scrollbar's width. Mobile browsers use overlay scrollbars, which take no space, so there this doesn't show. The base styles don't set `scrollbar-gutter: stable`, because it reserves the scrollbar's space all the time with classic scrollbars, also when the content doesn't overflow, and that changes the layout of every bottom and top drawer on those devices. If it matters for your app, set it yourself on a bottom or top tray:
 
 ```css
-.my-sheet > .mobile-drawer__tray {
+.my-sheet > .mobile-drawer__sheet > .mobile-drawer__tray {
   scrollbar-gutter: stable;
 }
 ```
@@ -331,6 +331,7 @@ Customise it with CSS custom properties, set on `:root`, any ancestor or the dra
 | `--mobile-drawer-backdrop-color`   | `rgb(0 0 0)`   | Backdrop colour                                 |
 | `--mobile-drawer-backdrop-opacity` | `0.4`          | Backdrop opacity when the drawer is fully open, a number from 0 to 1 |
 | `--mobile-drawer-z-index`          | `1000`         | Stacking order of the drawer overlay            |
+| `--mobile-drawer-inset`            | `0px`          | Inset of a floating bottom sheet below its highest snap point (see [Floating sheet](#floating-sheet)) |
 
 The base styles are easy to override. Every selector is wrapped in `:where()` (zero specificity), and the whole file lives in the `ember-mobile-drawer` cascade layer.
 
@@ -348,7 +349,7 @@ Cascade layers need Safari/iOS 15.4+, Chrome 99+ or Firefox 97+.
 When a snap point makes the tray larger than its content, the content sits against the tray's leading edge, the edge that comes into view first. A drawer that is partly open shows its content rather than empty space. Bottom and right drawers do this through normal block layout. For top and left drawers the tray is a flex container and `.mobile-drawer__content` gets an auto start margin (`margin-top: auto` for top, `margin-left: auto` for left). Content taller or wider than the tray still scrolls; below its highest snap point, a top drawer's tray is scrolled to the end of its content, so the end of the content is at its leading edge (see [Scrolling content](#scrolling-content)). To align the content differently, override `display` on `.mobile-drawer__tray` or `margin` on `.mobile-drawer__content`, for example:
 
 ```css
-.mobile-drawer[data-placement="top"] > .mobile-drawer__tray {
+.mobile-drawer[data-placement="top"] > .mobile-drawer__sheet > .mobile-drawer__tray {
   display: block;
 }
 ```
@@ -364,12 +365,32 @@ The drawer root (`.mobile-drawer`) carries state attributes you can style on:
 - `data-expanded`: while the drawer rests at its highest snap point, or is animating towards it. It doesn't change during a drag or while a touch holds the drawer, so small movements at the top don't flicker it: a drag that starts at the top keeps it until the finger lifts, and loses it only if the drawer is then released towards a lower snap point; a drag up from a lower snap point gets it on release, when the drawer heads for the top. It is never set when the highest snap point is closed (`0`). Use it for a look that only applies when the drawer is fully open, for example:
 
   ```css
-  .mobile-drawer[data-expanded] > .mobile-drawer__tray {
+  .mobile-drawer[data-expanded] > .mobile-drawer__sheet > .mobile-drawer__tray {
     --mobile-drawer-radius: 0;
   }
   ```
 
   The scroll lock (see [Scrolling content](#scrolling-content)) doesn't use it: that follows where the drawer is shown, frame by frame.
+- `data-at-highest`: while the tray is shown at (or past) its highest snap point, where its content can scroll. Unlike `data-expanded` it follows where the drawer is shown, also during a drag or an animation: it comes when the expand progress (see [Floating sheet](#floating-sheet)) gets to 1, and goes when it leaves 1. The iOS theme makes the grabber strip opaque with it.
+- `data-nested`: while a modal drawer in front of this drawer is open (the modal drawer that opened last), and this drawer shows and is not inside it. The iOS theme dims the sheet with it.
+
+### Floating sheet
+
+The tray is in a `.mobile-drawer__sheet` element. The sheet clips the tray and takes no pointer events. Every frame, the component writes the **expand progress** on it, `--mobile-drawer-expand-progress`: `0` at and below the second-highest snap point, `1` at the highest snap point, and linear in the tray's position between them. For a drawer with one open snap point (such as `[0, 'content']`) it goes from `0` when closed to `1` when open. A theme uses it to change the look of the sheet with the finger, between the partial-height look and the full-height look. The property is registered (`@property`) as a number that is not inherited: only the sheet and the tray (which takes it with `inherit`) have it, so the content isn't styled again on every frame. Don't set it yourself.
+
+With `--mobile-drawer-inset` (a length, `0px` by default), a bottom sheet floats: at and below its second-highest snap point the sheet is inset by that length from the left, right and bottom edges, between the two highest snap points by less (the inset times 1 minus the expand progress), and at the highest snap point it is edge-to-edge, as an iOS 27 sheet. The tray keeps its length, its snap points and its closed position: at a snap point its top is where it is without the inset, and the sheet shows it from there to the inset above the bottom edge. When the drawer is closed, no part of the tray shows. The inset area takes no pointer events, so a tap there goes to the backdrop (or, without a backdrop, to the page). The tray is as wide as the sheet, so between the two highest snap points the content is laid out again on every frame. Top, left and right drawers don't float. Round the sheet's bottom corners with `border-radius` on `.mobile-drawer__sheet` (the iOS theme does).
+
+```css
+.my-app {
+  --mobile-drawer-inset: 8px;
+}
+
+.my-app .mobile-drawer__sheet {
+  border-radius: 0 0 24px 24px;
+}
+```
+
+**Markup change:** the tray is now in the `.mobile-drawer__sheet` element, not a direct child of the root. Change app CSS and tests that select `.mobile-drawer > .mobile-drawer__tray` to `.mobile-drawer > .mobile-drawer__sheet > .mobile-drawer__tray`, and code that counts the root's children. A browser that scrolls a focused element into view now scrolls the sheet (the component scrolls it back at once), not the root.
 
 Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
 
@@ -381,14 +402,14 @@ Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
 
 iOS 26 Safari doesn't let fixed elements paint under the status bar or the floating toolbar. It clips them to the area between the bars, also with `100lvh` heights or negative insets. Instead, it fills each bar with a colour that it takes from the fixed element at that edge of the screen. The base styles have an iOS-only rule (in `@supports (-webkit-touch-callout: none)`) that gives Safari the right colours:
 
-- The bar at the sheet's edge gets the sheet colour, so the sheet seems to go on under the bar: the toolbar for a bottom drawer, the status bar for a top drawer. For this, the drawer renders an empty `.mobile-drawer__bar-tint` element after the tray. On iOS it is a 16px fixed strip at that edge, in front of the tray. It paints nothing and takes no pointer events. Its background is `--mobile-drawer-background`, and Safari takes that colour for the bar from the first frame of an opening drawer. When the colour changes, Safari takes the new colour. Left and right drawers don't get the strip. On other browsers it is `display: none`.
+- The bar at the sheet's edge gets the sheet colour, so the sheet seems to go on under the bar: the toolbar for a bottom drawer, the status bar for a top drawer. For this, the drawer renders an empty `.mobile-drawer__bar-tint` element after the sheet. On iOS it is a 16px fixed strip at that edge, in front of the tray. It paints nothing and takes no pointer events. Its background is `--mobile-drawer-background`, and Safari takes that colour for the bar from the first frame of an opening drawer. When the colour changes, Safari takes the new colour. Left and right drawers don't get the strip. On other browsers it is `display: none`.
 - Set the sheet colour with `--mobile-drawer-background`. If your app sets a `background` on `.mobile-drawer__tray` directly, also set the same `background-color` on `.mobile-drawer__bar-tint`. A gradient or an image can't be a bar colour: use its main colour.
 - A translucent sheet colour (for example the glass of the [iOS theme](#ios-theme)) is blended over the page background. Safari doesn't blur the page under the bar.
 - The bar at the far edge shows the page with the backdrop over it, as on iOS: the status bar for a bottom drawer, the toolbar for a top drawer. It never shows the sheet colour, also not at full height, where the sheet touches that edge. For this, the drawer renders an empty `.mobile-drawer__backdrop-tint` element after the backdrop (only when it has a backdrop). On iOS it is the same kind of invisible 16px strip, at the far edge. Its colour is the backdrop as it shows: `--mobile-drawer-backdrop-color` with `--mobile-drawer-backdrop-opacity` times the drawer's progress as its alpha. The component writes `--mobile-drawer-progress` on it, as on the backdrop. Safari blends it over the page background, so the bar follows the dim of the page at every snap point, during a drag and during the close animation.
 - The bars of left and right drawers (and the far bar of a drawer without a backdrop) dim with the backdrop in a different way. The backdrop fades with `filter: opacity()` over a background that has the max opacity as its alpha, instead of with `opacity`, so that Safari sees the dimmed colour from the first frame.
 - Safari keeps that backdrop colour until the drawer is closed (`data-closed`), not only while it is open. So those bars show the backdrop at its max opacity also at a lower snap point, while a drawer with a backdrop rests at a peek, and during the close animation. When the drawer comes to rest closed, the bars change to the page colour in one step. Safari's hit test ignores `pointer-events`, so the backdrop's `pointer-events: none` at the smallest snap point doesn't change this.
-- The tray is `position: fixed` and the root has `contain: layout`, so the tray still sits in the root, also in an embedded drawer.
-- **Markup change:** the root has two more children: `.mobile-drawer__backdrop-tint` after the backdrop (only with a backdrop) and `.mobile-drawer__bar-tint` after the tray. Both are empty and `aria-hidden`. If your app CSS or tests select the root's children with `:last-child`, `> div`, `> *` or a child count, change them to use the class names, for example `.mobile-drawer > .mobile-drawer__tray`.
+- The tray is `position: fixed`, and the root and the sheet have `contain: layout`, so the tray still sits in the root, also in an embedded drawer, and the sheet clips it.
+- **Markup change:** the root has two more children: `.mobile-drawer__backdrop-tint` after the backdrop (only with a backdrop) and `.mobile-drawer__bar-tint` after the sheet. Both are empty and `aria-hidden`. If your app CSS or tests select the root's children with `:last-child`, `> div`, `> *` or a child count, change them to use the class names, for example `.mobile-drawer > .mobile-drawer__backdrop`.
 
 On iOS, set the backdrop's colour and max opacity only with `--mobile-drawer-backdrop-color` and `--mobile-drawer-backdrop-opacity` (a number from 0 to 1). If your app sets a `background` on `.mobile-drawer__backdrop` directly, set `--mobile-drawer-backdrop-color` instead: the backdrop tint reads only the custom properties, so with an own `background` the bar at the far edge shows the default dim (black at 0.4), not your colour. The base background holds the max opacity as its alpha and `opacity` is `1`, so an app's own `background` on the backdrop shows at full strength there, and an app's `opacity` on the backdrop multiplies with the fade.
 
@@ -396,7 +417,7 @@ Content stays between the bars, so the safe-area padding doesn't change. Other b
 
 ### iOS theme
 
-An optional theme gives the drawer the look of an iOS 26/27 sheet ("Liquid Glass"): a translucent, blurred sheet with a light rim and a darkened edge, large rounded corners on the page-facing side, a dimming backdrop and a grabber bar. At the highest snap point the sheet becomes opaque, as an iOS sheet does at full height. Import it after the base styles; it does not import them itself:
+An optional theme gives the drawer the look of an iOS 27 sheet ("Liquid Glass"): a translucent, blurred sheet with a light rim and a darkened edge, large rounded corners on the page-facing side and a grabber bar. At partial heights a bottom sheet floats 8px from the left, right and bottom edges of the screen, with bottom corners that follow the display corners, and the page behind it doesn't dim. Towards the highest snap point the sheet becomes edge-to-edge and opaque and the page dims, with the finger, as an iOS sheet does at full height. Import it after the base styles; it does not import them itself:
 
 ```js
 import 'ember-mobile-drawer/styles.css';
@@ -414,14 +435,15 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 </div>
 ```
 
-`mobile-drawer-theme-ios__grabber` draws a 36×5px bar for bottom and top drawers. Put it directly in the drawer: first in a bottom drawer and last in a top drawer. The element is a 15px strip across the tray that stays at the tray's leading edge (see [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge)): sticky at the top of a bottom drawer and at the bottom of a top drawer, so it stays in view while the content scrolls at the highest snap point. Don't wrap the grabber in another element: a sticky element only sticks inside its parent, so a wrapped grabber scrolls away with its wrapper. While the drawer is expanded (`data-expanded`, at the highest snap point) the sheet is opaque (see **Full height** below) and the strip has the same colour, so the content scrolling under it doesn't show through and the strip doesn't show as a band (browsers that can't make the colour opaque, such as Safari before 18, keep the glass sheet and give the strip the translucent sheet colour). Below the highest snap point the strip is transparent, so it looks like the rest of the sheet. That works because no content is under the strip there: the component keeps the tray at its scroll start below the highest snap point (the start of the content at the top of a bottom drawer, the end of the content at the bottom of a top drawer; see [Scrolling content](#scrolling-content)). There is one short exception, a run down from a scrolled sheet. `data-expanded` goes away when the run starts, but the tray only gets back to its scroll start during the run, in step with the tray (or, for a close, once the drawer is closed). So for that moment the rows that were scrolled under the strip show under the bar. In the demo, when you close a fully open, scrolled sheet with "Done", a part of a row shows under the bar while the sheet slides away (about half a second). The strip's 5px padding above and below the bar doesn't collapse with a neighbour's margin, as the old 5px margins did. The bar is drawn by the strip's `::before`, so style the bar there, for example `.mobile-drawer-theme-ios__grabber::before { width: 48px; }`. To make the grabber always drag the sheet, also when the content is scrolled (and with `@handleOnly`), put the `handle` modifier on the grabber itself, not on a wrapper; for a larger touch target, give it more padding, for example `.mobile-drawer-theme-ios__grabber { padding-block: 12px; }`.
+`mobile-drawer-theme-ios__grabber` draws a 36×5px bar for bottom and top drawers. Put it directly in the drawer: first in a bottom drawer and last in a top drawer. The element is a 15px strip across the tray that stays at the tray's leading edge (see [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge)): sticky at the top of a bottom drawer and at the bottom of a top drawer, so it stays in view while the content scrolls at the highest snap point. Don't wrap the grabber in another element: a sticky element only sticks inside its parent, so a wrapped grabber scrolls away with its wrapper. While the drawer is at its highest snap point (`data-at-highest`) the sheet is opaque (see **Full height** below) and the strip has the same colour, so the content scrolling under it doesn't show through and the strip doesn't show as a band (browsers that can't make the colour opaque, such as Safari before 18, keep the glass sheet and give the strip the translucent sheet colour). Below the highest snap point the strip is transparent, so it looks like the rest of the sheet. That works because no content is under the strip there: the component keeps the tray at its scroll start below the highest snap point (the start of the content at the top of a bottom drawer, the end of the content at the bottom of a top drawer; see [Scrolling content](#scrolling-content)). There is one short exception, a run down from a scrolled sheet. `data-at-highest` goes away on the first frame below the highest snap point, but the tray only gets back to its scroll start during the run, in step with the tray (or, for a close, once the drawer is closed). So for that moment the rows that were scrolled under the strip show under the bar. In the demo, when you close a fully open, scrolled sheet with "Done", a part of a row shows under the bar while the sheet slides away (about half a second). The strip's 5px padding above and below the bar doesn't collapse with a neighbour's margin, as the old 5px margins did. The bar is drawn by the strip's `::before`, so style the bar there, for example `.mobile-drawer-theme-ios__grabber::before { width: 48px; }`. To make the grabber always drag the sheet, also when the content is scrolled (and with `@handleOnly`), put the `handle` modifier on the grabber itself, not on a wrapper; for a larger touch target, give it more padding, for example `.mobile-drawer-theme-ios__grabber { padding-block: 12px; }`.
 
 The glass rim (the light inner edge of the sheet, an inset shadow in `--mobile-drawer-shadow`) is part of the tray's background, so the content paints over it. While the strip has the opaque colour, the strip's `::after` draws the rim again over the strip, along the leading edge and its rounded corners. The strip spans the full width of the tray, also over the side safe areas that the content pads (for example in iPhone landscape), so the rim follows the sheet edge. The strip rim always uses the theme's rim colour, not the value in your `--mobile-drawer-shadow`. If you remove the rim from `--mobile-drawer-shadow`, also remove it from the strip: `.mobile-drawer-theme-ios__grabber::after { box-shadow: none; }`. If you change only the rim colour, also give the strip rim your colour. Use the same selector and `@supports` condition as the theme, so the strip gets the rim only where it is opaque:
 
 ```css
-@supports (color: rgb(from light-dark(red, red) r g b / 1)) {
+@supports (color: color-mix(in srgb, rgb(from light-dark(red, red) r g b / 1), red)) {
   .mobile-drawer-theme-ios
-    .mobile-drawer[data-expanded]
+    .mobile-drawer[data-at-highest]
+    > .mobile-drawer__sheet
     > .mobile-drawer__tray
     > .mobile-drawer__content
     > .mobile-drawer-theme-ios__grabber::after {
@@ -432,32 +454,39 @@ The glass rim (the light inner edge of the sheet, an inset shadow in `--mobile-d
 
 - **Light and dark** follow the page's `color-scheme` (through `light-dark()`), like the base styles' `Canvas` default. Declare `color-scheme: light dark` (for example on `:root`) to get the dark sheet in dark mode. Browsers without `light-dark()` (Safari before 17.5, Chrome before 123) always get the light sheet.
 - **Glass** needs `backdrop-filter`; without it the sheet is solid. With reduced transparency or increased contrast (`prefers-reduced-transparency: reduce`, `prefers-contrast: more`) the sheet is solid too.
-- **Full height**: while the drawer is expanded (`data-expanded`: at its highest snap point, or animating towards it) the sheet is opaque and not blurred. Its colour is the sheet colour (`--mobile-drawer-background`, the theme's or yours) without its transparency: white in light mode, `rgb(28 28 30)` in dark mode. The corners keep the theme's radius (`--mobile-drawer-radius`), which is the full-height radius. `data-expanded` doesn't change during a drag or while a touch holds the drawer, so small movements at the top don't switch the sheet between glass and opaque. The change fades in 0.25s (not with `prefers-reduced-motion: reduce`): towards the top the blur and the grabber strip's colour change when the fade ends, away from the top they change at once. This needs relative colours with a `light-dark()` origin (Safari 18, Chrome 123, Firefox 128 or later); other browsers keep the glass sheet at full height. In iOS Safari 26 the toolbar area under a bottom sheet also gets the opaque colour, at the end of the same fade: the theme sets it on `.mobile-drawer__bar-tint` (see [iOS Safari 26 bars](#ios-safari-26-bars)).
-  - It follows the highest snap point, not the height of the screen. A drawer with one open snap point, for example the default `[0, 'content']` or most left and right drawers, is `data-expanded` whenever it is open: its sheet is opaque at rest, and fades from glass to opaque each time it opens. On iOS, a sheet with only a medium or a content-sized detent stays glass. To keep such a drawer glass, give it a lower snap point, or override the expanded tray. A background alone is not sufficient: the expanded tray also has no `backdrop-filter`, so put the blur back too. If you use the grabber, also change its strip: while the drawer is expanded the strip has the opaque sheet colour, which shows as a band on the glass sheet. A translucent colour on the strip also shows as a band, because it adds to the tray's tint. So make the strip transparent: it then shows the tray's own glass, and the content that scrolls under the grabber stays visible there. App CSS that is not in a layer wins over the theme:
+- **Floating sheet**: the theme sets `--mobile-drawer-inset: 8px` (see [Floating sheet](#floating-sheet)), so a bottom sheet floats 8px from the left, right and bottom edges at and below its second-highest snap point, and is edge-to-edge at its highest, changing with the finger in between. The top corners have a 36px radius at every snap point. The bottom corners are concentric with the display corners: the display radius minus the inset as it is. CSS can't read the display radius, so it is a setting, `--mobile-drawer-ios-display-radius` (`55px`, about the radius of current iPhones). Near the highest snap point the bottom corners go to square, so a full-height sheet has no round bottom corners on a screen without them. For an edge-to-edge sheet at every snap point, set `--mobile-drawer-inset: 0px`; then in iOS Safari 26 also give the toolbar area the sheet colour again, because below a floating sheet it shows the page:
+
+  ```css
+  .mobile-drawer-theme-ios {
+    --mobile-drawer-inset: 0px;
+  }
+
+  .mobile-drawer-theme-ios .mobile-drawer > .mobile-drawer__bar-tint {
+    background-color: var(--mobile-drawer-background);
+  }
+  ```
+
+  The content keeps its width in the sheet: at partial heights it is 16px narrower than at full height, and between the two highest snap points it is laid out again on every frame. The sheet has no outer shadow on its sides and bottom while it floats (the sheet clips the tray, and the tray's shadow with it); the rim on its sides stays.
+- **Full height**: the sheet goes from glass to opaque with the expand progress, so it follows the finger and the spring: glass at and below the second-highest snap point, opaque at the highest, mixed in between. There is no timed fade any more. The opaque colour is the sheet colour (`--mobile-drawer-background`, the theme's or yours) without its transparency: white in light mode, `rgb(28 28 30)` in dark mode. At the highest snap point (`data-at-highest`) the sheet is not blurred, and the grabber strip has the opaque colour. This needs relative colours with a `light-dark()` origin and `color-mix()` (Safari 18, Chrome 123, Firefox 128 or later); other browsers keep the glass sheet at full height. In iOS Safari 26 the toolbar area under a bottom sheet gets the opaque colour at the highest snap point too (see **Dim** below and [iOS Safari 26 bars](#ios-safari-26-bars)).
+  - It follows the highest snap point, not the height of the screen. A drawer with one open snap point, for example the default `[0, 'content']` or most left and right drawers, goes from glass to opaque as it opens. On iOS, a sheet with only a medium or a content-sized detent stays glass. To keep such a drawer glass, give it a lower snap point, or override the tray. A background alone is not sufficient: at the highest snap point the tray also has no `backdrop-filter`, so put the blur back too. If you use the grabber, also make its strip transparent: the opaque strip shows as a band on the glass sheet. App CSS that is not in a layer wins over the theme:
 
     ```css
-    .mobile-drawer-theme-ios .mobile-drawer[data-expanded] > .mobile-drawer__tray {
+    .mobile-drawer-theme-ios .mobile-drawer__sheet > .mobile-drawer__tray {
       background: var(--mobile-drawer-background);
       -webkit-backdrop-filter: blur(30px) saturate(1.8);
       backdrop-filter: blur(30px) saturate(1.8);
     }
 
-    .mobile-drawer-theme-ios
-      .mobile-drawer[data-expanded]
-      > .mobile-drawer__tray
-      > .mobile-drawer__content
-      > .mobile-drawer-theme-ios__grabber {
+    .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber {
       background: transparent;
-    }
-
-    .mobile-drawer-theme-ios .mobile-drawer[data-expanded] > .mobile-drawer__bar-tint {
-      background-color: var(--mobile-drawer-background);
     }
     ```
 
-    The last rule gives the iOS Safari 26 toolbar area the glass colour again (see [iOS Safari 26 bars](#ios-safari-26-bars)). In the `ember-mobile-drawer` layer, these selectors also win, because they have more than one class (see the end of this section). The example also puts the blur back with reduced transparency or increased contrast. There the sheet is opaque, so you can't see the blur, but it still costs GPU time.
-  - `--mobile-drawer-background` must be a colour with this theme. The theme can't make a non-colour value, such as a gradient or an image, opaque: then the expanded tray gets no background at all, so it is transparent and not blurred.
-- **Blur cost**: the glass is a 30px `backdrop-filter` blur on the tray, and the tray moves every frame while it is dragged or animates, so the browser blurs the page behind it again on every frame. On slower devices that can cost frames. At full height the sheet is opaque and not blurred, so the blur costs nothing there, also while the content scrolls. To turn the blur off, override it on the tray and give the sheet a solid background, so the page doesn't show through unblurred:
+    In the `ember-mobile-drawer` layer, these selectors also win, because they have more than one class (see the end of this section). The example also puts the blur back with reduced transparency or increased contrast. There the sheet is opaque, so you can't see the blur, but it still costs GPU time.
+  - `--mobile-drawer-background` must be a colour with this theme. The theme can't mix a non-colour value, such as a gradient or an image: then the tray gets no background at all.
+- **Dim**: the backdrop doesn't dim the page at and below the second-highest snap point, as on iOS 27, where a sheet at its medium detent leaves the page undimmed. The dim comes in with the expand progress, to `0.35` at the highest snap point. A modal drawer's backdrop still takes taps where it doesn't dim, so a tap outside the sheet closes it. To dim at every snap point, as before, set `--mobile-drawer-ios-partial-dim: 1` (for example on the element with the theme class). In iOS Safari 26 the status bar above a bottom sheet and the toolbar area below a floating sheet show the page with this dim.
+- **Nested sheets**: while another modal drawer is open in front of a drawer (`data-nested`), its sheet dims (12% black, `--mobile-drawer-ios-nested-dim`), as on iOS 27. It doesn't scale or move. The dim is over the sheet's background, not over its content. It fades in 0.3s, not with reduced motion.
+- **Blur cost**: the glass is a 30px `backdrop-filter` blur on the tray, and the tray moves every frame while it is dragged or animates, so the browser blurs the page behind it again on every frame. Between the two highest snap points the sheet's colour, size and width also change on every frame. On slower devices that can cost frames. At full height the sheet is opaque and not blurred, so the blur costs nothing there, also while the content scrolls. To turn the blur off, override it on the tray and give the sheet a solid background, so the page doesn't show through unblurred:
 
   ```css
   .mobile-drawer-theme-ios {
@@ -471,7 +500,7 @@ The glass rim (the light inner edge of the sheet, an inset shadow in `--mobile-d
   ```
 
 - **Spring**: the theme is CSS only, so it doesn't change how the drawer moves. For iOS-like motion, also pass `@spring={{springPresets.ios}}` (see [Spring](#spring)).
-- The sheet stays attached to the screen edge at every snap point. On iOS a partial-height sheet floats inset from the screen edges and only becomes edge-to-edge when fully expanded; the theme can't do the inset sheet yet.
+- **Differences from iOS 27**: Maps' smallest detent is a capsule with a larger inset; the theme has one inset for every snap point. The floating sheet has no outer shadow on its sides and bottom. Safari's toolbar stays visible over the page: a web page can't hide it.
 
 #### Grabber strip limits
 
@@ -501,7 +530,7 @@ The glass rim (the light inner edge of the sheet, an inset shadow in `--mobile-d
 
 #### Page scale
 
-Optional, and off by default: while a modal bottom sheet is open, the page behind it scales down, moves down and gets rounded top corners, like the page behind an iOS sheet. It follows the sheet frame by frame, and the area around the page is black. To turn it on, put the `mobile-drawer-theme-ios__page` class and the `data-mobile-drawer-page` attribute on the element that holds your page, for example a wrapper around your application template:
+Optional, and off by default: the iOS 17/18 look. While a modal bottom sheet is open, the page behind it scales down, moves down and gets rounded top corners, like the page behind an iOS 17 or 18 sheet. iOS 26 and 27 don't scale the page any more. It follows the sheet frame by frame, and the area around the page is black. To turn it on, put the `mobile-drawer-theme-ios__page` class and the `data-mobile-drawer-page` attribute on the element that holds your page, for example a wrapper around your application template:
 
 ```hbs
 {{! app/templates/application.hbs }}
@@ -512,13 +541,15 @@ Optional, and off by default: while a modal bottom sheet is open, the page behin
 
 `data-mobile-drawer-page` tells the drawers to write their progress on the element (see "The page behind" in `styles.css`). The class makes the iOS theme use it. The element doesn't need to be inside the `mobile-drawer-theme-ios` class.
 
+With the page class on a child of `<body>`, the theme also uses the rest of the iOS 17/18 look: it sets `--mobile-drawer-inset: 0px` and `--mobile-drawer-ios-partial-dim: 1`, so the sheet is edge-to-edge and dims at every snap point, and the toolbar area under it has the sheet colour. Not with `prefers-reduced-motion: reduce`, where the page doesn't scale either.
+
 - **The drawer must not be inside the page element.** A drawer inside it doesn't scale the page (the page can't move without moving the drawer). Render the drawer outside it, for example at the end of `<body>` with `{{#in-element}}`, and put the `mobile-drawer-theme-ios` class around the drawer there. Drawers that stay inside the page still work; they just don't scale it.
 - Only modal drawers (the default) with `@placement="bottom"` (the default) scale the page. As on iOS, top, left and right drawers never move the page. A non-modal drawer leaves the page usable, so the page stays as it is. With several open drawers it follows the one that is open furthest.
 - The page follows the drawer linearly, from its smallest snap point (no scale) to its largest (full scale), so a sheet at `'40%'` of `[0, '40%', 'content']` scales the page part of the way. iOS scales the page only when a sheet is at its large detent. For that look, give the sheet only a closed and a full-height snap point.
 - A page element that is rendered while a sheet is open (for example after a route change) follows the sheet at once, also while the sheet is at rest. A page element that is removed gets its properties removed.
 - **`position: fixed`**: while the page is scaled it has a `transform`, so `position: fixed` content in it is positioned against the page element instead of the viewport. That is only right when the page element fills the viewport (for example an app shell whose content scrolls inside it); otherwise such content can move while a sheet is open. While no modal sheet is open the page has no `transform` at all, so fixed content works as usual.
 - **Black around the page**: the theme makes `<body>` black while a drawer moves the page (the component then puts `data-mobile-drawer-page-active` on the page element). This only works when the page element is a direct child of `<body>`. A sheet that rests at a peek (its smallest snap point, with the page not scaled) doesn't make `<body>` black. An unlayered `background` on `<body>` wins over that: put the page colour on `<html>` and on the page element instead. The page element gets `Canvas` as its background (set `--mobile-drawer-ios-page-background`, or a `background` of your own). Give `<body>` no margin or padding, so the black only shows around the scaled page. In iOS Safari 26 the toolbar area under the sheet has the sheet colour, not black, and the status bar is black, the colour around the scaled page: the theme makes `.mobile-drawer__backdrop-tint` black while the page is `data-mobile-drawer-page-active` (see [iOS Safari 26 bars](#ios-safari-26-bars)).
-- **Leave a gap at the top**: the theme doesn't add it, your app's CSS does. A sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px); }`, as the demo does.
+- **Leave a gap at the top**: the theme doesn't add it, your app's CSS does. A sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px); }`, as the demo does.
 - **Performance**: the page's `transform` (a `translate3d` and a `scale`) changes every frame, and the `translate3d` puts the page on a compositing layer of its own while it is scaled, so the browser doesn't paint the page again on every frame. The rounded corners are a `clip-path` with a fixed radius, which only changes when a sheet opens.
 - **Reduced motion**: with `prefers-reduced-motion: reduce` the page doesn't scale or move.
 - **Inherited properties**: the theme registers `--mobile-drawer-page-progress` and `--mobile-drawer-page-viewport-top` with `@property` as not inherited (`inherits: false`), for the whole document, so the page's content isn't styled again on every frame. So when you load `ios.css`, app CSS can't read these properties on a child of the page element. Read them on the page element itself.
@@ -534,7 +565,7 @@ Settings, as custom properties on the page element or an ancestor of it:
 
 Like the rest of the theme, these values are approximations: Apple doesn't document them.
 
-The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` and `transition` on the tray, and `background` on the tray while the drawer is expanded, in the same `ember-mobile-drawer` layer with zero-specificity selectors. One rule is an exception: the expanded tray's `background` has the specificity of one class, so it wins over the base styles' tray background in either load order. Unlayered app CSS, and app CSS in a later layer, win over all of the theme. In the `ember-mobile-drawer` layer itself, app CSS needs more than one class (or must come later) to override the expanded tray's `background`. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
+The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` and `transition` on the tray and `border-radius` on the sheet, in the same `ember-mobile-drawer` layer with zero-specificity selectors. The rules for properties that the base styles also set are an exception: the tray's `background`, a nested tray's `box-shadow`, the backdrop's `opacity` and `filter`, and the tints' `background-color` have the specificity of one class, so they win over the base styles in either load order. Unlayered app CSS, and app CSS in a later layer, win over all of the theme. In the `ember-mobile-drawer` layer itself, app CSS needs more than one class (or must come later) to override those rules. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
 
 ## Testing
 

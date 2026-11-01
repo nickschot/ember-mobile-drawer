@@ -53,16 +53,22 @@ function corners(element: HTMLElement): Record<string, string> {
 }
 
 /**
- * Computed colours from relative colour syntax serialize as
- * `color(srgb r g b)` with 0-1 channels; turn an opaque one into `rgb()`.
+ * Computed colours from relative colour syntax and color-mix() serialize as
+ * `color(srgb r g b)` or `color(srgb r g b / a)` with 0-1 channels; turn
+ * them into `rgb()` or `rgba()` (alpha rounded to 3 decimals).
  */
 function rgb(color: string): string {
-  const match = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)\)$/.exec(color);
+  const match =
+    /^color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)$/.exec(
+      color,
+    );
   if (!match) return color;
   const [r, g, b] = match
-    .slice(1)
+    .slice(1, 4)
     .map((channel) => Math.round(Number(channel) * 255));
-  return `rgb(${r}, ${g}, ${b})`;
+  if (match[4] === undefined) return `rgb(${r}, ${g}, ${b})`;
+  const alpha = Math.round(Number(match[4]) * 1000) / 1000;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 /** Adds CSS to the page for the duration of a test. */
@@ -138,12 +144,40 @@ function noRim(boxShadow: string): boolean {
 const TALL_LINES = Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`);
 
 /**
+ * Writes the progress values as the component does: the expand progress on
+ * the sheet, and both values on the backdrop, its tint and the bar tint.
+ * With `expand` 1 the root gets `data-at-highest`, as the component sets it
+ * at the highest snap point.
+ */
+function setProgress(expand: number, progress = expand) {
+  el('[data-test-sheet]').style.setProperty(
+    '--mobile-drawer-expand-progress',
+    String(expand),
+  );
+  for (const selector of [
+    '[data-test-backdrop]',
+    '[data-test-backdrop-tint]',
+    '[data-test-bar-tint]',
+  ]) {
+    const element = find(selector);
+    if (!(element instanceof HTMLElement)) continue;
+    element.style.setProperty(
+      '--mobile-drawer-expand-progress',
+      String(expand),
+    );
+    element.style.setProperty('--mobile-drawer-progress', String(progress));
+  }
+  el('[data-test-root]').toggleAttribute('data-at-highest', expand === 1);
+}
+
+/**
  * Renders the drawer markup inside a wrapper with the given `color-scheme`,
  * with or without the theme class on the wrapper. The grabber goes first,
  * or last for a top drawer. With `tall` the content is much longer than the
  * drawer and the tray rests fully open (`transform: none`). With
- * `expanded` the root gets `data-expanded`, as the component sets it at the
- * highest snap point.
+ * `expanded` the root gets `data-expanded` and `data-at-highest`, and the
+ * expand progress is 1, as the component sets them at the highest snap
+ * point; otherwise the expand progress is 0 (see `setProgress`).
  */
 async function renderDrawer({
   themed = true,
@@ -167,7 +201,7 @@ async function renderDrawer({
   await render(
     <template>
       {{! template-lint-disable no-inline-styles }}
-      <div class={{wrapperClass}} style={{wrapperStyle}}>
+      <div class={{wrapperClass}} style={{wrapperStyle}} data-test-theme>
         <div
           class="mobile-drawer"
           data-placement={{placement}}
@@ -175,23 +209,29 @@ async function renderDrawer({
           data-test-root
         >
           <div class="mobile-drawer__backdrop" data-test-backdrop></div>
-          <div class="mobile-drawer__tray" style={{trayStyle}} data-test-tray>
-            <div class="mobile-drawer__content">
-              {{#unless isTop}}
-                <div
-                  class="mobile-drawer-theme-ios__grabber"
-                  data-test-grabber
-                ></div>
-              {{/unless}}
-              {{#each lines as |line|}}
-                <p>{{line}}</p>
-              {{/each}}
-              {{#if isTop}}
-                <div
-                  class="mobile-drawer-theme-ios__grabber"
-                  data-test-grabber
-                ></div>
-              {{/if}}
+          <div
+            class="mobile-drawer__backdrop-tint"
+            data-test-backdrop-tint
+          ></div>
+          <div class="mobile-drawer__sheet" data-test-sheet>
+            <div class="mobile-drawer__tray" style={{trayStyle}} data-test-tray>
+              <div class="mobile-drawer__content">
+                {{#unless isTop}}
+                  <div
+                    class="mobile-drawer-theme-ios__grabber"
+                    data-test-grabber
+                  ></div>
+                {{/unless}}
+                {{#each lines as |line|}}
+                  <p>{{line}}</p>
+                {{/each}}
+                {{#if isTop}}
+                  <div
+                    class="mobile-drawer-theme-ios__grabber"
+                    data-test-grabber
+                  ></div>
+                {{/if}}
+              </div>
             </div>
           </div>
           <div class="mobile-drawer__bar-tint" data-test-bar-tint></div>
@@ -199,6 +239,7 @@ async function renderDrawer({
       </div>
     </template>,
   );
+  setProgress(expanded ? 1 : 0);
 }
 
 /**
@@ -207,11 +248,21 @@ async function renderDrawer({
  * also loads them after it.
  */
 function iosBaseRulesText(): string {
+  return iosRulesText(false);
+}
+
+/** The same for the theme's own iOS-only block. */
+function themeIosRulesText(): string {
+  return iosRulesText(true);
+}
+
+function iosRulesText(theme: boolean): string {
   const visit = (rules: CSSRuleList): CSSSupportsRule | undefined => {
     for (const rule of Array.from(rules)) {
       if (
         rule instanceof CSSSupportsRule &&
-        rule.conditionText.includes('-webkit-touch-callout: none')
+        rule.conditionText.includes('-webkit-touch-callout: none') &&
+        rule.cssText.includes('mobile-drawer-theme-ios') === theme
       ) {
         return rule;
       }
@@ -330,15 +381,15 @@ module('Integration | themes/ios.css', function (hooks) {
       await renderDrawer({ scheme });
 
       const tray = getComputedStyle(el('[data-test-tray]'));
-      assert.strictEqual(tray.backgroundColor, GLASS[scheme].background);
+      assert.strictEqual(rgb(tray.backgroundColor), GLASS[scheme].background);
       assert.strictEqual(tray.color, GLASS[scheme].color);
       assert.strictEqual(tray.backdropFilter, 'blur(30px) saturate(1.8)');
       assert.true(tray.boxShadow.includes('inset'), 'inner rim');
       assert.notStrictEqual(tray.boxShadow, BASE_SHADOW);
 
-      const backdrop = el('[data-test-backdrop]');
-      backdrop.style.setProperty('--mobile-drawer-progress', '1');
-      const backdropStyle = getComputedStyle(backdrop);
+      // The dim at the highest snap point.
+      setProgress(1);
+      const backdropStyle = getComputedStyle(el('[data-test-backdrop]'));
       assert.strictEqual(backdropStyle.backgroundColor, 'rgb(0, 0, 0)');
       assert.strictEqual(Number(backdropStyle.opacity), 0.35);
     });
@@ -356,7 +407,7 @@ module('Integration | themes/ios.css', function (hooks) {
       try {
         finishTransitions();
         const tray = getComputedStyle(el('[data-test-tray]'));
-        assert.strictEqual(tray.backgroundColor, SOLID[scheme]);
+        assert.strictEqual(rgb(tray.backgroundColor), SOLID[scheme]);
         assert.strictEqual(tray.backdropFilter, 'none');
       } finally {
         style.remove();
@@ -373,7 +424,7 @@ module('Integration | themes/ios.css', function (hooks) {
       )) {
         assert.strictEqual(
           value,
-          ROUNDED[placement].includes(corner) ? '32px' : '0px',
+          ROUNDED[placement].includes(corner) ? '36px' : '0px',
           `${corner} corner`,
         );
       }
@@ -440,7 +491,7 @@ module('Integration | themes/ios.css', function (hooks) {
       await renderDrawer({ scheme, tall: true });
 
       const tray = getComputedStyle(el('[data-test-tray]'));
-      assert.strictEqual(tray.backgroundColor, GLASS[scheme].background);
+      assert.strictEqual(rgb(tray.backgroundColor), GLASS[scheme].background);
       const grabber = getComputedStyle(el('[data-test-grabber]'));
       assert.strictEqual(grabber.position, 'sticky', 'still sticky');
       // Transparent: no second tint over the tray's, so no band.
@@ -460,7 +511,7 @@ module('Integration | themes/ios.css', function (hooks) {
       for (const [corner, value] of Object.entries(corners(trayElement))) {
         assert.strictEqual(
           value,
-          ROUNDED.bottom.includes(corner) ? '32px' : '0px',
+          ROUNDED.bottom.includes(corner) ? '36px' : '0px',
           `${corner} corner: the full-height radius`,
         );
       }
@@ -497,18 +548,15 @@ module('Integration | themes/ios.css', function (hooks) {
       const style = applyReducedTransparency();
 
       try {
-        // The sheet colour transitions from glass to solid.
-        finishTransitions();
         const tray = getComputedStyle(el('[data-test-tray]'));
-        assert.strictEqual(tray.backgroundColor, SOLID[scheme]);
+        assert.strictEqual(rgb(tray.backgroundColor), SOLID[scheme]);
         assert.strictEqual(
           getComputedStyle(el('[data-test-grabber]')).backgroundColor,
           'rgba(0, 0, 0, 0)',
           'not expanded: the solid tray shows through',
         );
 
-        el('[data-test-root]').setAttribute('data-expanded', '');
-        finishTransitions();
+        setProgress(1);
         assert.strictEqual(
           rgb(getComputedStyle(el('[data-test-grabber]')).backgroundColor),
           SOLID[scheme],
@@ -561,7 +609,7 @@ module('Integration | themes/ios.css', function (hooks) {
           placement === 'bottom'
             ? [style.borderBottomLeftRadius, style.borderBottomRightRadius]
             : [style.borderTopLeftRadius, style.borderTopRightRadius];
-        assert.deepEqual(leading, ['32px', '32px'], 'leading corners');
+        assert.deepEqual(leading, ['36px', '36px'], 'leading corners');
         assert.deepEqual(far, ['0px', '0px'], 'far corners');
 
         const t = trayElement.getBoundingClientRect();
@@ -576,7 +624,7 @@ module('Integration | themes/ios.css', function (hooks) {
         // Taller than the strip by the radius, so the radius isn't scaled.
         assert.strictEqual(
           parseFloat(rim.height),
-          grabber.offsetHeight + 32,
+          grabber.offsetHeight + 36,
           'taller than the strip',
         );
       });
@@ -779,118 +827,74 @@ module('Integration | themes/ios.css', function (hooks) {
     }
   });
 
-  test('towards the top the glass fades to opaque before the strip and the blur change; away from it they change at once', async function (assert) {
-    // Forced, so the test also runs on a machine with reduced motion.
-    styles.push(applyMotion());
+  test('the glass mixes to opaque with the expand progress; the strip and the blur change at the highest snap point', async function (assert) {
     await renderDrawer({ tall: true });
-    const root = el('[data-test-root]');
     const tray = el('[data-test-tray]');
     const grabber = el('[data-test-grabber]');
-    // Reading the styles also gives the transitions a style to start from.
-    assert.strictEqual(
-      getComputedStyle(tray).backgroundColor,
-      GLASS.light.background,
-      'glass to start with',
-    );
-    assert.true(isTransparent(getComputedStyle(grabber).backgroundColor));
+    const background = () => rgb(getComputedStyle(tray).backgroundColor);
 
-    root.setAttribute('data-expanded', '');
+    assert.strictEqual(background(), GLASS.light.background, '0: glass');
     assert.strictEqual(
       getComputedStyle(tray).backdropFilter,
       'blur(30px) saturate(1.8)',
-      'fading in: still blurred',
+    );
+
+    // Half way: the alpha half way from 0.72 to 1, no timed transition.
+    setProgress(0.5);
+    assert.strictEqual(background(), 'rgba(255, 255, 255, 0.86)', '0.5');
+    assert.strictEqual(tray.getAnimations().length, 0, 'no transition');
+    assert.strictEqual(
+      getComputedStyle(tray).backdropFilter,
+      'blur(30px) saturate(1.8)',
+      '0.5: still blurred',
     );
     assert.true(
       isTransparent(getComputedStyle(grabber).backgroundColor),
-      'fading in: the strip is still transparent, no band',
+      '0.5: the strip is transparent, no band',
     );
     assert.true(
       noRim(getComputedStyle(grabber, '::after').boxShadow),
-      'fading in: no second rim over the tray rim yet',
-    );
-    assert.true(
-      tray.getAnimations().length > 0,
-      'fading in: the sheet colour transitions',
+      '0.5: no second rim',
     );
 
-    finishTransitions();
-    assert.strictEqual(
-      rgb(getComputedStyle(tray).backgroundColor),
-      SOLID.light,
-    );
+    setProgress(0.9);
+    assert.strictEqual(background(), 'rgba(255, 255, 255, 0.972)', '0.9');
+
+    // At the highest snap point: opaque, no blur, an opaque strip.
+    setProgress(1);
+    assert.strictEqual(background(), SOLID.light, '1: opaque');
     assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
     assert.strictEqual(
       rgb(getComputedStyle(grabber).backgroundColor),
       SOLID.light,
+      '1: the strip has the sheet colour',
     );
 
-    root.removeAttribute('data-expanded');
+    // Back down: blurred and a transparent strip at once.
+    setProgress(0.99);
     assert.strictEqual(
       getComputedStyle(tray).backdropFilter,
       'blur(30px) saturate(1.8)',
-      'fading out: blurred at once',
     );
-    assert.true(
-      isTransparent(getComputedStyle(grabber).backgroundColor),
-      'fading out: the strip is transparent at once',
+    assert.true(isTransparent(getComputedStyle(grabber).backgroundColor));
+  });
+
+  test('the theme has no timed fade any more', function (assert) {
+    const motion = themeMediaRule('prefers-reduced-motion: no-preference');
+    assert.false(
+      motion.cssText.includes('background-color'),
+      'no background-color transition',
     );
-    assert.strictEqual(
-      getComputedStyle(grabber, '::after').boxShadow,
-      'none',
-      'fading out: the rim over the strip goes at once',
-    );
-    finishTransitions();
-    assert.strictEqual(
-      getComputedStyle(tray).backgroundColor,
-      GLASS.light.background,
-      'glass again',
+    assert.false(
+      motion.cssText.includes('backdrop-filter'),
+      'no backdrop-filter transition',
     );
   });
 
-  test('the strip and the blur wait exactly as long as the sheet fades, from one custom property', async function (assert) {
-    styles.push(applyMotion());
-    await renderDrawer({ tall: true, expanded: true });
-
-    const timing = () => {
-      const tray = getComputedStyle(el('[data-test-tray]'));
-      const strip = getComputedStyle(el('[data-test-grabber]'));
-      const property = tray.transitionProperty.split(', ');
-      const duration = tray.transitionDuration.split(', ');
-      const delay = tray.transitionDelay.split(', ');
-      const at = (name: string) => property.indexOf(name);
-      return {
-        fade: duration[at('background-color')],
-        blurDelay: delay[at('backdrop-filter')],
-        stripDelay: strip.transitionDelay,
-        rimDelay: getComputedStyle(el('[data-test-grabber]'), '::after')
-          .transitionDelay,
-      };
-    };
-
-    assert.deepEqual(timing(), {
-      fade: '0.25s',
-      blurDelay: '0.25s',
-      stripDelay: '0.25s',
-      rimDelay: '0.25s',
-    });
-
-    styles.push(
-      addStyles(
-        '.mobile-drawer-theme-ios { --_mobile-drawer-ios-fade: 0.4s; }',
-      ),
-    );
-    assert.deepEqual(
-      timing(),
-      { fade: '0.4s', blurDelay: '0.4s', stripDelay: '0.4s', rimDelay: '0.4s' },
-      'all follow the one property',
-    );
-  });
-
-  test('the expanded sheet is opaque also when the base styles load after the theme', async function (assert) {
+  test('the sheet is opaque at the highest snap point also when the base styles load after the theme', async function (assert) {
     // The base styles' tray background, later in the same layer.
     styles.push(addStyles(baseLayerText()));
     await renderDrawer({ tall: true, expanded: true });
-    finishTransitions();
 
     const tray = getComputedStyle(el('[data-test-tray]'));
     assert.strictEqual(rgb(tray.backgroundColor), SOLID.light, 'opaque');
@@ -901,68 +905,259 @@ module('Integration | themes/ios.css', function (hooks) {
       'no band',
     );
 
-    el('[data-test-root]').removeAttribute('data-expanded');
-    finishTransitions();
+    setProgress(0);
     assert.strictEqual(
-      getComputedStyle(el('[data-test-tray]')).backgroundColor,
+      rgb(getComputedStyle(el('[data-test-tray]')).backgroundColor),
       GLASS.light.background,
-      'not expanded: glass',
+      'at a partial snap point: glass',
     );
   });
 
   for (const scheme of SCHEMES) {
-    test(`${scheme}: the iOS Safari bar tint has the sheet colour, opaque while expanded, also with the base iOS rules after the theme`, async function (assert) {
+    test(`${scheme}: iOS Safari: the toolbar under a bottom sheet shows the page below the highest snap point and the opaque sheet at it`, async function (assert) {
       await renderDrawer({ scheme, tall: true });
       const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
 
-      // The iOS block only applies on iOS; force it, after the theme.
+      // The iOS blocks only apply on iOS; force them, after the theme too.
       styles.push(addStyles(iosBaseRulesText()));
+      styles.push(addStyles(themeIosRulesText()));
       assert.strictEqual(tint().display, 'block');
       assert.strictEqual(
-        tint().backgroundColor,
-        GLASS[scheme].background,
-        'below the top: the glass tint',
+        rgb(tint().backgroundColor),
+        'rgba(0, 0, 0, 0.01)',
+        '0: no dim, so Safari shows the page',
       );
 
-      el('[data-test-root]').setAttribute('data-expanded', '');
-      finishTransitions();
+      setProgress(1);
       assert.strictEqual(
         rgb(tint().backgroundColor),
         SOLID[scheme],
-        'expanded: the opaque sheet colour',
+        '1: the opaque sheet colour',
       );
       assert.strictEqual(
         tint().backgroundColor,
         getComputedStyle(el('[data-test-tray]')).backgroundColor,
-        'the same colour as the expanded tray',
+        'the same colour as the tray',
+      );
+    });
+
+    test(`${scheme}: iOS Safari: the status bar over a top sheet has the sheet colour, glass to opaque`, async function (assert) {
+      await renderDrawer({ scheme, placement: 'top', tall: true });
+      const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
+      styles.push(addStyles(iosBaseRulesText()));
+      styles.push(addStyles(themeIosRulesText()));
+
+      assert.strictEqual(rgb(tint().backgroundColor), GLASS[scheme].background);
+      setProgress(1);
+      assert.strictEqual(rgb(tint().backgroundColor), SOLID[scheme]);
+    });
+  }
+
+  test('iOS Safari: the backdrop and the status bar follow the dim, not the progress', async function (assert) {
+    await renderDrawer();
+    styles.push(addStyles(iosBaseRulesText()));
+    styles.push(addStyles(themeIosRulesText()));
+    const backdrop = () => getComputedStyle(el('[data-test-backdrop]'));
+    const tint = () => getComputedStyle(el('[data-test-backdrop-tint]'));
+
+    setProgress(0, 0.4);
+    assert.strictEqual(backdrop().opacity, '1');
+    assert.strictEqual(backdrop().filter, 'opacity(0)', 'partial: no dim');
+    assert.strictEqual(rgb(tint().backgroundColor), 'rgba(0, 0, 0, 0.01)');
+
+    setProgress(0.5, 0.7);
+    assert.strictEqual(backdrop().filter, 'opacity(0.5)');
+    assert.strictEqual(rgb(tint().backgroundColor), 'rgba(0, 0, 0, 0.175)');
+
+    styles.push(
+      addStyles('[data-test-theme] { --mobile-drawer-ios-partial-dim: 1; }'),
+    );
+    setProgress(0, 0.4);
+    assert.strictEqual(backdrop().filter, 'opacity(0.4)', 'the old dim');
+    assert.strictEqual(rgb(tint().backgroundColor), 'rgba(0, 0, 0, 0.14)');
+  });
+
+  test('bottom: the sheet floats 8px from the left, right and bottom edges, and goes edge-to-edge with the expand progress', async function (assert) {
+    await renderDrawer();
+    const root = el('[data-test-root]');
+    const sheet = el('[data-test-sheet]');
+    const scale = root.getBoundingClientRect().width / root.offsetWidth;
+    const insets = () => {
+      const r = root.getBoundingClientRect();
+      const s = sheet.getBoundingClientRect();
+      const px = (value: number) => Math.round((value / scale) * 100) / 100;
+      return {
+        left: px(s.left - r.left),
+        right: px(r.right - s.right),
+        bottom: px(r.bottom - s.bottom),
+        height: px(s.height - r.height),
+      };
+    };
+
+    assert.deepEqual(
+      insets(),
+      { left: 8, right: 8, bottom: 8, height: 0 },
+      '0: 8px, the sheet keeps the root height',
+    );
+    setProgress(0.5);
+    assert.deepEqual(insets(), { left: 4, right: 4, bottom: 4, height: 0 });
+    setProgress(1);
+    assert.deepEqual(insets(), { left: 0, right: 0, bottom: 0, height: 0 });
+
+    const tray = el('[data-test-tray]');
+    setProgress(0);
+    tray.style.transform = 'none';
+    assert.strictEqual(
+      Math.round(tray.getBoundingClientRect().bottom),
+      Math.round(root.getBoundingClientRect().bottom),
+      'the tray stays at the root bottom; the sheet clips it',
+    );
+    assert.strictEqual(tray.offsetWidth, root.offsetWidth - 16, 'the width');
+  });
+
+  for (const placement of ['top', 'left', 'right'] as const) {
+    test(`${placement}: the sheet doesn't float`, async function (assert) {
+      await renderDrawer({ placement });
+      const root = el('[data-test-root]').getBoundingClientRect();
+      const sheet = el('[data-test-sheet]').getBoundingClientRect();
+      assert.deepEqual(
+        [sheet.top, sheet.right, sheet.bottom, sheet.left],
+        [root.top, root.right, root.bottom, root.left],
+      );
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-sheet]')).borderBottomLeftRadius,
+        '0px',
       );
     });
   }
 
-  test('with motion, the bar tint fades with the sheet', async function (assert) {
-    styles.push(applyMotion());
-    await renderDrawer({ tall: true });
-    const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
-    const tray = () => getComputedStyle(el('[data-test-tray]'));
-    const duration = (style: CSSStyleDeclaration, property: string) => {
-      const properties = style.transitionProperty.split(', ');
-      return style.transitionDuration.split(', ')[properties.indexOf(property)];
-    };
+  test('bottom: the bottom corners are concentric with the display corners', async function (assert) {
+    await renderDrawer();
+    const radius = () =>
+      corners(el('[data-test-sheet]'))['bottom-left'] +
+      ' ' +
+      corners(el('[data-test-sheet]'))['bottom-right'];
 
-    for (const expanded of [false, true]) {
-      el('[data-test-root]').toggleAttribute('data-expanded', expanded);
-      assert.strictEqual(
-        duration(tint(), 'background-color'),
-        duration(tray(), 'background-color'),
-        `bar tint (expanded: ${expanded})`,
-      );
-    }
+    assert.strictEqual(radius(), '47px 47px', '0: 55px minus the 8px inset');
+    setProgress(0.5);
+    assert.strictEqual(radius(), '51px 51px', '0.5: 55px minus 4px');
+    setProgress(0.95);
+    assert.strictEqual(
+      radius(),
+      '27.3px 27.3px',
+      'the last tenth: to square corners',
+    );
+    setProgress(1);
+    assert.strictEqual(radius(), '0px 0px', '1: square, the display clips it');
+
+    setProgress(0);
     styles.push(
       addStyles(
-        '.mobile-drawer-theme-ios { --_mobile-drawer-ios-fade: 0.4s; }',
+        '[data-test-theme] { --mobile-drawer-ios-display-radius: 40px; }',
       ),
     );
-    assert.strictEqual(duration(tint(), 'background-color'), '0.4s');
+    assert.strictEqual(radius(), '32px 32px', 'apps set the display radius');
+
+    styles.push(addStyles('[data-test-theme] { --mobile-drawer-inset: 0px; }'));
+    assert.strictEqual(radius(), '0px 0px', 'no inset: square corners');
+  });
+
+  test('with motion, the nested dim fades; with reduced motion it does not', async function (assert) {
+    await renderDrawer();
+    const motion = themeMediaRule('prefers-reduced-motion: no-preference');
+    assert.true(
+      motion.cssText.includes('box-shadow 0.3s'),
+      'only inside the no-preference block',
+    );
+    styles.push(applyMotion());
+    const tray = getComputedStyle(el('[data-test-tray]'));
+    assert.strictEqual(tray.transitionProperty, 'box-shadow');
+    assert.strictEqual(tray.transitionDuration, '0.3s');
+  });
+
+  test('the top radius is 36px', async function (assert) {
+    await renderDrawer();
+    assert.strictEqual(corners(el('[data-test-tray]'))['top-left'], '36px');
+  });
+
+  test('no dim at a partial snap point; the dim comes in towards the highest', async function (assert) {
+    await renderDrawer();
+    const opacity = () =>
+      Number(getComputedStyle(el('[data-test-backdrop]')).opacity);
+
+    setProgress(0, 0.4);
+    assert.strictEqual(opacity(), 0, 'partial: no dim');
+    setProgress(0.5, 0.7);
+    assert.true(Math.abs(opacity() - 0.175) < 1e-6, `0.5: ${opacity()}`);
+    setProgress(1);
+    assert.true(Math.abs(opacity() - 0.35) < 1e-6, `1: ${opacity()}`);
+  });
+
+  test('--mobile-drawer-ios-partial-dim: 1 keeps the old dim at every snap point', async function (assert) {
+    styles.push(addStyles(':root { --mobile-drawer-ios-partial-dim: 1; }'));
+    await renderDrawer();
+    const opacity = () =>
+      Number(getComputedStyle(el('[data-test-backdrop]')).opacity);
+
+    setProgress(0, 0.4);
+    assert.true(Math.abs(opacity() - 0.14) < 1e-6, `partial: ${opacity()}`);
+    setProgress(1);
+    assert.true(Math.abs(opacity() - 0.35) < 1e-6, `1: ${opacity()}`);
+  });
+
+  test('a nested sheet dims, and does not scale or move', async function (assert) {
+    await renderDrawer({ tall: true, expanded: true });
+    const tray = el('[data-test-tray]');
+    const grabber = el('[data-test-grabber]');
+    const before = tray.getBoundingClientRect();
+    assert.false(tray.style.boxShadow.includes('100vmax'));
+
+    el('[data-test-root]').setAttribute('data-nested', '');
+    finishTransitions();
+    const shadow = getComputedStyle(tray).boxShadow;
+    assert.true(
+      /rgba\(0, 0, 0, 0\.12\) 0px 0px 0px \d+(\.\d+)?px inset$/.test(shadow),
+      `the tray dims: ${shadow}`,
+    );
+    assert.true(
+      insetRim(shadow) !== null,
+      'the rim and the shadow stay under the dim',
+    );
+    assert.true(
+      /rgba\(0, 0, 0, 0\.12\) 0px 0px 0px \d+(\.\d+)?px inset$/.test(
+        getComputedStyle(grabber).boxShadow,
+      ),
+      'the opaque strip dims too, no band',
+    );
+    assert.strictEqual(getComputedStyle(tray).filter, 'none', 'no filter');
+    assert.strictEqual(getComputedStyle(tray).scale, 'none', 'no scale');
+    const after = tray.getBoundingClientRect();
+    assert.deepEqual(
+      [after.top, after.left, after.width, after.height],
+      [before.top, before.left, before.width, before.height],
+      'same box',
+    );
+
+    setProgress(0);
+    finishTransitions();
+    assert.strictEqual(
+      getComputedStyle(grabber).boxShadow,
+      'none',
+      'below the highest snap point the transparent strip gets no dim',
+    );
+
+    styles.push(
+      addStyles(
+        '[data-test-theme] { --mobile-drawer-ios-nested-dim: rgb(0 0 0 / 0.3); }',
+      ),
+    );
+    finishTransitions();
+    assert.true(
+      getComputedStyle(tray).boxShadow.includes(
+        'rgba(0, 0, 0, 0.3) 0px 0px 0px',
+      ),
+      'apps set the dim colour',
+    );
   });
 
   test('unlayered app CSS still wins over the expanded tray background', async function (assert) {
@@ -1028,11 +1223,15 @@ module('Integration | themes/ios.css', function (hooks) {
       finishTransitions();
       const tray = getComputedStyle(el('[data-test-tray]'));
       assert.strictEqual(tray.borderTopLeftRadius, '3px', 'radius');
-      assert.strictEqual(tray.backgroundColor, 'rgb(1, 2, 3)', 'background');
+      assert.strictEqual(
+        rgb(tray.backgroundColor),
+        'rgb(1, 2, 3)',
+        'background',
+      );
       assert.strictEqual(tray.backdropFilter, 'none', 'blur');
 
       const backdrop = el('[data-test-backdrop]');
-      backdrop.style.setProperty('--mobile-drawer-progress', '1');
+      setProgress(1);
       assert.strictEqual(
         Number(getComputedStyle(backdrop).opacity),
         0.9,
@@ -1182,12 +1381,21 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
       const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
       const strip = root.querySelector('.mobile-drawer-theme-ios__grabber')!;
 
+      const sheet = root.querySelector<HTMLElement>('.mobile-drawer__sheet')!;
+      const inset = () => {
+        const r = root.getBoundingClientRect();
+        const s = sheet.getBoundingClientRect();
+        // The test container may be scaled.
+        const scale = r.width / (root as HTMLElement).offsetWidth;
+        return Math.round((s.left - r.left) / scale);
+      };
+
       state.active = 1;
       await frames();
-      finishTransitions();
       assert.dom(root).doesNotHaveAttribute('data-expanded');
+      assert.dom(root).doesNotHaveAttribute('data-at-highest');
       assert.strictEqual(
-        getComputedStyle(tray).backgroundColor,
+        rgb(getComputedStyle(tray).backgroundColor),
         GLASS.light.background,
         'partial: glass',
       );
@@ -1195,11 +1403,17 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
         getComputedStyle(tray).backdropFilter,
         'blur(30px) saturate(1.8)',
       );
+      assert.strictEqual(
+        inset(),
+        placement === 'bottom' ? 8 : 0,
+        'partial: a bottom sheet floats',
+      );
 
       state.active = 2;
       await frames();
-      finishTransitions();
       assert.dom(root).hasAttribute('data-expanded');
+      assert.dom(root).hasAttribute('data-at-highest');
+      assert.strictEqual(inset(), 0, 'highest: edge-to-edge');
       const trayStyle = getComputedStyle(tray);
       assert.strictEqual(
         rgb(trayStyle.backgroundColor),

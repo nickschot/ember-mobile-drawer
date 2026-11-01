@@ -195,7 +195,7 @@ module('Integration | Component | mobile-drawer', function (hooks) {
       .exists({ count: 1 });
     assert
       .dom(
-        '[data-test-drawer] > .mobile-drawer__tray > .mobile-drawer__content > [data-test-block]',
+        '[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content > [data-test-block]',
       )
       .hasText('Drawer content');
     assert
@@ -209,7 +209,7 @@ module('Integration | Component | mobile-drawer', function (hooks) {
       .hasNoText();
     assert
       .dom(
-        '[data-test-drawer] > .mobile-drawer__tray + .mobile-drawer__bar-tint',
+        '[data-test-drawer] > .mobile-drawer__sheet + .mobile-drawer__bar-tint',
       )
       .exists({ count: 1 }, 'an empty bar tint after the tray');
     assert
