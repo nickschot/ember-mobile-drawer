@@ -397,6 +397,19 @@ function isEditable(element: Element): boolean {
   );
 }
 
+/**
+ * Whether `element` is a field that takes text: a text `<input>` (not
+ * `disabled`), a `<textarea>` or contenteditable content. Unlike
+ * `isEditable`, `readonly` fields count: their text can still be selected.
+ */
+function isTextField(element: Element): boolean {
+  if (element instanceof HTMLInputElement) {
+    return !element.disabled && !NON_TEXT_INPUTS.has(element.type);
+  }
+  if (element instanceof HTMLTextAreaElement) return !element.disabled;
+  return element instanceof HTMLElement && element.isContentEditable;
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
@@ -444,13 +457,17 @@ const clampIndex = (index: number, count: number) =>
  * own, with `didPan`'s `touch-action` (`pan-x` for a vertical axis, `pan-y`
  * for a horizontal one), so the browser doesn't pan along the axis on it. A
  * gesture that starts on a handle always drags, at every snap point, also
- * when the content is scrolled (see `shouldDrag`): a sticky header with the
- * modifier stays a way to drag a scrolled sheet. Without `@handleOnly` the
- * tray's drag source also decides such a gesture as a drag, so it cancels
- * the touchmoves; whichever of the two recognises the pan first owns the
- * drag, and the other is ignored. A handle belongs to the drawer that
- * yielded it, not to a drawer around that one. A tap on an element in a
- * handle (a button) still clicks.
+ * when the content is scrolled (see `#onHandle`): a sticky header with the
+ * modifier stays a way to drag a scrolled sheet. The handle's drag source
+ * decides such a gesture as a drag like the tray's does (`shouldHandleDrag`),
+ * so it cancels the touchmoves, also with `@handleOnly`. Without
+ * `@handleOnly` the tray's drag source decides it as a drag too
+ * (`shouldDrag`); whichever of the two recognises the pan first owns the
+ * drag, and the other is ignored. A handle wins over everything in it, also
+ * a `data-mobile-drawer-scroll` element, except a text field (see
+ * `#onHandle`). A handle belongs to the drawer that yielded it, not to a
+ * drawer around that one. A tap on an element in a handle (a button) still
+ * clicks.
  *
  * With `@handleOnly` the content is locked below the highest snap point
  * too, so it only scrolls when the drawer is fully open, and swipes along
@@ -1997,7 +2014,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Whether `target` is in one of this drawer's handles (not a nested
-   * drawer's). A gesture that starts there always drags.
+   * drawer's). A gesture that starts there always drags. A text field in a
+   * handle (see `isTextField`) is not part of it, so text selection in it
+   * keeps working: without `@handleOnly` a gesture there follows the rules
+   * of the rest of the tray, with it a gesture there doesn't drag.
    */
   #onHandle(target: Element | null): boolean {
     const tray = this.#tray;
@@ -2006,10 +2026,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       element && element !== tray && tray?.contains(element);
       element = element.parentElement
     ) {
+      if (isTextField(element)) return false;
       if (this.#handles.has(element as HTMLElement)) return true;
     }
     return false;
   }
+
+  /**
+   * The handles' `shouldDrag`: a gesture on a handle drags (see
+   * `#onHandle`). With it the handle's drag source also cancels the
+   * touchmoves of a drag, so the browser can't scroll the tray under it,
+   * also with `@handleOnly`, where the tray isn't a drag source.
+   */
+  private shouldHandleDrag = (_movement: number, target: Element | null) =>
+    this.#onHandle(target);
 
   private onHandleInstall = (element: HTMLElement): void => {
     this.#handles.add(element);
@@ -2369,6 +2399,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
                 onPan=this.onPan
                 onPanEnd=this.onPanEnd
                 onInstall=this.onHandleInstall
+                shouldDrag=this.shouldHandleDrag
                 onTeardown=this.onHandleTeardown
               )
               isDragging=this.isDragging

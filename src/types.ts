@@ -38,7 +38,9 @@ export interface MobileDrawerApi {
    * drags the drawer and never scrolls the content, at every snap point,
    * also when the content is scrolled. Use it on a grabber or a sticky
    * header. The element gets `touch-action: pan-x` (`pan-y` for `left` and
-   * `right`). Taps on buttons in it still work.
+   * `right`). Taps on buttons in it still work. The handle wins over the
+   * elements in it (also a `data-mobile-drawer-scroll` element), except a
+   * text field, so keep handles small.
    *
    * Without `@handleOnly` the rest of the tray drags too (and scrolls where
    * the content can scroll). With `@handleOnly={{true}}` dragging only

@@ -210,6 +210,8 @@ class State {
   @tracked filler = 0;
   /** Renders a non-modal drawer with a handle inside the drawer. */
   @tracked innerDrawer = false;
+  /** Renders a text input and a marked scroll element in the handle. */
+  @tracked handleContent = false;
   changes: number[] = [];
 
   onChange = (index: number) => {
@@ -247,7 +249,22 @@ async function renderDrawer(state: State) {
             style="width: 40px; height: 40px"
             data-test-handle
             {{drawer.handle}}
-          ></div>
+          >
+            {{#if state.handleContent}}
+              <input
+                style="width: 30px; height: 10px"
+                aria-label="Field"
+                data-test-handle-field
+              />
+              <div
+                style="width: 30px; height: 20px; overflow: auto"
+                data-mobile-drawer-scroll
+                data-test-handle-scroller
+              >
+                <div style="height: 100px"></div>
+              </div>
+            {{/if}}
+          </div>
           {{#if state.innerDrawer}}
             <div style={{innerStyle}}>
               <MobileDrawer
@@ -1144,6 +1161,10 @@ module(
       const handle = await gesture(el('[data-test-handle]'), 'down', 30);
       assert.true(handle.dragging, 'the handle drags');
       assert.true(handle.shift < -80, `(${handle.shift})`);
+      assert.true(
+        handle.prevented.every(Boolean),
+        'the handle cancels its touchmoves',
+      );
     });
 
     test('pan() drags from a handle, also with scrolled content', async function (assert) {
@@ -1264,9 +1285,42 @@ module(
         );
         assert.true(handle.dragging, 'the handle drags');
         assert.true(handle.shift < -80, `(${handle.shift})`);
+        assert.true(
+          handle.prevented.length > 0 && handle.prevented.every(Boolean),
+          'every touchmove is cancelled, so the content does not scroll',
+        );
         clock.runUntilIdle();
         await settled();
         assert.deepEqual(state.changes, [1]);
+      });
+    }
+
+    for (const handleOnly of [false, true]) {
+      const mode = handleOnly ? 'with @handleOnly' : 'without @handleOnly';
+
+      test(`${mode}: a text field in a handle is not part of the handle`, async function (assert) {
+        const state = new State();
+        state.handleOnly = handleOnly;
+        state.handleContent = true;
+        await renderDrawer(state);
+        scrollTo(tray(), 'bottom', 'middle');
+
+        const field = await gesture(el('[data-test-handle-field]'), 'down', 30);
+        assert.false(field.dragging, 'the field does not drag');
+        assert.false(
+          field.prevented.some(Boolean),
+          'its touchmoves are left to the browser',
+        );
+
+        el('[data-test-handle-scroller]').scrollTop = 40;
+        assert.strictEqual(el('[data-test-handle-scroller]').scrollTop, 40);
+        const scroller = await gesture(
+          el('[data-test-handle-scroller]'),
+          'down',
+          30,
+        );
+        assert.true(scroller.dragging, 'a scroll element in a handle drags');
+        assert.true(scroller.prevented.every(Boolean));
       });
     }
 
