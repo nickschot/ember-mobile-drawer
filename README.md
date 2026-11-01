@@ -73,6 +73,7 @@ Arguments:
 - `@modal`: whether the drawer is a modal dialog while it is open. Default `true`. See [Accessibility](#accessibility).
 - `@backdrop`: whether to render the backdrop behind the tray. Defaults to the value of `@modal`: `true`, unless the drawer is non-modal. With `@backdrop={{false}}` nothing covers the page.
 - `@closeOnBackdropClick`: whether a tap or click on the backdrop closes the drawer (like `close()`, so through `@onSnapPointChange` when `@activeSnapPoint` is set). Default `true`.
+- `@transparentStatusBar`: iOS Safari 26 and later only. While this modal drawer is open, the status bar shows the dimmed page instead of one solid colour. Default `false`. See [Transparent status bar](#transparent-status-bar).
 - `@onOpen`, `@onClose`, `@onDragStart`, `@onDragEnd`: lifecycle callbacks, see [Events](#events).
 - `@spring`: the spring that moves the drawer to a snap point, for example `springPresets.ios`. See [Spring](#spring).
 
@@ -412,6 +413,7 @@ The drawer root (`.mobile-drawer`) carries state attributes you can style on:
   The scroll lock (see [Scrolling content](#scrolling-content)) doesn't use it: that follows where the drawer is shown, frame by frame.
 - `data-at-highest`: while the tray is shown at (or past) its highest snap point, where its content can scroll. Unlike `data-expanded` it follows where the drawer is shown, also during a drag or an animation: it comes when the expand progress (see [Floating sheet](#floating-sheet)) gets to 1, and goes when it leaves 1. The iOS theme makes the grabber strip opaque with it.
 - `data-nested`: while a modal drawer in front of this drawer is open (the modal drawer that opened last), and this drawer shows and is not inside it (a drawer in the yielded `Nested` counts as inside). The iOS theme dims the sheet with it.
+- `data-status-bar="transparent"`: while the drawer shows the page in the iOS status bar (see [Transparent status bar](#transparent-status-bar)).
 
 ### Floating sheet
 
@@ -462,6 +464,34 @@ When a field gets focus, iOS Safari moves the visual viewport up in the page to 
 - The root gets `data-keyboard` for that time. The floating sheet (see [Floating sheet](#floating-sheet)) then goes to the edges and the bottom of the root, and the iOS theme gives it no bottom radius, so the sheet meets the fill, as a native sheet goes on behind the keyboard. The content and the field don't move.
 - Only one drawer shows a fill at a time. With nested drawers (also those rendered with the yielded `Nested`), the innermost drawer that contains the focused field shows it. When focus leaves the fields, every fill goes at once.
 - Only for a `position: fixed` root (not an embedded drawer), while the page isn't zoomed in. Other browsers keep fixed elements in the layout viewport's coordinates and don't get the fill.
+
+#### Transparent status bar
+
+By default, the status bar is one solid colour while a drawer is open in iOS Safari 26 and later (see above). With `@transparentStatusBar={{true}}` it shows the page under it, dimmed like the rest of the page and blurred by Safari, with no edge, as in native iOS apps:
+
+```gts
+<MobileDrawer @transparentStatusBar={{true}} @snapPoints={{array 0 "40%" "100%"}}>
+  …
+</MobileDrawer>
+```
+
+Safari paints the status bar in one colour when any fixed or sticky element is within 4px of the top of the area between the bars, or when `<body>` is `position: fixed`. So, while the drawer is open:
+
+- **Scroll lock:** the page is locked with `overflow: hidden` and `overscroll-behavior: none` on `<html>` and `<body>`, and a `touchmove` filter, instead of a fixed `<body>`. A scroll of the page while it is locked is undone.
+- **Text fields:** a drawer that contains a text field (`<input>` of a text type, `<textarea>` or `contenteditable`, not disabled or read-only) when it opens keeps the fixed `<body>`, and so the solid status bar. The on-screen keyboard needs it: without a fixed `<body>`, iOS scrolls the page and the drawer apart to show a focused field. The same applies when such a drawer opens in front of a drawer with a transparent status bar (for example a nested drawer): the lock changes to the fixed `<body>`, and the status bar is solid until all drawers are closed. A field that the drawer adds after it opened doesn't change the lock.
+- **5px offset:** the root (with the backdrop and the sheet) starts 5px below the top. A full-height sheet stops 5px below the status bar. `env(safe-area-inset-top)` is 0 in Safari with the bars, so the offset is a fixed 5px.
+- **Dim layer:** the dim is a separate element, `.mobile-drawer__dim`, inserted just before the root. It is `position: absolute` and as large as the document, so it is page content and Safari shows it in the status bar. It has the backdrop colour, max opacity and progress (`--mobile-drawer-backdrop-color`, `--mobile-drawer-backdrop-opacity`, `--mobile-drawer-progress`), and the dim of the [iOS theme](#ios-theme). The backdrop is transparent and only takes the pointer events. The `.mobile-drawer__backdrop-tint` strip isn't shown; the `.mobile-drawer__bar-tint` at the toolbar stays.
+- **Keyboard:** a drawer with a text field has the fixed `<body>`, so the offset and the dim layer are off while it is open, and the [keyboard fill](#ios-safari-on-screen-keyboard) works as without `@transparentStatusBar`.
+- The root has `data-status-bar="transparent"` while this is on. It starts when the drawer opens (and locks the page), and ends when the drawer is closed or rests at a peek.
+
+It applies only to modal drawers, only while they are open, and only in iOS Safari (the `-webkit-touch-callout` rule). Top drawers don't change (the sheet is at the status bar there), and neither does an embedded drawer (a root that isn't `position: fixed`). A drawer nested in a drawer with a transparent status bar also gets the offset and its own dim layer.
+
+Limits:
+
+- A fixed or sticky element of your app near the top (for example a header) makes the status bar solid again.
+- An ancestor of the drawer root that clips (`overflow`), that is scaled or transformed, or that is a stacking context below other page content can cut or hide the dim layer. If the drawer root is inside the page element of the iOS theme's [page scale](#page-scale), the dim layer scales with the page.
+- An own `background` on `.mobile-drawer__backdrop` doesn't go to the dim layer. Use `--mobile-drawer-backdrop-color` and `--mobile-drawer-backdrop-opacity`.
+- The scroll lock was tested in the iOS 27 simulator and on a current iPhone (#113). iOS 16 to 18 aren't tested: older iOS ignored `overflow: hidden` for touch scrolling.
 
 ### iOS theme
 

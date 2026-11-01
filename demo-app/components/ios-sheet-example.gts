@@ -3,6 +3,7 @@ import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { MobileDrawer, springPresets, type SnapPoint } from '#src/index.ts';
+import { statusBar } from '../lib/status-bar.ts';
 import { pageScale } from '../lib/page-scale.ts';
 
 const ITEMS = [
@@ -112,6 +113,7 @@ export default class IosSheetExample extends Component {
       {{#in-element this.destination insertBefore=null}}
         <div class="mobile-drawer-theme-ios">
           <MobileDrawer
+            @transparentStatusBar={{statusBar.transparent}}
             @placement={{this.placement}}
             @snapPoints={{this.snapPoints}}
             @activeSnapPoint={{this.active}}
@@ -152,6 +154,7 @@ export default class IosSheetExample extends Component {
             </ul>
             <drawer.Nested>
               <MobileDrawer
+                @transparentStatusBar={{statusBar.transparent}}
                 @snapPoints={{this.detailSnapPoints}}
                 @activeSnapPoint={{this.detailActive}}
                 @onSnapPointChange={{this.setDetailActive}}

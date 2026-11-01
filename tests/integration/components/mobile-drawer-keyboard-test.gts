@@ -43,6 +43,7 @@ class State {
   @tracked shift = 0;
   @tracked embedded = false;
   @tracked inset = '8px';
+  @tracked transparentStatusBar = false;
 
   get rootStyle() {
     return htmlSafe(
@@ -87,6 +88,7 @@ async function renderDrawer(state: State) {
             @snapPoints={{SNAP_POINTS}}
             @activeSnapPoint={{state.active}}
             @modal={{state.modal}}
+            @transparentStatusBar={{state.transparentStatusBar}}
             aria-label="Drawer"
             style={{state.rootStyle}}
             data-test-drawer
@@ -120,6 +122,7 @@ module('Integration | Component | mobile-drawer | keyboard', function (hooks) {
     delete drawerEnvironment.clock;
     delete drawerEnvironment.prefersReducedMotion;
     delete drawerEnvironment.visualViewport;
+    delete drawerEnvironment.isIOS;
     assert.strictEqual(fills().length, 0, 'no fill outlives the test');
   });
 
@@ -223,6 +226,39 @@ module('Integration | Component | mobile-drawer | keyboard', function (hooks) {
       );
     });
   }
+
+  test('@transparentStatusBar: a drawer with a field keeps the fixed <body>, so no offset and no dim layer while the fill shows', async function (assert) {
+    drawerEnvironment.isIOS = () => true;
+    const state = new State();
+    state.modal = true;
+    state.transparentStatusBar = true;
+    state.active = 0;
+    await renderDrawer(state);
+    await settle();
+    state.active = 1;
+    await settle();
+    assert.strictEqual(document.body.style.position, 'fixed', 'fixed lock');
+    assert.dom(root()).doesNotHaveAttribute('data-status-bar');
+    assert.dom('.mobile-drawer__dim').doesNotExist();
+
+    el('[data-test-field]').focus();
+    await openKeyboard(state);
+    assert.strictEqual(fills().length, 1, 'the fill shows');
+    assert.dom(root()).hasAttribute(KEYBOARD_ATTRIBUTE);
+    assert.dom(root()).doesNotHaveAttribute('data-status-bar');
+    assert.dom('.mobile-drawer__dim').doesNotExist();
+    const rect = fill().getBoundingClientRect();
+    assert.true(
+      Math.abs(rect.top - root().getBoundingClientRect().bottom) < 0.5,
+      'from the bottom of the root',
+    );
+
+    await closeKeyboard(state);
+    assert.strictEqual(fills().length, 0);
+    state.active = 0;
+    await settle();
+    assert.strictEqual(document.body.style.position, '', 'lock released');
+  });
 
   test('focus that leaves the fields hides the fill at once; focus on another field keeps it', async function (assert) {
     const state = new State();
