@@ -19,7 +19,7 @@ Try it in the [playground](https://nickschot.github.io/ember-mobile-drawer/). It
 - [Compatibility](#compatibility)
 - [Installation](#installation)
 - [Quick start](#quick-start): [bottom](#bottom-sheet), [top](#top-drawer), [left](#left-drawer), [right](#right-drawer)
-- [Usage](#usage): [snap points](#snap-points), [controlled and uncontrolled](#controlled-and-uncontrolled), [backdrop](#backdrop), [spring](#spring), [events](#events), [accessibility](#accessibility), [dragging](#dragging), [grabber](#grabber), [scrolling content](#scrolling-content), [nested drawers](#nested-drawers), [public imports](#public-imports), [TypeScript](#typescript)
+- [Usage](#usage): [snap points](#snap-points), [controlled and uncontrolled](#controlled-and-uncontrolled), [backdrop](#backdrop), [spring](#spring), [events](#events), [accessibility](#accessibility), [dragging](#dragging), [grabber](#grabber), [header](#header), [scrolling content](#scrolling-content), [nested drawers](#nested-drawers), [public imports](#public-imports), [TypeScript](#typescript)
 - [Styles](#styles): [state attributes](#state-attributes), [floating sheet](#floating-sheet), [iOS theme](#ios-theme)
 - [Testing](#testing)
 - [API reference](#api-reference)
@@ -443,6 +443,8 @@ The yielded `Grabber` component is an accessible grabber, like the grabber of an
 
 #### Keep the grabber at the leading edge
 
+The closest to a native iOS sheet is the [header](#header): put the grabber in the `header` block, outside the scroll container. It then doesn't move at all, and the content bounces at its start under it. Without a header, the rest of this section applies: the grabber is in the content and sticky.
+
 Put the grabber (with or without the `handle` modifier) at the tray's leading edge, the edge that faces the page, and make it sticky there, so it doesn't scroll with the content. The tray is the scroll container, and the content scrolls at the highest snap point (also with `@handleOnly`, see [Scrolling content](#scrolling-content)). A grabber that scrolls out of view can't be dragged, and with `@handleOnly` it is the only way to drag the drawer at all. Give it the tray's background, so content doesn't show through as it scrolls under it.
 
 ```css
@@ -467,9 +469,36 @@ Padding on the tray's leading edge needs one more line. A sticky element sticks 
 
 The demo app's playground (`demo-app/styles.css`, `.demo-grabber`) does this for all four placements.
 
+### Header
+
+The `header` block puts content at the tray's leading edge, outside the scroll container: the header mode. Use it for a grabber, or a title bar or a search field that must not scroll, as in a native iOS sheet: the header doesn't move, and the content scrolls under it and bounces at its start (in iOS Safari) like the list of a native sheet. Without the block, nothing changes: the tray is the scroll container, and a sticky grabber moves with the bounce at the content start (see [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge)).
+
+```gts
+<MobileDrawer @snapPoints={{array 0 "40%" "100%"}} aria-label="Places">
+  <:header as |drawer|>
+    <drawer.Grabber class="mobile-drawer-theme-ios__grabber" />
+  </:header>
+  <:default as |drawer|>
+    <h2>Places</h2>
+    ...
+  </:default>
+</MobileDrawer>
+```
+
+With a named block, Ember needs the other content in `<:default>`. Both blocks get the same [yielded values](#yielded-values).
+
+- **Markup:** the header renders in `.mobile-drawer__header`, a tray child before `.mobile-drawer__content`, and the root gets `data-header`. The header is always first in the DOM, so it is first in the tab order and for screen readers; the base styles show it at the tray's leading edge with `order`: at the top of a bottom drawer, at the bottom of a top drawer (after the content), at the right of a left drawer and at the left of a right drawer (a column there).
+- **Scroll container:** `.mobile-drawer__content` (`overflow: auto`, `overscroll-behavior: contain`), not the tray (`overflow: hidden`). Everything in [Scrolling content](#scrolling-content) applies to the content instead of the tray: the scroll lock below the highest snap point, the scroll reset to the scroll start, the scroll-to-drag handoff and the drag-to-scroll. Code that reads or sets the scroll position must use the content: `scrollTop` of the tray is always `0`. The content doesn't grow: it sits against the leading edge (next to the header) and shrinks to the space the header leaves, and then it scrolls.
+- **Gestures:** a gesture on the header drags the drawer at every snap point (there is nothing to scroll there), also without the `handle` modifier, like the grabber area of a native sheet. Towards open at the highest snap point it bounces the content past fully open. A drag on the header never scrolls the content. Put the `handle` modifier (or the `Grabber`) in the header anyway for `@handleOnly`.
+- **Bounce past fully open:** the content moves under the header, which stays at the tray's edge. The header is above the content (`position: relative; z-index: 1`) and has the tray's background (`background: inherit`). Elements in the header need no `data-mobile-drawer-pinned`.
+- **Padding:** the header has the content's safe-area padding across the axis (left and right for bottom and top drawers, top and bottom for left and right drawers), no padding along the axis.
+- **Size:** the tray's natural size (for a `content` snap point) is the header plus the content. The component measures the header again when it changes size.
+- **Focus:** when keyboard focus on an element off screen moves the drawer to its highest snap point (see [Keyboard focus and content off screen](#keyboard-focus-and-content-off-screen)), the component scrolls the content (not the tray) so the element shows next to the header, not under it. A modal drawer focuses the tray (`tabindex="-1"`) or its first focusable element, as before; the header is in the focus trap. For a top drawer the DOM order (header first) differs from the visual order (header last).
+- **iOS theme:** see [iOS theme](#ios-theme).
+
 ### Scrolling content
 
-The tray is a scroll container (`overflow: auto`), so content longer than the drawer scrolls. Without `@handleOnly`, each touch gesture on the tray either scrolls or drags the drawer. It is decided once the finger has moved 4px along the drawer's axis, and further along it than across it, and stays that way until the finger lifts. A swipe across the axis (a horizontal carousel in a bottom drawer, a list in a side drawer) is left to the browser, also when it starts with a slight lean along the axis; if a gesture that was going to drag turns sideways before the drag starts (10px), it is left to the browser too.
+The tray is a scroll container (`overflow: auto`), so content longer than the drawer scrolls. With a `header` block, the content is the scroll container instead (see [Header](#header)): read "tray" as "content" in this section for the scroll position, the scroll lock and the overscroll behaviour. Without `@handleOnly`, each touch gesture on the tray either scrolls or drags the drawer. It is decided once the finger has moved 4px along the drawer's axis, and further along it than across it, and stays that way until the finger lifts. A swipe across the axis (a horizontal carousel in a bottom drawer, a list in a side drawer) is left to the browser, also when it starts with a slight lean along the axis; if a gesture that was going to drag turns sideways before the drag starts (10px), it is left to the browser too.
 
 - While the drawer is below its highest snap point, the content can't scroll along the drawer's axis at all (also with `@handleOnly`, and also with a mouse wheel or the keyboard), and every gesture along the axis drags the drawer. Dragging a half-open bottom drawer up expands it instead of scrolling.
 - When a bottom or top drawer leaves its highest snap point, the tray scrolls back to its scroll start, so the part of the content that shows at a lower snap point is always the same and you never see content that you can't scroll back. The scroll start is the start of the content for a bottom drawer (`scrollTop` 0). A top drawer's leading edge is its bottom, so below its highest snap point its scroll start is the end of the content: at a partial snap point it shows the end of its content. At the highest snap point every drawer opens at `scrollTop` 0, the top of its content.
@@ -630,6 +659,7 @@ The safe-area insets are padding on the `.mobile-drawer__content` element inside
 The drawer root (`.mobile-drawer`) carries state attributes you can style on:
 
 - `data-placement`: `bottom`, `top`, `left` or `right`.
+- `data-header`: when the drawer has a `header` block (see [Header](#header)). It doesn't change while the drawer is rendered.
 - `data-closed`: while the drawer is fully closed and at rest. The base styles hide the drawer then.
 - `data-expanded`: while the drawer rests at its highest snap point, or is animating towards it. It doesn't change during a drag or while a touch holds the drawer, so small movements at the top don't flicker it: a drag that starts at the top keeps it until the finger lifts, and loses it only if the drawer is then released towards a lower snap point; a drag up from a lower snap point gets it on release, when the drawer heads for the top. It is never set when the highest snap point is closed (`0`). Use it for a look that only applies when the drawer is fully open, for example:
 
@@ -740,6 +770,21 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 ```
 
 The grabber class also styles the yielded [`Grabber`](#grabber) button the same way, with a focus ring around the bar for keyboard focus: `<drawer.Grabber class="mobile-drawer-theme-ios__grabber" data-mobile-drawer-pinned />`.
+
+**With a header (recommended, the native behaviour).** Put the grabber in the `header` block (see [Header](#header)). It then doesn't move when the content bounces at its start, as in a native iOS sheet, and it needs no `data-mobile-drawer-pinned`. The same markup works for a top drawer: the header goes to the bottom edge by itself.
+
+```hbs
+<div class="mobile-drawer-theme-ios">
+  <MobileDrawer>
+    <:header as |drawer|>
+      <drawer.Grabber class="mobile-drawer-theme-ios__grabber" />
+    </:header>
+    <:default>...</:default>
+  </MobileDrawer>
+</div>
+```
+
+The theme styles `.mobile-drawer__header` as it styles the grabber strip in the content (below): transparent below the highest snap point, and at it (`data-at-highest`) the opaque sheet colour, with the glass rim again over it along the leading edge (its `::after`, bottom and top drawers), and the nested dim (`data-nested`). The strip in the header has no background of its own. In a floating bottom sheet the header has the same side padding as the content (the inset and the side safe areas). The rest of this section is about a grabber in the content, without a header.
 
 `mobile-drawer-theme-ios__grabber` draws a 58×4px bar for bottom and top drawers, 5px below the sheet's edge, like the grabber of an iOS 27 sheet. Put it directly in the drawer: first in a bottom drawer and last in a top drawer. The element is a 14px strip (the 4px bar with 5px padding above and below) across the tray that stays at the tray's leading edge (see [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge)): sticky at the top of a bottom drawer and at the bottom of a top drawer, so it stays in view while the content scrolls at the highest snap point. Don't wrap the grabber in another element: a sticky element only sticks inside its parent, so a wrapped grabber scrolls away with its wrapper. While the drawer is at its highest snap point (`data-at-highest`) the sheet is opaque (see **Full height** below) and the strip has the same colour, so the content scrolling under it doesn't show through and the strip doesn't show as a band (browsers that can't make the colour opaque, such as Safari before 18, keep the glass sheet and give the strip the translucent sheet colour). Below the highest snap point the strip is transparent, so it looks like the rest of the sheet. That works because no content is under the strip there: the component keeps the tray at its scroll start below the highest snap point (the start of the content at the top of a bottom drawer, the end of the content at the bottom of a top drawer; see [Scrolling content](#scrolling-content)). There is one short exception, a run down from a scrolled sheet. `data-at-highest` goes away on the first frame below the highest snap point, but the tray only gets back to its scroll start during the run, in step with the tray (or, for a close, once the drawer is closed). So for that moment the rows that were scrolled under the strip show under the bar. In the demo, when you close a fully open, scrolled sheet with "Done", a part of a row shows under the bar while the sheet slides away (about half a second). The strip's 5px padding above and below the bar doesn't collapse with a neighbour's margin, as the old 5px margins did. The bar is drawn by the strip's `::before`, so style the bar there, for example `.mobile-drawer-theme-ios__grabber::before { width: 48px; }`. To make the grabber always drag the sheet, also when the content is scrolled (and with `@handleOnly`), put the `handle` modifier on the grabber itself, not on a wrapper; the hit area of the grabber (the only part that drags with `@handleOnly`) is this 14px strip, so for a larger touch target give it more padding, for example `.mobile-drawer-theme-ios__grabber { padding-block: 12px; }`.
 
@@ -960,7 +1005,7 @@ Attributes (`...attributes`) go on the root element, a `<div>`.
 
 ### Yielded values
 
-The block gets one value, of type `MobileDrawerApi`:
+The default block and the `header` block (see [Header](#header)) get the same value, of type `MobileDrawerApi`:
 
 | Name              | Type                                          | Description |
 | ----------------- | --------------------------------------------- | ----------- |
@@ -990,6 +1035,7 @@ The root element `.mobile-drawer` has these attributes:
 | Attribute                       | When |
 | ------------------------------- | ---- |
 | `data-placement`                | Always: `bottom`, `top`, `left` or `right`. |
+| `data-header`                   | With a `header` block: the header mode, the content is the scroll container. See [Header](#header). |
 | `data-closed`                   | While the drawer is fully closed and at rest. The base styles hide the drawer. |
 | `data-expanded`                 | While the drawer rests at its highest snap point or animates towards it (not during a drag), and that snap point is not `0`. |
 | `data-at-highest`               | While the tray is shown at or past its highest snap point, frame by frame. |
@@ -1016,6 +1062,7 @@ See [State attributes](#state-attributes) for details.
   <div class="mobile-drawer__sheet">
     <div class="mobile-drawer__glass" aria-hidden="true"></div>
     <div class="mobile-drawer__tray" tabindex="-1">                   <!-- tabindex: modal drawers -->
+      <div class="mobile-drawer__header">...your header block...</div> <!-- with a header block -->
       <div class="mobile-drawer__content">...your block...</div>
     </div>
   </div>
@@ -1031,8 +1078,9 @@ See [State attributes](#state-attributes) for details.
 | `.mobile-drawer__shadow`        | A layer for a theme's outer shadow of a floating bottom sheet; `display: none` in the base styles. For bottom drawers the component writes the tray's length (`height`), the tray's `transform` and `--mobile-drawer-expand-progress` on it, and the opposite transform on `.mobile-drawer__shadow-body`. The [iOS theme](#ios-theme) draws its shadow there. |
 | `.mobile-drawer__sheet`         | Clips the tray. Floats with `--mobile-drawer-inset`. The component writes `--mobile-drawer-expand-progress` on it. |
 | `.mobile-drawer__glass`         | A layer in the sheet, under the tray, for a theme's `backdrop-filter` on a floating bottom sheet; `display: none` in the base styles. It has the sheet's width and the top radius (`--mobile-drawer-radius`), and the sheet clips its bottom, so a blur on it needs no `clip-path`. For bottom drawers the component writes the tray's length (`height`) and the tray's `transform` on it. The [iOS theme](#ios-theme) puts its blur there. |
-| `.mobile-drawer__tray`          | The visible drawer and its scroll container. The component writes its `transform` and, below the highest snap point and during the bounce past fully open, `overflow`. It writes `touch-action` only when the tray is a drag source (not with `@handleOnly`). |
-| `.mobile-drawer__content`       | Your block. Has the safe-area padding. If you set padding on it, you replace the insets (the iOS theme sets its own side padding here). |
+| `.mobile-drawer__tray`          | The visible drawer and its scroll container (with a `header` block: not a scroll container, `overflow: hidden`). The component writes its `transform` and, below the highest snap point and during the bounce past fully open, `overflow`. It writes `touch-action` only when the tray is a drag source (not with `@handleOnly`). |
+| `.mobile-drawer__header`        | With a `header` block only: your header block, at the tray's leading edge, outside the scroll container. Has the safe-area padding across the axis. See [Header](#header). |
+| `.mobile-drawer__content`       | Your block. Has the safe-area padding. With a `header` block, it is the scroll container, and the component writes `overflow` on it below the highest snap point. If you set padding on it, you replace the insets (the iOS theme sets its own side padding here). |
 | `.mobile-drawer__bar-tint`      | iOS Safari 26 only: colours the bar at the sheet's edge. |
 | `.mobile-drawer__visually-hidden` | In your block, rendered by the yielded `Grabber`: text for screen readers only (its description and its status element). |
 | `.mobile-drawer-nested`         | Not in the root: the `display: contents` element that the yielded `Nested` renders into. Gets `data-closed` with its drawer. |

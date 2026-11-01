@@ -556,6 +556,13 @@ export interface MobileDrawerSignature {
   };
   Blocks: {
     default: [drawer: MobileDrawerApi];
+    /**
+     * Optional. Content that stays at the tray's leading edge, outside the
+     * scroll container, such as a grabber or a title bar: the header
+     * mode. The content then scrolls (and bounces at its start, as in a
+     * native iOS sheet) under it. See "Header" in the README.
+     */
+    header: [drawer: MobileDrawerApi];
   };
 }
 
@@ -782,7 +789,9 @@ const clampIndex = (index: number, count: number) =>
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
  * `@backdrop={{false}}`) and a `.mobile-drawer__sheet` with the
  * `.mobile-drawer__tray` in it, with the block inside
- * `.mobile-drawer__content`, and an empty `.mobile-drawer__bar-tint` after
+ * `.mobile-drawer__content` (and the `header` block, if given, in a
+ * `.mobile-drawer__header` before it, see `#scroller`), and an empty
+ * `.mobile-drawer__bar-tint` after
  * the sheet and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
  * after the backdrop (for the iOS Safari 26 bars, see styles.css), and a
  * `.mobile-drawer__shadow` before the sheet, for a theme's outer shadow of
@@ -897,6 +906,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #sheet?: HTMLElement;
   #tray?: HTMLElement;
   #content?: HTMLElement;
+  /**
+   * The tray's `.mobile-drawer__header`, with a `header` block: the header
+   * mode. The content is then the scroll container, see `#scroller`.
+   */
+  #header?: HTMLElement;
+
+  /**
+   * The drawer's scroll container: the tray, or with a `header` block (the
+   * header mode) `.mobile-drawer__content`, so the header stays out of the
+   * scroll and the content bounces under it at its start, as in a native
+   * iOS sheet. The tray then doesn't scroll (`overflow: hidden` in
+   * styles.css). The scroll reset, the scroll lock, the scroll handoff and
+   * the drag-to-scroll use this element.
+   */
+  get #scroller(): HTMLElement | undefined {
+    return this.#header ? this.#content : this.#tray;
+  }
   /** The root's `.mobile-drawer__bar-tint` child, if any. */
   #barTint?: HTMLElement;
   /** The root's `.mobile-drawer__shadow` child, see `#paintShadow`. */
@@ -1298,6 +1324,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#content = this.#tray.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__content',
       )!;
+      this.#header =
+        this.#tray.querySelector<HTMLElement>(
+          ':scope > .mobile-drawer__header',
+        ) ?? undefined;
       const { clock } = drawerEnvironment;
       this.#clock = clock;
       this.#spring = new Spring({
@@ -1383,6 +1413,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
         this.#resizeObserver.observe(root);
         this.#resizeObserver.observe(this.#content);
+        if (this.#header) this.#resizeObserver.observe(this.#header);
       }
     },
 
@@ -1657,10 +1688,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (this.#renderedOffset <= EPSILON) this.#scrollToStart(target);
       return;
     }
-    const tray = this.#tray!;
+    const scroller = this.#scroller!;
     const top = this.placement === 'top';
-    const start = top ? Math.max(0, tray.scrollHeight - tray.clientHeight) : 0;
-    let distance = Math.abs(tray.scrollTop - start);
+    const start = top
+      ? Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      : 0;
+    let distance = Math.abs(scroller.scrollTop - start);
     // The browser rounds scroll positions. Where the tray is still where
     // the running spring put it, go on from the spring's exact position:
     // otherwise a resize on every frame could keep the reset a pixel short.
@@ -1730,7 +1763,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #writeScroll(reset: ScrollReset, fraction: number): void {
     reset.fraction = fraction;
     const top = reset.start + reset.sign * reset.distance * fraction;
-    this.#tray!.scrollTo({ top, behavior: 'instant' });
+    this.#scroller!.scrollTo({ top, behavior: 'instant' });
   }
 
   /**
@@ -1796,12 +1829,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #scrollToStart(target: number): void {
     this.#stopScrollReset();
     if (this.axis !== 'vertical') return;
-    const tray = this.#tray!;
+    const scroller = this.#scroller!;
     const top =
       this.placement === 'top' && !this.#isHighest(target)
-        ? Math.max(0, tray.scrollHeight - tray.clientHeight)
+        ? Math.max(0, scroller.scrollHeight - scroller.clientHeight)
         : 0;
-    tray.scrollTo({ top, behavior: 'instant' });
+    scroller.scrollTo({ top, behavior: 'instant' });
   }
 
   /**
@@ -2212,6 +2245,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (!lock) return;
     this.#lockScroll(tray);
+    // In the header mode the content is the scroll container.
+    if (this.#header) this.#lockScroll(this.#content!);
     for (const element of tray.querySelectorAll<HTMLElement>(
       `[${SCROLL_ATTRIBUTE}]`,
     )) {
@@ -3086,24 +3121,27 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * The scroll containers that take part in a gesture that starts at
    * `target`: the marked ones (`data-mobile-drawer-scroll`) between it and
-   * the tray, innermost first, and the tray.
+   * the tray, innermost first, and the drawer's scroll container (see
+   * `#scroller`): the tray, or in the header mode the content, if the
+   * gesture starts in it. A gesture on the header has no scroll container.
    */
   #scrollChain(target: Element | null): HTMLElement[] {
     const tray = this.#tray;
-    if (!tray) return [];
+    const scroller = this.#scroller;
+    if (!tray || !scroller) return [];
     const chain: HTMLElement[] = [];
     for (
-      let element = target instanceof Element ? target : tray;
+      let element = target instanceof Element ? target : scroller;
       element && tray.contains(element);
       element = element.parentElement!
     ) {
       if (
         element instanceof HTMLElement &&
-        (element === tray || element.hasAttribute(SCROLL_ATTRIBUTE))
+        (element === scroller || element.hasAttribute(SCROLL_ATTRIBUTE))
       ) {
         chain.push(element);
       }
-      if (element === tray) break;
+      if (element === scroller || element === tray) break;
     }
     return chain;
   }
@@ -3286,6 +3324,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     this.#lockScroll(tray);
+    if (this.#header) this.#lockScroll(this.#content!);
     for (
       let element: Element | null = target;
       element && element !== tray && tray.contains(element);
@@ -3552,12 +3591,24 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (active !== element) return;
     const visible = this.#visibleRange(0);
+    const header = this.#header;
+    if (header) {
+      // The header doesn't scroll; the content shows below (or, for a top
+      // drawer, above) it only.
+      if (header.contains(element)) return;
+      const box = this.#content!.getBoundingClientRect();
+      visible.start = Math.max(visible.start, box.top);
+      visible.end = Math.min(visible.end, box.bottom);
+    }
     const rect = element.getBoundingClientRect();
     // Show the element's end if it is below, but its start first of all.
     let delta = Math.max(0, rect.bottom - visible.end);
     delta = Math.min(delta, rect.top - visible.start);
     if (Math.abs(delta) <= EPSILON) return;
-    tray.scrollBy({ top: delta / this.#screenScale(), behavior: 'instant' });
+    this.#scroller!.scrollBy({
+      top: delta / this.#screenScale(),
+      behavior: 'instant',
+    });
   }
 
   #onTrayTouchStart = (event: TouchEvent): void => {
@@ -4193,6 +4244,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     <div
       class="mobile-drawer"
       data-placement={{this.placement}}
+      data-header={{if (has-block "header") ""}}
       data-closed
       role={{if this.isModal "dialog"}}
       aria-modal={{if this.modalActive "true"}}
@@ -4242,48 +4294,54 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
             )
           )}}
         >
-          <div class="mobile-drawer__content">
+          {{#let
+            (modifier
+              dragSource
+              axis=this.axis
+              pointerTypes=POINTER_TYPES
+              onPointerDown=this.onPointerDown
+              onPanStart=this.onPanStart
+              onPan=this.onPan
+              onPanEnd=this.onPanEnd
+              onInstall=this.onHandleInstall
+              shouldDrag=this.shouldHandleDrag
+              onTeardown=this.onHandleTeardown
+            )
+            as |handle|
+          }}
             {{#let
-              (modifier
-                dragSource
-                axis=this.axis
-                pointerTypes=POINTER_TYPES
-                onPointerDown=this.onPointerDown
-                onPanStart=this.onPanStart
-                onPan=this.onPan
-                onPanEnd=this.onPanEnd
-                onInstall=this.onHandleInstall
-                shouldDrag=this.shouldHandleDrag
-                onTeardown=this.onHandleTeardown
-              )
-              as |handle|
-            }}
-              {{yield
-                (hash
-                  snapTo=this.snapTo
-                  open=this.open
-                  close=this.close
-                  activeSnapPoint=this.activeSnapPoint
+              (hash
+                snapTo=this.snapTo
+                open=this.open
+                close=this.close
+                activeSnapPoint=this.activeSnapPoint
+                handle=handle
+                Grabber=(component
+                  Grabber
+                  owner=this.grabberOwner
                   handle=handle
-                  Grabber=(component
-                    Grabber
-                    owner=this.grabberOwner
-                    handle=handle
-                    activeSnapPoint=this.activeSnapPoint
-                    openSnapPoints=this.openSnapPoints
-                  )
-                  isDragging=this.isDragging
-                  isAnimating=this.isAnimating
-                  progress=this.progress
-                  Nested=(component
-                    NestedPortal
-                    owner=this.nestedOwner
-                    fallback=this.nestedParent
-                  )
+                  activeSnapPoint=this.activeSnapPoint
+                  openSnapPoints=this.openSnapPoints
                 )
-              }}
+                isDragging=this.isDragging
+                isAnimating=this.isAnimating
+                progress=this.progress
+                Nested=(component
+                  NestedPortal owner=this.nestedOwner fallback=this.nestedParent
+                )
+              )
+              as |drawer|
+            }}
+              {{#if (has-block "header")}}
+                <div class="mobile-drawer__header">
+                  {{yield drawer to="header"}}
+                </div>
+              {{/if}}
+              <div class="mobile-drawer__content">
+                {{yield drawer}}
+              </div>
             {{/let}}
-          </div>
+          {{/let}}
         </div>
       </div>
       <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>

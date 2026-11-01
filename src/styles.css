@@ -23,6 +23,7 @@
  *     <div class="mobile-drawer__sheet">
  *       <div class="mobile-drawer__glass" aria-hidden="true"></div>
  *       <div class="mobile-drawer__tray">
+ *         <div class="mobile-drawer__header">...header block...</div>
  *         <div class="mobile-drawer__content">...yielded content...</div>
  *       </div>
  *     </div>
@@ -162,7 +163,9 @@
  *                           the sheet (`inherit`), and so can a theme rule
  *                           on the sheet or the tray. Don't set it from app
  *                           CSS.
- * .mobile-drawer__tray      The sheet and scroll container. The component
+ * .mobile-drawer__tray      The sheet and scroll container (with a header
+ *                           block the content is the scroll container, see
+ *                           .mobile-drawer__header). The component
  *                           writes an inline `touch-action` on it to decide
  *                           between scrolling and dragging (see the README);
  *                           don't override `touch-action` on it. It also
@@ -272,6 +275,14 @@
  *                           length (an inline `height`) and every frame the
  *                           tray's inline `transform`. Other drawers don't
  *                           use it.
+ * .mobile-drawer__header    Only with a `header` block (the root then has
+ *                           `data-header`): the header block, a tray child
+ *                           before the content, at the tray's leading edge
+ *                           (with `order`). The content is then the scroll
+ *                           container, and the tray doesn't scroll; the
+ *                           component's scroll lock, scroll reset and
+ *                           scroll handoff use the content. See "The header
+ *                           mode" below.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
  *                           carries the safe-area padding (see below) and,
  *                           for top and left, the auto start margin (see the
@@ -1081,6 +1092,99 @@
   ) {
     padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
       env(safe-area-inset-bottom, 0px) 0;
+  }
+
+  /*
+   * The header mode ([data-header], with a `header` block): the header is a
+   * tray child at the tray's leading edge, and the content, not the tray,
+   * is the scroll container. So the header doesn't scroll, and the content
+   * bounces under it at its start (iOS), as in a native iOS sheet. The
+   * tray is a flex container along the axis that doesn't scroll; the
+   * content doesn't grow (it sits against the leading edge, as before) and
+   * shrinks to the space the header leaves, then it scrolls. Its
+   * `overscroll-behavior: contain` keeps a scroll from chaining to the page,
+   * as the tray's does. The header is above the content, so the content
+   * goes under it while it bounces past fully open, and has the tray's
+   * background for that. It has the content's safe-area padding across
+   * the axis.
+   */
+  :where(.mobile-drawer[data-header] > .mobile-drawer__sheet)
+    > .mobile-drawer__tray {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  :where(
+    .mobile-drawer[data-header]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+  ) {
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  :where(
+    .mobile-drawer[data-header]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
+  ) {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    box-sizing: border-box;
+    padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+    background: inherit;
+  }
+
+  /* A top drawer's leading edge is its bottom: the header goes last. */
+  :where(
+    .mobile-drawer[data-header][data-placement="top"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
+  ) {
+    order: 1;
+  }
+
+  /* Left and right drawers: a column at the leading edge (the right of a
+     left drawer, the left of a right drawer), the content at full height. */
+  :where(
+      .mobile-drawer[data-header]:is(
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+    )
+    > .mobile-drawer__tray {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  :where(
+    .mobile-drawer[data-header]:is(
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
+  ) {
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+  }
+
+  :where(
+    .mobile-drawer[data-header][data-placement="left"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
+  ) {
+    order: 1;
   }
 
   /*
