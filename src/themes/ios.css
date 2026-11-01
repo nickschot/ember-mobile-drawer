@@ -126,11 +126,13 @@
  * expands, and a `content` snap point doesn't move. The theme pads the
  * content of a bottom sheet by the inset on both sides, at every snap
  * point, so the clipped sides hide nothing: at full height the content has
- * 8px more side padding than a native sheet. The clips hide the tray's
- * outer shadow on its sides and bottom while the inset is set; the shadow
- * above the top edge stays, so it separates the sheet from the page. Top,
- * left and right drawers don't float. The top corners have the theme
- * radius (36px) at every snap point.
+ * 8px more side padding than a native sheet. While the sheet floats, the
+ * clips hide the tray's outer shadow on every side, also above the top
+ * edge: the glass rim and the blur separate the sheet from the page, as
+ * on iOS 27, where the floating sheet's shadow is hardly visible. At the
+ * highest snap point the whole shadow shows. Top, left and right drawers
+ * don't float. The top corners have the theme radius (36px) at every snap
+ * point.
  *
  * Full height: the sheet goes from glass to opaque (the sheet colour,
  * `--mobile-drawer-background`, the theme's or the app's, without its

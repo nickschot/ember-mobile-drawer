@@ -290,6 +290,31 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     );
   });
 
+  test('with --mobile-drawer-inset the tray clip has no area above the top edge, and clips nothing at the highest snap point', async function (assert) {
+    const state = new State();
+    state.inset = '8px';
+    await renderDrawer(state);
+    state.active = 1;
+    await settle();
+    const clip = () => getComputedStyle(tray()).clipPath;
+    // Above the top edge the tray's own shadow would be a flat band across
+    // the sheet, with hard ends at the sheet's sides.
+    assert.true(
+      clip().startsWith('polygon(8px calc(100% + 1000px), 8px 0px, '),
+      `floating: the sides at the inset (${clip()})`,
+    );
+    assert.notOk(/-\d/.test(clip()), `floating: no point above (${clip()})`);
+
+    state.active = 2;
+    await settle();
+    assert.true(
+      clip().startsWith(
+        'polygon(-10000px calc(100% + 1000px), -10000px -10000px',
+      ),
+      `highest: the clip clips nothing, the whole shadow shows (${clip()})`,
+    );
+  });
+
   test('with --mobile-drawer-inset the inset area does not take touches, at the highest snap point the tray does', async function (assert) {
     const state = new State();
     state.inset = '8px';

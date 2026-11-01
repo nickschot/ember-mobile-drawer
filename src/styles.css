@@ -264,11 +264,11 @@
  * of the tray is in the sheet. The inset area takes no pointer events. The
  * clipped sides of the tray hide `inset` px of the content on each side
  * below the highest snap point: pad the content by the inset (the iOS
- * theme does). While an inset is set, the clips hide the tray's outer
- * shadow on its sides and bottom; the shadow above its top edge stays.
- * Without an inset the tray's clip clips nothing (also not a large app
- * shadow). Themes round the sheet's bottom corners with `border-radius` on
- * the sheet.
+ * theme does). While the sheet floats, the clips hide the tray's outer
+ * shadow on every side, also above its top edge. At the highest snap point,
+ * and without an inset, the tray's clip clips nothing, so the whole shadow
+ * shows (also a large app shadow). Themes round the sheet's bottom corners
+ * with `border-radius` on the sheet.
  *
  * Defaults are given as var() fallbacks rather than declared on the root, so
  * values set on any ancestor (including :root) take effect.
@@ -432,6 +432,17 @@
   initial-value: 0;
 }
 
+/*
+ * Private: how far the tray's clip moves out (see the clip below). It
+ * changes with the expand progress, so it is not inherited: the content
+ * isn't styled again when it changes.
+ */
+@property --_mobile-drawer-clip-out {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @layer ember-mobile-drawer {
   :where(.mobile-drawer) {
     position: fixed;
@@ -580,14 +591,21 @@
    * tray's sides at the inset, but the tray's own top corners are at the
    * root's edges: the sheet would cut them with a kink. This polygon gives
    * the tray its top radius at the inset (each corner as 6 straight
-   * segments, which don't show at these radii), and it goes 1000px above
-   * the tray's top edge, across the sheet's width, so the tray's top shadow
-   * stays (the sheet cuts it at its sides, as the side shadow). The
-   * private `--_mobile-drawer-clip-out` moves every point 10000px out when
-   * `--mobile-drawer-inset` is 0: `10000px - min(inset * 100000, 10000px)`
-   * is 10000px for an inset of 0 and 0 for an inset of 0.1px or more. So
-   * without an inset the polygon clips nothing (also not a large app
-   * shadow).
+   * segments, which don't show at these radii). Its top edge is the tray's
+   * top edge, so while the sheet floats, the tray's outer shadow doesn't
+   * show above it either. The tray is wider than the sheet, so its own
+   * shadow there would be a flat band across the sheet: the sheet cuts it
+   * with hard ends at its sides, and next to the round corners it would
+   * stop at the height of the top edge.
+   *
+   * `--_mobile-drawer-clip-out` (registered above, not inherited) moves
+   * every point 10000px out while the effective inset (the inset times
+   * 1 - the expand progress) is 0: `10000px - min(inset * 100000,
+   * 10000px)` is 10000px for 0 and 0 for 0.1px or more. So at the highest
+   * snap point, and without an inset, the clip cuts nothing: the tray is
+   * then the sheet's shape, and its whole shadow shows (also a large app
+   * shadow). Between an effective inset of 0.1px and 0 (the last 1/80 of
+   * the expand progress for an 8px inset) the points move out.
    */
   :where(
     .mobile-drawer:not(
@@ -599,7 +617,12 @@
       > .mobile-drawer__tray
   ) {
     --_mobile-drawer-clip-out: calc(
-      10000px - min(var(--mobile-drawer-inset, 0px) * 100000, 10000px)
+      10000px -
+        min(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) * 100000,
+          10000px
+        )
     );
     clip-path: polygon(
       calc(
@@ -670,30 +693,6 @@
           var(--mobile-drawer-inset, 0px) *
             (1 - var(--mobile-drawer-expand-progress)) +
             var(--mobile-drawer-radius, 0px) * 1 -
-            var(--_mobile-drawer-clip-out)
-        )
-        calc(-1 * var(--_mobile-drawer-clip-out)),
-      calc(
-          var(--mobile-drawer-inset, 0px) *
-            (1 - var(--mobile-drawer-expand-progress)) -
-            var(--_mobile-drawer-clip-out)
-        )
-        calc(-1 * var(--_mobile-drawer-clip-out)),
-      calc(
-          var(--mobile-drawer-inset, 0px) *
-            (1 - var(--mobile-drawer-expand-progress)) -
-            var(--_mobile-drawer-clip-out)
-        )
-        calc(-1000px - var(--_mobile-drawer-clip-out)),
-      calc(
-          100% - var(--mobile-drawer-inset, 0px) *
-            (1 - var(--mobile-drawer-expand-progress)) +
-            var(--_mobile-drawer-clip-out)
-        )
-        calc(-1000px - var(--_mobile-drawer-clip-out)),
-      calc(
-          100% - var(--mobile-drawer-inset, 0px) *
-            (1 - var(--mobile-drawer-expand-progress)) +
             var(--_mobile-drawer-clip-out)
         )
         calc(-1 * var(--_mobile-drawer-clip-out)),
