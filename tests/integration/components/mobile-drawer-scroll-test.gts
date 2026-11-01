@@ -678,8 +678,9 @@ module(
       });
       assert.true(result.dragging, 'still dragging');
       assert.true(
-        // 30 steps down, 20 back up: 40 screen px down, less didPan's 10px.
-        result.shift < -20 && result.shift > -40,
+        // 30 steps down, 20 back up: 40 screen px down. The tray holds
+        // still while the finger comes back to it, then follows it.
+        Math.abs(result.shift + 40) < 0.5,
         `the tray followed back up (${result.shift})`,
       );
       assert.true(result.prevented.every(Boolean), 'never scrolls');

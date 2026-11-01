@@ -1,6 +1,6 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { find, render, settled } from '@ember/test-helpers';
+import { clearRender, find, render, settled } from '@ember/test-helpers';
 import { tracked } from '@glimmer/tracking';
 import { htmlSafe } from '@ember/template';
 import { pan } from 'ember-gesture-modifiers/test-support';
@@ -1177,5 +1177,124 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     finger.up();
     clock.runUntilIdle();
     await settled();
+  });
+  /**
+   * A finger on the grip of a rendered drawer, and how to read the finger
+   * and the tray in drawer px from where they started, positive opening.
+   */
+  function fingerOnGrip(placement: Placement) {
+    const scale = containerScale();
+    const grip = el('[data-test-grip]').getBoundingClientRect();
+    const finger = new TouchPointer(
+      el('[data-test-grip]'),
+      grip.left + grip.width / 2,
+      grip.top + grip.height / 2,
+    );
+    const vertical = placement === 'bottom' || placement === 'top';
+    const down = vertical ? finger.y : finger.x;
+    const start = openOffset(placement);
+    /** Moves the finger `by` screen px, positive opening. */
+    const move = (by: number) => {
+      const along = OPENS_TOWARDS[placement] * by;
+      finger.move(vertical ? 0 : along, vertical ? along : 0);
+    };
+    const read = (): PanFrame => ({
+      finger:
+        (OPENS_TOWARDS[placement] * ((vertical ? finger.y : finger.x) - down)) /
+        scale,
+      tray: openOffset(placement) - start,
+    });
+    return { finger, move, read };
+  }
+
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: a pull that turns back during the catch-up never passes the finger`, async function (assert) {
+      for (const pull of [1, -1]) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        const { finger, move, read } = fingerOnGrip(placement);
+
+        // 4 screen px a frame: 16px one way (recognised at 12), then at
+        // once back past the touchdown, to 16px the other way.
+        finger.down();
+        const frames: PanFrame[] = [];
+        // In the pull's direction, after every frame and every move.
+        const record = () => {
+          const { finger: f, tray } = read();
+          frames.push({ finger: f * pull, tray: tray * pull });
+        };
+        for (let i = 0; i < 12; i++) {
+          clock.frame(FRAME);
+          record();
+          move(i < 4 ? 4 * pull : -4 * pull);
+          record();
+        }
+        const log = table(frames);
+        assert.true(
+          // Between where it started and the finger.
+          frames.every(
+            ({ finger: f, tray }) =>
+              tray >= Math.min(0, f) - 0.01 && tray <= Math.max(0, f) + 0.01,
+          ),
+          `${pull}: never past the finger (finger/tray: ${log})`,
+        );
+        const against = frames.slice(1).some((frame, i) => {
+          const fingerStep = frame.finger - frames[i]!.finger;
+          const trayStep = frame.tray - frames[i]!.tray;
+          return fingerStep * trayStep < -0.0001;
+        });
+        assert.false(against, `${pull}: never against the finger (${log})`);
+        const last = frames[frames.length - 1]!;
+        assert.true(near(last.tray, last.finger), `${pull}: under the finger`);
+
+        finger.up();
+        clock.runUntilIdle();
+        await settled();
+      }
+    });
+  }
+
+  test('a finger that turns back and stops during the catch-up is caught up with', async function (assert) {
+    const state = new State();
+    state.active = 1;
+    await renderDrawer(state);
+    const { finger, move, read } = fingerOnGrip('bottom');
+
+    finger.down();
+    for (const by of [4, 4, 4, 4, -4]) {
+      clock.frame(FRAME);
+      move(by);
+    }
+    const turned = read();
+    assert.true(
+      turned.tray > 0 && turned.tray < turned.finger,
+      `held behind the finger (${turned.finger}/${turned.tray})`,
+    );
+    clock.runUntilIdle();
+    const stopped = read();
+    assert.true(
+      near(stopped.tray, stopped.finger),
+      `then under it (${stopped.finger}/${stopped.tray})`,
+    );
+    finger.up();
+    clock.runUntilIdle();
+    await settled();
+  });
+
+  test('removing the drawer during the catch-up leaves no frame', async function (assert) {
+    const state = new State();
+    state.active = 1;
+    await renderDrawer(state);
+    const { finger, move } = fingerOnGrip('bottom');
+
+    finger.down();
+    move(6);
+    move(6);
+    assert.true(clock.pendingFrames > 0, 'catching up');
+    await clearRender();
+    assert.strictEqual(clock.pendingFrames, 0);
+    finger.up();
   });
 });
