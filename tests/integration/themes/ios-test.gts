@@ -1244,6 +1244,67 @@ module('Integration | themes/ios.css', function (hooks) {
     );
   });
 
+  test("the tray shadow: the theme's value, or an app's --mobile-drawer-shadow as is", async function (assert) {
+    const trayShadow = () => getComputedStyle(el('[data-test-tray]')).boxShadow;
+    const rim = 'rgba(255, 255, 255, 0.22) 0px 0px 0px 0.5px inset';
+
+    await renderDrawer({ scheme: 'dark' });
+    assert.strictEqual(
+      trayShadow(),
+      rim,
+      'bottom, the theme: only the rim (the shadow layer draws the outer shadow)',
+    );
+    await renderDrawer({ scheme: 'dark', placement: 'top' });
+    assert.true(
+      trayShadow().startsWith(rim) && trayShadow().includes('32px'),
+      `top, the theme: the rim and an outer shadow (${trayShadow()})`,
+    );
+
+    // A value on an ancestor of the theme element doesn't apply.
+    const rootStyle = addStyles(
+      ':root { --mobile-drawer-shadow: rgb(1, 2, 3) 0px 0px 5px 0px; }',
+    );
+    styles.push(rootStyle);
+    await renderDrawer({ scheme: 'dark' });
+    assert.strictEqual(
+      trayShadow(),
+      rim,
+      'bottom: a :root value does not apply',
+    );
+    rootStyle.remove();
+
+    for (const placement of ['bottom', 'left'] as const) {
+      const style = addStyles(
+        '[data-test-theme] { --mobile-drawer-shadow: none; }',
+      );
+      await renderDrawer({ scheme: 'dark', placement });
+      assert.strictEqual(
+        trayShadow(),
+        'none',
+        `${placement}: --mobile-drawer-shadow: none removes the rim`,
+      );
+      style.remove();
+    }
+
+    styles.push(
+      addStyles(
+        '[data-test-theme] { --mobile-drawer-shadow: inset 0 0 0 1px rgb(1 2 3); }',
+      ),
+    );
+    await renderDrawer({ scheme: 'dark' });
+    assert.strictEqual(
+      trayShadow(),
+      'rgb(1, 2, 3) 0px 0px 0px 1px inset',
+      'bottom: an app rim applies as is',
+    );
+    el('[data-test-root]').setAttribute('data-nested', '');
+    finishTransitions();
+    assert.true(
+      trayShadow().startsWith('rgb(1, 2, 3) 0px 0px 0px 1px inset, '),
+      `bottom, nested: the app rim and the dim (${trayShadow()})`,
+    );
+  });
+
   test('unlayered app CSS still wins over the expanded tray background', async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     styles.push(

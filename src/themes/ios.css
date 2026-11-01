@@ -18,7 +18,7 @@
  * properties it sets are `backdrop-filter` and `transition` on the tray and
  * the grabber's and `border-radius` on the sheet, which the base styles
  * don't set, the shadow layer's boxes (see "The shadow"), and `background`
- * on the tray, `box-shadow` on a bottom tray and on a nested tray,
+ * on the tray, `box-shadow` on the tray,
  * `opacity` and `filter` on the backdrop, `background-color` on the bar
  * tint and `background-color` on the backdrop tint, which the base styles
  * also set: those rules have a specificity above zero (see "Overriding"),
@@ -96,6 +96,13 @@
  *                                       minus the inset (about 55px - 8px
  *                                       on current iPhones) for corners
  *                                       concentric with the display.
+ *   --mobile-drawer-shadow              The tray's box-shadow. The theme
+ *                                       resets it (`initial`); without an
+ *                                       app value the tray gets the glass
+ *                                       rim, plus an outer shadow on top,
+ *                                       left and right drawers. An app
+ *                                       value applies as is, on every
+ *                                       placement (see "The tray shadow").
  *   --mobile-drawer-ios-shadow          The outer shadow of a bottom sheet,
  *                                       on the shadow layer (see "The
  *                                       shadow"). A 0.5px edge line and
@@ -243,7 +250,7 @@
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
  * wins. Exceptions: the rules for real properties that the base styles also
- * set (the tray `background`, a bottom and a nested tray's `box-shadow`, the
+ * set (the tray `background`, the tray's `box-shadow`, the
  * backdrop's `opacity` and `filter`, the bar tint's and the backdrop tint's
  * `background-color`) have the specificity of one class (0,1,0), so they
  * win over the base styles' rules in any load order.
@@ -285,7 +292,13 @@
     --mobile-drawer-radius: 36px;
     /* The floating sheet (bottom sheets, see styles.css). */
     --mobile-drawer-inset: 8px;
-    --mobile-drawer-shadow:
+    /* Not set: an app value set on this element or closer applies as is,
+       and a value from an ancestor (e.g. :root) doesn't, as with the other
+       theme values. The tray rules ("The tray shadow" below) use the
+       theme's own value when this property is not set. */
+    --mobile-drawer-shadow: initial;
+    /* Private: the theme's tray shadow for top, left and right drawers. */
+    --_mobile-drawer-ios-tray-shadow:
       0 0 0 0.5px rgb(0 0 0 / 0.12), 0 0 32px rgb(0 0 0 / 0.12);
     --mobile-drawer-backdrop-color: rgb(0 0 0);
     --mobile-drawer-backdrop-opacity: 0.35;
@@ -306,7 +319,7 @@
     :where(.mobile-drawer-theme-ios) {
       --mobile-drawer-background: light-dark(rgb(255 255 255), rgb(28 28 30));
       --mobile-drawer-color: light-dark(rgb(0 0 0), rgb(255 255 255));
-      --mobile-drawer-shadow:
+      --_mobile-drawer-ios-tray-shadow:
         0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
         0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
       --mobile-drawer-ios-shadow:
@@ -438,7 +451,7 @@
   }
 
   /*
-   * The glass rim (the inset box-shadow in --mobile-drawer-shadow) is part of
+   * The glass rim (the inset box-shadow of the tray) is part of
    * the tray's background, so it is painted under the content. While the
    * strip is opaque (see "Full height") it covers the rim along the tray's
    * leading edge and its rounded corners. ::after draws that part of the rim
@@ -495,7 +508,7 @@
     :where(.mobile-drawer-theme-ios) {
       --mobile-drawer-background: rgb(255 255 255 / 0.72);
       --_mobile-drawer-ios-rim: rgb(255 255 255 / 0.8);
-      --mobile-drawer-shadow:
+      --_mobile-drawer-ios-tray-shadow:
         inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim),
         0 0 0 0.5px rgb(0 0 0 / 0.12), 0 0 32px rgb(0 0 0 / 0.12);
     }
@@ -510,7 +523,7 @@
           rgb(255 255 255 / 0.8),
           rgb(255 255 255 / 0.22)
         );
-        --mobile-drawer-shadow:
+        --_mobile-drawer-ios-tray-shadow:
           inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim),
           0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
           0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
@@ -766,11 +779,23 @@
   }
 
   /*
-   * The tray of a bottom sheet: only the glass rim, no outer shadow (the
-   * shadow layer draws it). Specificity 0,1,0, so it wins over the base
-   * tray shadow in either load order. Thus `--mobile-drawer-shadow` doesn't
-   * apply to a bottom sheet with this theme; see the README.
+   * The tray shadow: an app's `--mobile-drawer-shadow` (set on the theme
+   * element or closer) applies as is, on every placement. Without it, the
+   * theme's value: the rim and an outer shadow on top, left and right
+   * drawers, and only the rim on a bottom sheet, because the shadow layer
+   * draws its outer shadow. An app value with an outer shadow on a bottom
+   * sheet is clipped while the sheet floats (see styles.css); see the
+   * README. Specificity 0,1,0, so these win over the base tray shadow in
+   * either load order.
    */
+  :where(.mobile-drawer-theme-ios .mobile-drawer__sheet)
+    > .mobile-drawer__tray {
+    box-shadow: var(
+      --mobile-drawer-shadow,
+      var(--_mobile-drawer-ios-tray-shadow, none)
+    );
+  }
+
   :where(
       .mobile-drawer-theme-ios
         .mobile-drawer:not(
@@ -781,7 +806,10 @@
         > .mobile-drawer__sheet
     )
     > .mobile-drawer__tray {
-    box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
+    box-shadow: var(
+      --mobile-drawer-shadow,
+      inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent)
+    );
   }
 
   /*
@@ -1042,12 +1070,12 @@
     )
     > .mobile-drawer__tray {
     box-shadow:
-      var(--mobile-drawer-shadow, 0 0 12px rgb(0 0 0 / 0.2)),
+      var(--mobile-drawer-shadow, var(--_mobile-drawer-ios-tray-shadow, none)),
       inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
   }
 
-  /* A bottom sheet: the rim and the dim, without an outer shadow (the
-     shadow layer draws it, see "The shadow"). */
+  /* A bottom sheet: without an app value, the rim and the dim, without an
+     outer shadow (the shadow layer draws it, see "The shadow"). */
   :where(
       .mobile-drawer-theme-ios
         .mobile-drawer[data-nested]:not(
@@ -1059,7 +1087,10 @@
     )
     > .mobile-drawer__tray {
     box-shadow:
-      inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent),
+      var(
+        --mobile-drawer-shadow,
+        inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent)
+      ),
       inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
   }
 
