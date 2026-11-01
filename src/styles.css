@@ -141,7 +141,9 @@
  *                           shadow and padding it would make the JS distance
  *                           and the CSS default disagree.
  *                           The base styles set no padding on the tray, so
- *                           apps can pad it freely.
+ *                           apps can pad it freely. With a sticky grabber,
+ *                           don't pad the tray's leading edge: the grabber
+ *                           sticks inside that padding.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
  *                           carries the safe-area padding (see below) and,
  *                           for top and left, the auto start margin (see the

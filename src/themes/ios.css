@@ -45,7 +45,13 @@
  *                                    the 36x5px bar, in the tray's text
  *                                    colour. Don't wrap it in another
  *                                    element: a sticky element only sticks
- *                                    inside its parent.
+ *                                    inside its parent. Its ::after draws
+ *                                    the glass rim again over the opaque
+ *                                    strip. Limits (see the README): don't
+ *                                    pad the tray's leading edge, as the
+ *                                    strip sticks inside that padding; app
+ *                                    content with a z-index of 1 or more
+ *                                    paints above the strip.
  *
  * .mobile-drawer-theme-ios__page     Optional, off by default. The page
  *                                    scale effect: put this class and the
@@ -192,6 +198,10 @@
     --mobile-drawer-backdrop-opacity: 0.35;
     /* Private: the glass-to-opaque fade (see "Full height" below). */
     --_mobile-drawer-ios-fade: 0.25s;
+    /* Private: the colour of the glass rim, which the grabber strip draws
+       again over its own background (see the grabber). The solid sheet has
+       no rim. */
+    --_mobile-drawer-ios-rim: transparent;
   }
 
   @supports (color: light-dark(#000, #fff)) {
@@ -232,6 +242,8 @@
     top: 0;
     z-index: 1;
     padding: 5px 0;
+    /* Clips the rim in ::after to the strip. */
+    overflow: hidden;
     background: transparent;
   }
 
@@ -246,6 +258,28 @@
     background: color-mix(in srgb, currentcolor 30%, transparent);
   }
 
+  /*
+   * The glass rim (the inset box-shadow in --mobile-drawer-shadow) is part of
+   * the tray's background, so it is painted under the content. While the
+   * strip is opaque (see "Full height") it covers the rim along the tray's
+   * leading edge and its rounded corners. ::after draws that part of the rim
+   * again, over the strip: a box with the tray's radius on the leading
+   * corners and the same inset shadow. The box is taller than the strip by
+   * the radius, so the radius isn't scaled down, and the strip clips it: its
+   * far edge doesn't show. The shadow is only on while the strip has a
+   * colour; on the transparent strip the tray's own rim shows, and a second
+   * one would make it brighter.
+   */
+  :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: calc(100% + var(--mobile-drawer-radius, 0px));
+    border-radius: var(--mobile-drawer-radius, 0px)
+      var(--mobile-drawer-radius, 0px) 0 0;
+    pointer-events: none;
+  }
+
   /* A top sheet's leading edge is its bottom: the grabber goes last. */
   :where(
     .mobile-drawer-theme-ios
@@ -258,6 +292,18 @@
     bottom: 0;
   }
 
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-placement="top"]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  )::after {
+    inset: auto 0 0;
+    border-radius: 0 0 var(--mobile-drawer-radius, 0px)
+      var(--mobile-drawer-radius, 0px);
+  }
+
   /*
    * Liquid Glass: a translucent tint over a strong blur, a light inner rim
    * (the specular edge) and a darkened outer edge.
@@ -265,9 +311,10 @@
   @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
     :where(.mobile-drawer-theme-ios) {
       --mobile-drawer-background: rgb(255 255 255 / 0.72);
+      --_mobile-drawer-ios-rim: rgb(255 255 255 / 0.8);
       --mobile-drawer-shadow:
-        inset 0 0 0 0.5px rgb(255 255 255 / 0.8), 0 0 0 0.5px rgb(0 0 0 / 0.12),
-        0 0 32px rgb(0 0 0 / 0.12);
+        inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim),
+        0 0 0 0.5px rgb(0 0 0 / 0.12), 0 0 32px rgb(0 0 0 / 0.12);
     }
 
     @supports (color: light-dark(#000, #fff)) {
@@ -276,9 +323,12 @@
           rgb(255 255 255 / 0.72),
           rgb(28 28 30 / 0.72)
         );
+        --_mobile-drawer-ios-rim: light-dark(
+          rgb(255 255 255 / 0.8),
+          rgb(255 255 255 / 0.22)
+        );
         --mobile-drawer-shadow:
-          inset 0 0 0 0.5px
-            light-dark(rgb(255 255 255 / 0.8), rgb(255 255 255 / 0.22)),
+          inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim),
           0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
           0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
       }
@@ -350,6 +400,16 @@
     background: var(--mobile-drawer-background, Canvas);
   }
 
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-expanded]
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  )::after {
+    box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
+  }
+
   @supports (color: rgb(from light-dark(red, red) r g b / 1)) {
     :where(.mobile-drawer-theme-ios .mobile-drawer[data-expanded])
       > .mobile-drawer__tray,
@@ -378,7 +438,8 @@
      * and the strip only gets its colour once the tray has it: before that,
      * a strip that is already opaque would show as a band on the sheet that
      * is still fading. So the strip's and the blur's delay must be the same
-     * as the tray's duration; all three use --_mobile-drawer-ios-fade.
+     * as the tray's duration; all three (and the rim over the strip) use
+     * --_mobile-drawer-ios-fade.
      * The strip colour follows this timer, not the tray position. If the
      * tray gets to the top before the timer ends (a short run, or a fade
      * that was reversed) and the user scrolls at once, rows can show under
@@ -411,6 +472,17 @@
           > .mobile-drawer-theme-ios__grabber
       ) {
         transition: background-color 0s linear var(--_mobile-drawer-ios-fade);
+      }
+
+      /* The rim over the strip comes with the strip's colour. */
+      :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-expanded]
+          > .mobile-drawer__tray
+          > .mobile-drawer__content
+          > .mobile-drawer-theme-ios__grabber
+      )::after {
+        transition: box-shadow 0s linear var(--_mobile-drawer-ios-fade);
       }
     }
   }

@@ -115,6 +115,25 @@ function isTransparent(color: string): boolean {
   return color === 'transparent' || /[,/]\s*0\)$/.test(color);
 }
 
+/** The colour of the 0.5px inset rim in a computed box-shadow, or null. */
+function insetRim(boxShadow: string): string | null {
+  const match = /((?:rgba?|color)\([^)]*\)) 0px 0px 0px 0\.5px inset/.exec(
+    boxShadow,
+  );
+  return match?.[1] ?? null;
+}
+
+/**
+ * Whether a computed box-shadow draws nothing. During a transition from
+ * `none`, it serializes as a transparent shadow of size 0.
+ */
+function noRim(boxShadow: string): boolean {
+  return (
+    boxShadow === 'none' ||
+    /^rgba\(0, 0, 0, 0\) 0px 0px 0px 0px inset$/.test(boxShadow)
+  );
+}
+
 const TALL_LINES = Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`);
 
 /**
@@ -467,6 +486,81 @@ module('Integration | themes/ios.css', function (hooks) {
     });
   }
 
+  for (const placement of ['bottom', 'top'] as const) {
+    for (const scheme of SCHEMES) {
+      test(`${placement}, ${scheme}: expanded, the strip draws the glass rim again over its colour`, async function (assert) {
+        await renderDrawer({ placement, scheme, tall: true, expanded: true });
+        finishTransitions();
+
+        const trayElement = el('[data-test-tray]');
+        const grabber = el('[data-test-grabber]');
+        trayElement.style.scrollbarWidth = 'none';
+        // Scrolled, so content is under the strip.
+        trayElement.scrollTop =
+          placement === 'bottom'
+            ? 100
+            : trayElement.scrollHeight - trayElement.clientHeight - 100;
+
+        const trayRim = insetRim(getComputedStyle(trayElement).boxShadow);
+        assert.ok(trayRim, `the tray has a rim: ${trayRim}`);
+        const rim = getComputedStyle(grabber, '::after');
+        assert.strictEqual(
+          rim.boxShadow,
+          `${trayRim} 0px 0px 0px 0.5px inset`,
+          'the same rim as the tray',
+        );
+        assert.strictEqual(rim.pointerEvents, 'none', 'no hit target');
+        assert.strictEqual(
+          getComputedStyle(grabber).overflow,
+          'hidden',
+          'the strip clips the rim box',
+        );
+
+        // The rim box has the tray's leading corners and is at the tray's
+        // leading edge; its far edge is outside the strip, so it is clipped.
+        const style = rim;
+        const leading =
+          placement === 'bottom'
+            ? [style.borderTopLeftRadius, style.borderTopRightRadius]
+            : [style.borderBottomLeftRadius, style.borderBottomRightRadius];
+        const far =
+          placement === 'bottom'
+            ? [style.borderBottomLeftRadius, style.borderBottomRightRadius]
+            : [style.borderTopLeftRadius, style.borderTopRightRadius];
+        assert.deepEqual(leading, ['32px', '32px'], 'leading corners');
+        assert.deepEqual(far, ['0px', '0px'], 'far corners');
+
+        const t = trayElement.getBoundingClientRect();
+        const g = grabber.getBoundingClientRect();
+        const edge =
+          placement === 'bottom' ? g.top - t.top : t.bottom - g.bottom;
+        assert.true(Math.abs(edge) < 1, `at the leading edge (${edge}px)`);
+        assert.true(
+          Math.abs(g.left - t.left) < 1 && Math.abs(t.right - g.right) < 1,
+          'as wide as the tray',
+        );
+        // Taller than the strip by the radius, so the radius isn't scaled.
+        assert.strictEqual(
+          parseFloat(rim.height),
+          grabber.offsetHeight + 32,
+          'taller than the strip',
+        );
+      });
+    }
+  }
+
+  test('below the highest snap point the strip draws no second rim', async function (assert) {
+    await renderDrawer({ tall: true });
+    assert.true(
+      insetRim(getComputedStyle(el('[data-test-tray]')).boxShadow) !== null,
+      'the tray rim shows through the transparent strip',
+    );
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-grabber]'), '::after').boxShadow,
+      'none',
+    );
+  });
+
   test("expanded, the sheet and the grabber follow the app's sheet background, made opaque", async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     const style = addStyles(
@@ -510,6 +604,10 @@ module('Integration | themes/ios.css', function (hooks) {
       'fading in: the strip is still transparent, no band',
     );
     assert.true(
+      noRim(getComputedStyle(grabber, '::after').boxShadow),
+      'fading in: no second rim over the tray rim yet',
+    );
+    assert.true(
       tray.getAnimations().length > 0,
       'fading in: the sheet colour transitions',
     );
@@ -535,6 +633,11 @@ module('Integration | themes/ios.css', function (hooks) {
       isTransparent(getComputedStyle(grabber).backgroundColor),
       'fading out: the strip is transparent at once',
     );
+    assert.strictEqual(
+      getComputedStyle(grabber, '::after').boxShadow,
+      'none',
+      'fading out: the rim over the strip goes at once',
+    );
     finishTransitions();
     assert.strictEqual(
       getComputedStyle(tray).backgroundColor,
@@ -558,6 +661,8 @@ module('Integration | themes/ios.css', function (hooks) {
         fade: duration[at('background-color')],
         blurDelay: delay[at('backdrop-filter')],
         stripDelay: strip.transitionDelay,
+        rimDelay: getComputedStyle(el('[data-test-grabber]'), '::after')
+          .transitionDelay,
       };
     };
 
@@ -565,6 +670,7 @@ module('Integration | themes/ios.css', function (hooks) {
       fade: '0.25s',
       blurDelay: '0.25s',
       stripDelay: '0.25s',
+      rimDelay: '0.25s',
     });
 
     styles.push(
@@ -574,8 +680,8 @@ module('Integration | themes/ios.css', function (hooks) {
     );
     assert.deepEqual(
       timing(),
-      { fade: '0.4s', blurDelay: '0.4s', stripDelay: '0.4s' },
-      'all three follow the one property',
+      { fade: '0.4s', blurDelay: '0.4s', stripDelay: '0.4s', rimDelay: '0.4s' },
+      'all follow the one property',
     );
   });
 
