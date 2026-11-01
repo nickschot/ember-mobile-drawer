@@ -8,6 +8,8 @@ export interface PanData {
   initial?: { x: number; y: number };
   current: { x: number; y: number };
   originalEvent?: Event;
+  /** Set on the `onPanStart` of a drag that took over a scroll. */
+  handoff?: boolean;
 }
 
 type PanCallback = (data: PanData, element: HTMLElement) => void;
@@ -37,6 +39,16 @@ interface DragSourceNamedArgs {
    * axis, `pan-y` for a horizontal one). Called whenever `didPan` writes it.
    */
   touchAction?: () => string;
+  /**
+   * Turns on the scroll handoff (see `DragSourceModifier`): called for every
+   * `touchmove` of a gesture that `shouldDrag` decided as a scroll, with how
+   * far the finger moved along the axis since the previous one (client px,
+   * positive is down or right) and where the gesture started. Returns
+   * whether a drag takes over the gesture from here.
+   */
+  onScroll?: (step: number, target: Element | null) => boolean;
+  /** Called once a gesture that `onScroll` was called for ends. */
+  onScrollEnd?: () => void;
 }
 
 export interface DragSourceSignature {
@@ -79,6 +91,16 @@ interface Gesture {
   drags?: boolean;
   /** Whether `didPan` recognised a pan and the drag started. */
   panning: boolean;
+  /** Whether `shouldDrag` decided it as a scroll along the axis. */
+  scrolls?: boolean;
+  /**
+   * Whether a drag took it over from a scroll (see `onScroll`): touch
+   * events drive the drag from then on, not `didPan`.
+   */
+  handoff?: boolean;
+  /** The finger's last position, from its last touch event. */
+  lastX?: number;
+  lastY?: number;
 }
 
 /**
@@ -120,7 +142,18 @@ const findTouch = (list: TouchList, id: number | undefined) =>
  * `shouldDrag`. Touchmoves before the decision, and after a drag decision
  * was released to the browser, are never cancelled, so swipes across the
  * axis keep working. A gesture that doesn't drag never reaches
- * `onPanStart`; usually the browser takes it over (`pointercancel`) anyway.
+ * `onPanStart` through `didPan`; usually the browser takes it over
+ * (`pointercancel`) anyway.
+ *
+ * Scroll handoff (with `onScroll`): the browser keeps sending a scrolling
+ * gesture's `touchmove` events (not cancelable) after it took the gesture
+ * over, but no pointer events. For each of them `onScroll` decides whether
+ * a drag takes the gesture over, e.g. once the content can't scroll further
+ * the way the finger moves. The drag then starts where the finger is (so
+ * the tray doesn't jump) and its touch events drive `onPanStart`, `onPan`
+ * and `onPanEnd` (with the `touchend`, or a `touchcancel`) until the finger
+ * lifts. `didPan`'s own callbacks are ignored during it. The gesture never
+ * goes back to a scroll.
  *
  * Extends the modifier class, so it uses `didPan`'s own modifier manager.
  * It relies only on that class being a class-based ember-modifier (its
@@ -205,6 +238,17 @@ class DragSourceModifier extends DidPan {
       gesture?.touchId !== undefined &&
       !findTouch(event.touches, gesture.touchId)
     ) {
+      if (gesture.handoff) {
+        // Its drag ends as on a cancel.
+        this.#named?.onPanEnd(
+          this.#touchData(
+            gesture.lastX ?? gesture.x,
+            gesture.lastY ?? gesture.y,
+            new Event('touchcancel'),
+          ),
+          this.#element!,
+        );
+      }
       this.#endGesture();
       gesture = undefined;
     }
@@ -218,16 +262,47 @@ class DragSourceModifier extends DidPan {
     } else if (gesture.touchId === undefined) {
       gesture.touchId = touch.identifier;
     }
+    const current = this.#gesture;
+    if (current?.touchId === touch.identifier) {
+      current.lastX = touch.clientX;
+      current.lastY = touch.clientY;
+    }
   };
 
   #onTouchMove = (event: TouchEvent): void => {
     const gesture = this.#gesture;
     const touch = findTouch(event.changedTouches, gesture?.touchId);
     if (!gesture || !touch) return;
-    if (this.#decide(touch.clientX, touch.clientY) && event.cancelable) {
-      event.preventDefault();
+    const { clientX: x, clientY: y } = touch;
+    const lastX = gesture.lastX ?? gesture.x;
+    const lastY = gesture.lastY ?? gesture.y;
+    gesture.lastX = x;
+    gesture.lastY = y;
+    const drags = this.#decide(x, y);
+    if (drags && event.cancelable) event.preventDefault();
+    if (gesture.handoff) {
+      if (event.cancelable) event.preventDefault();
+      this.#named?.onPan(this.#touchData(x, y, event), this.#element!);
+      return;
     }
+    const named = this.#named;
+    if (drags !== false || !gesture.scrolls || !named?.onScroll) return;
+    const step = named.axis === 'vertical' ? y - lastY : x - lastX;
+    if (step === 0 || !named.onScroll(step, gesture.target)) return;
+    // From here the drag follows the finger, from where it is now.
+    gesture.handoff = true;
+    gesture.panning = true;
+    if (event.cancelable) event.preventDefault();
+    named.onPanStart(
+      { ...this.#touchData(x, y, event), initial: { x, y }, handoff: true },
+      this.#element!,
+    );
   };
+
+  /** `didPan`-like event data for a touch at `x`/`y`. */
+  #touchData(x: number, y: number, originalEvent: Event): PanData {
+    return { current: { x, y }, originalEvent };
+  }
 
   #onPointerEnd = (event: PointerEvent): void => {
     const gesture = this.#gesture;
@@ -241,9 +316,17 @@ class DragSourceModifier extends DidPan {
   };
 
   #onTouchEnd = (event: TouchEvent): void => {
-    if (findTouch(event.changedTouches, this.#gesture?.touchId)) {
-      this.#endGesture();
+    const gesture = this.#gesture;
+    const touch = findTouch(event.changedTouches, gesture?.touchId);
+    if (!gesture || !touch) return;
+    if (gesture.handoff) {
+      gesture.handoff = false;
+      this.#named?.onPanEnd(
+        this.#touchData(touch.clientX, touch.clientY, event),
+        this.#element!,
+      );
     }
+    this.#endGesture();
   };
 
   #startGesture(gesture: Omit<Gesture, 'panning'>): void {
@@ -255,8 +338,10 @@ class DragSourceModifier extends DidPan {
   }
 
   #endGesture(): void {
-    if (!this.#gesture) return;
+    const gesture = this.#gesture;
+    if (!gesture) return;
     this.#gesture = undefined;
+    if (gesture.scrolls) this.#named?.onScrollEnd?.();
     document.removeEventListener('pointerup', this.#onPointerEnd, CAPTURE);
     document.removeEventListener('pointercancel', this.#onPointerEnd, CAPTURE);
     document.removeEventListener('touchend', this.#onTouchEnd, CAPTURE);
@@ -292,6 +377,7 @@ class DragSourceModifier extends DidPan {
       return undefined;
     }
     gesture.drags = named.shouldDrag(along, gesture.target);
+    gesture.scrolls = !gesture.drags;
     return gesture.drags;
   }
 
@@ -315,8 +401,13 @@ class DragSourceModifier extends DidPan {
         if (gesture) gesture.panning = true;
         args.onPanStart(data, element);
       },
-      onPan: (data: PanData) => args.onPan(data, element),
-      onPanEnd: (data: PanData) => args.onPanEnd(data, element),
+      // During a handoff the touch events drive the drag (see above).
+      onPan: (data: PanData) => {
+        if (!this.#gesture?.handoff) args.onPan(data, element);
+      },
+      onPanEnd: (data: PanData) => {
+        if (!this.#gesture?.handoff) args.onPanEnd(data, element);
+      },
     });
     // didPan has just written its own touch-action.
     if (args.touchAction) element.style.touchAction = args.touchAction();
