@@ -1,12 +1,21 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { find, render, settled } from '@ember/test-helpers';
+import { clearRender, find, render, settled } from '@ember/test-helpers';
 import { tracked } from '@glimmer/tracking';
 import { htmlSafe } from '@ember/template';
 import { pan } from 'ember-gesture-modifiers/test-support';
-import { MobileDrawer, type SnapPoint } from '#src/index.ts';
+import {
+  MobileDrawer,
+  type MobileDrawerDragEndEvent,
+  type SnapPoint,
+} from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { rubberBand } from '#src/-private/snap-points/index.ts';
+import {
+  CATCH_UP_SPEED,
+  catchUpDuration,
+} from '#src/-private/gesture/catch-up.ts';
+import { TouchPointer } from '#src/-private/gesture/touch-pointer.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 import '#src/styles.css';
 
@@ -136,6 +145,25 @@ async function onEveryMove(
   }
 }
 
+/** Which way along the client axis opens the drawer, see `OPENING`. */
+const OPENS_TOWARDS: Record<Placement, 1 | -1> = {
+  bottom: -1,
+  top: 1,
+  left: 1,
+  right: -1,
+};
+
+/** One pointer move of a pan, as recorded by `panFrames`. */
+interface PanFrame {
+  /** How far the finger has moved from where it went down, in drawer px. */
+  finger: number;
+  /** How far the tray has moved from where it was, in drawer px. */
+  tray: number;
+}
+
+/** A 60 Hz frame, in ms. */
+const FRAME = 16;
+
 class State {
   @tracked placement: Placement = 'bottom';
   @tracked active: number | undefined = 2;
@@ -143,7 +171,9 @@ class State {
   @tracked grip = SHORT;
   @tracked snapPoints: SnapPoint[] = [0, 200, 400];
   @tracked showHandle = true;
+  @tracked handleSize = 40;
   changes: number[] = [];
+  dragEnds: MobileDrawerDragEndEvent[] = [];
   /** Whether the parent accepts changes requested by the drawer. */
   accept = true;
 
@@ -151,6 +181,8 @@ class State {
     this.changes.push(index);
     if (this.accept) this.active = index;
   };
+
+  onDragEnd = (event: MobileDrawerDragEndEvent) => this.dragEnds.push(event);
 }
 
 const containerStyle = htmlSafe(
@@ -170,13 +202,14 @@ async function renderDrawer(state: State) {
           @activeSnapPoint={{state.active}}
           @onSnapPointChange={{state.onChange}}
           @handleOnly={{state.handleOnly}}
+          @onDragEnd={{state.onDragEnd}}
           style="position: absolute"
           as |drawer|
         >
           <div style={{gripStyle state.grip}} data-test-grip></div>
           {{#if state.showHandle}}
             <div
-              style="width: 40px; height: 40px"
+              style={{gripStyle state.handleSize}}
               data-test-handle
               {{drawer.handle}}
             ></div>
@@ -597,7 +630,9 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
 
   test('catching an overshoot past the band limit still follows the finger', async function (assert) {
     // The tray (~360px of content) is longer than the largest snap point,
-    // so a spring overshoot past 200 is shown in full, beyond the 24px band.
+    // so a spring overshoot past 200 moves the tray itself, in full. (Only
+    // past the tray's full length does the tray stay at its edge while its
+    // content bounces.) A catch there starts from the offset shown.
     const state = new State();
     state.snapPoints = [0, 100, 200];
     state.active = 1;
@@ -932,4 +967,442 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     assert.strictEqual(openOffset('left'), 400, 'at the active snap point');
     assert.deepEqual(state.changes, []);
   });
+
+  /**
+   * Pans `selector` the way that opens the drawer, with one frame of the
+   * fake clock before each pointer move: a finger at about 60 Hz. Records
+   * the finger and the tray after each move and after the release (in the
+   * same frame as the last move), both in drawer px from where they started
+   * (positive opens).
+   */
+  async function panFrames(
+    selector: string,
+    placement: Placement,
+  ): Promise<PanFrame[]> {
+    const vertical = placement === 'bottom' || placement === 'top';
+    const scale = containerScale();
+    const startOffset = openOffset(placement);
+    const frames: PanFrame[] = [];
+    let down: number | undefined;
+    const onDown = (event: PointerEvent) => {
+      if (event.target === document) {
+        down = vertical ? event.clientY : event.clientX;
+      }
+    };
+    // `pan()` sends each move to the document and then to the element; the
+    // document's comes first.
+    const beforeMove = (event: PointerEvent) => {
+      if (event.target === document) clock.frame(FRAME);
+    };
+    const afterMove = (event: PointerEvent) => {
+      if (event.target !== document || down === undefined) return;
+      const position = vertical ? event.clientY : event.clientX;
+      frames.push({
+        finger: (OPENS_TOWARDS[placement] * (position - down)) / scale,
+        tray: openOffset(placement) - startOffset,
+      });
+    };
+    document.addEventListener('pointerdown', onDown, { capture: true });
+    document.addEventListener('pointermove', beforeMove, { capture: true });
+    document.addEventListener('pointermove', afterMove);
+    document.addEventListener('pointerup', afterMove);
+    try {
+      await pan(selector, OPENING[placement]);
+    } finally {
+      document.removeEventListener('pointerdown', onDown, { capture: true });
+      document.removeEventListener('pointermove', beforeMove, {
+        capture: true,
+      });
+      document.removeEventListener('pointermove', afterMove);
+      document.removeEventListener('pointerup', afterMove);
+    }
+    return frames;
+  }
+
+  /**
+   * The finger's velocity (drawer px/s) at the release recorded last in
+   * `frames`: over the moves within `VELOCITY_WINDOW` (100ms, 6 frames)
+   * before it.
+   */
+  function releaseVelocity(frames: PanFrame[]): number {
+    const release = frames[frames.length - 1]!;
+    const first = frames[frames.length - 8]!;
+    return ((release.finger - first.finger) / (6 * FRAME)) * 1000;
+  }
+
+  /** The index of the move at which didPan recognised the pan. */
+  const recognisedAt = (frames: PanFrame[]) =>
+    frames.findIndex(({ finger }) => finger * containerScale() > 10);
+
+  const table = (frames: PanFrame[]) =>
+    frames
+      .map(({ finger, tray }) => `${finger.toFixed(1)}/${tray.toFixed(1)}`)
+      .join(' ');
+
+  for (const placement of PLACEMENTS) {
+    for (const source of ['tray', 'handle'] as const) {
+      test(`${placement}: a ${source} drag catches up with the finger without a jump`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        if (source === 'tray') {
+          state.grip = LONG;
+        } else {
+          state.grip = 10;
+          state.handleSize = LONG;
+        }
+        await renderDrawer(state);
+        const selector =
+          source === 'tray' ? '[data-test-grip]' : '[data-test-handle]';
+
+        const frames = await panFrames(selector, placement);
+        const start = recognisedAt(frames);
+        const lost = frames[start]!.finger;
+        assert.true(start > 0 && lost > 10, `recognised after ${lost}px`);
+        assert.strictEqual(frames[start]!.tray, 0, 'starts where it was');
+
+        // No jump: in every frame the tray moves the way of the finger, by
+        // at most the finger's step plus the catch-up speed, and it never
+        // gets ahead of the finger.
+        const most = CATCH_UP_SPEED * FRAME + 0.01;
+        const steps = frames.slice(1).map((frame, i) => ({
+          finger: frame.finger - frames[i]!.finger,
+          tray: frame.tray - frames[i]!.tray,
+        }));
+        assert.true(
+          steps.every(
+            ({ finger, tray }) => tray >= -0.01 && tray <= finger + most,
+          ),
+          `small steps (finger/tray: ${table(frames)})`,
+        );
+        assert.true(
+          frames.every(({ finger, tray }) => tray <= finger + 0.01),
+          'never ahead of the finger',
+        );
+
+        // Under the finger once the catch-up is over, and 1:1 from there.
+        const caughtUp = start + Math.ceil(catchUpDuration(lost) / FRAME);
+        assert.true(caughtUp < frames.length, 'caught up before the release');
+        assert.true(
+          frames
+            .slice(caughtUp)
+            .every(({ finger, tray }) => near(tray, finger)),
+          `under the finger from move ${caughtUp} (finger/tray: ${table(frames)})`,
+        );
+
+        // The release: at the finger's velocity and where the finger left it.
+        const [end] = state.dragEnds;
+        const last = frames[frames.length - 1]!;
+        const speed = releaseVelocity(frames);
+        assert.true(
+          Math.abs(end!.velocity - speed) < 1,
+          `velocity ${end?.velocity}, finger ${speed}`,
+        );
+        assert.true(
+          near(end!.offset, 200 + last.finger),
+          `released at ${end?.offset}`,
+        );
+        clock.runUntilIdle();
+        await settled();
+      });
+    }
+
+    test(`${placement}: a release during the catch-up flings at the finger's velocity`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      state.active = 1;
+      // 1 screen px per move: the release comes before the tray caught up.
+      state.grip = 10;
+      state.handleSize = 40;
+      await renderDrawer(state);
+
+      const frames = await panFrames('[data-test-handle]', placement);
+      const last = frames[frames.length - 1]!;
+      assert.true(
+        last.tray < last.finger - 1,
+        `still behind at the release (finger/tray: ${table(frames)})`,
+      );
+      const [end] = state.dragEnds;
+      const speed = releaseVelocity(frames);
+      assert.true(
+        Math.abs(end!.velocity - speed) < 1,
+        `velocity ${end?.velocity}, finger ${speed}`,
+      );
+      assert.true(
+        near(end!.offset, 200 + last.finger),
+        `released where the finger is: ${end?.offset}`,
+      );
+
+      // The spring takes the tray from where it is: no jump to the finger.
+      clock.frame(FRAME);
+      const first = openOffset(placement) - 200;
+      assert.true(
+        Math.abs(first - last.tray) < 5,
+        `the spring starts at the tray (${last.tray} -> ${first})`,
+      );
+      clock.runUntilIdle();
+      await settled();
+    });
+  }
+
+  test('the tray catches up with a finger that holds still', async function (assert) {
+    const state = new State();
+    state.active = 1;
+    await renderDrawer(state);
+    const scale = containerScale();
+    const grip = el('[data-test-grip]').getBoundingClientRect();
+    const finger = new TouchPointer(
+      el('[data-test-grip]'),
+      grip.left + grip.width / 2,
+      grip.top + grip.height / 2,
+    );
+
+    finger.down();
+    finger.move(0, -6);
+    finger.move(0, -6);
+    assert.strictEqual(openOffset('bottom'), 200, 'the drag starts in place');
+    const lost = 12 / scale;
+    const seen: number[] = [];
+    for (let i = 0; i < Math.ceil(catchUpDuration(lost) / FRAME); i++) {
+      clock.frame(FRAME);
+      seen.push(openOffset('bottom'));
+    }
+    assert.true(
+      seen.every((offset, i) => offset >= (seen[i - 1] ?? 200)),
+      `moves towards the finger (${seen.map((o) => o.toFixed(1)).join(', ')})`,
+    );
+    assert.true(near(openOffset('bottom'), 200 + lost), 'under the finger');
+    assert.strictEqual(clock.pendingFrames, 0, 'no more frames');
+
+    finger.move(0, -10);
+    assert.true(near(openOffset('bottom'), 200 + 22 / scale), 'then 1:1');
+    finger.up();
+    clock.runUntilIdle();
+    await settled();
+  });
+  /**
+   * A finger on the grip of a rendered drawer, and how to read the finger
+   * and the tray in drawer px from where they started, positive opening.
+   */
+  function fingerOnGrip(placement: Placement) {
+    const scale = containerScale();
+    const grip = el('[data-test-grip]').getBoundingClientRect();
+    const finger = new TouchPointer(
+      el('[data-test-grip]'),
+      grip.left + grip.width / 2,
+      grip.top + grip.height / 2,
+    );
+    const vertical = placement === 'bottom' || placement === 'top';
+    const down = vertical ? finger.y : finger.x;
+    const start = openOffset(placement);
+    /** Moves the finger `by` screen px, positive opening. */
+    const move = (by: number) => {
+      const along = OPENS_TOWARDS[placement] * by;
+      finger.move(vertical ? 0 : along, vertical ? along : 0);
+    };
+    const read = (): PanFrame => ({
+      finger:
+        (OPENS_TOWARDS[placement] * ((vertical ? finger.y : finger.x) - down)) /
+        scale,
+      tray: openOffset(placement) - start,
+    });
+    return { finger, move, read };
+  }
+
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: a pull that turns back during the catch-up never passes the finger`, async function (assert) {
+      for (const pull of [1, -1]) {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        const { finger, move, read } = fingerOnGrip(placement);
+
+        // 4 screen px a frame: 16px one way (recognised at 12), then at
+        // once back past the touchdown, to 16px the other way.
+        finger.down();
+        const frames: PanFrame[] = [];
+        // In the pull's direction, after every frame and every move.
+        const record = () => {
+          const { finger: f, tray } = read();
+          frames.push({ finger: f * pull, tray: tray * pull });
+        };
+        for (let i = 0; i < 12; i++) {
+          clock.frame(FRAME);
+          record();
+          move(i < 4 ? 4 * pull : -4 * pull);
+          record();
+        }
+        const log = table(frames);
+        assert.true(
+          // Between where it started and the finger.
+          frames.every(
+            ({ finger: f, tray }) =>
+              tray >= Math.min(0, f) - 0.01 && tray <= Math.max(0, f) + 0.01,
+          ),
+          `${pull}: never past the finger (finger/tray: ${log})`,
+        );
+        const against = frames.slice(1).some((frame, i) => {
+          const fingerStep = frame.finger - frames[i]!.finger;
+          const trayStep = frame.tray - frames[i]!.tray;
+          return fingerStep * trayStep < -0.0001;
+        });
+        assert.false(against, `${pull}: never against the finger (${log})`);
+        const last = frames[frames.length - 1]!;
+        assert.true(near(last.tray, last.finger), `${pull}: under the finger`);
+
+        finger.up();
+        clock.runUntilIdle();
+        await settled();
+      }
+    });
+  }
+
+  test('a finger that turns back and stops during the catch-up is caught up with', async function (assert) {
+    const state = new State();
+    state.active = 1;
+    await renderDrawer(state);
+    const { finger, move, read } = fingerOnGrip('bottom');
+
+    finger.down();
+    for (const by of [4, 4, 4, 4, -4]) {
+      clock.frame(FRAME);
+      move(by);
+    }
+    const turned = read();
+    assert.true(
+      turned.tray > 0 && turned.tray < turned.finger,
+      `held behind the finger (${turned.finger}/${turned.tray})`,
+    );
+    clock.runUntilIdle();
+    const stopped = read();
+    assert.true(
+      near(stopped.tray, stopped.finger),
+      `then under it (${stopped.finger}/${stopped.tray})`,
+    );
+    finger.up();
+    clock.runUntilIdle();
+    await settled();
+  });
+
+  test('removing the drawer during the catch-up leaves no frame', async function (assert) {
+    const state = new State();
+    state.active = 1;
+    await renderDrawer(state);
+    const { finger, move } = fingerOnGrip('bottom');
+
+    finger.down();
+    move(6);
+    move(6);
+    assert.true(clock.pendingFrames > 0, 'catching up');
+    await clearRender();
+    assert.strictEqual(clock.pendingFrames, 0);
+    finger.up();
+  });
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: a jittery finger is caught up with as fast as a still one`, async function (assert) {
+      /** Frames until the tray is under the finger, and the tray per frame. */
+      const catchUp = async (jitter: boolean) => {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        const { finger, move, read } = fingerOnGrip(placement);
+        finger.down();
+        for (let i = 0; i < 4; i++) {
+          clock.frame(FRAME);
+          move(4);
+        }
+        const seen: PanFrame[] = [];
+        let frames = 0;
+        for (; frames < 30; frames++) {
+          const now = read();
+          seen.push(now);
+          if (near(now.tray, now.finger)) break;
+          clock.frame(FRAME);
+          // 1 screen px back and forth, every frame.
+          if (jitter) move(frames % 2 === 0 ? -1 : 1);
+        }
+        finger.up();
+        clock.runUntilIdle();
+        await settled();
+        return { frames, seen };
+      };
+
+      const still = await catchUp(false);
+      const jittery = await catchUp(true);
+      assert.true(
+        jittery.frames <= still.frames + 1,
+        `under the finger after ${jittery.frames} frames, still: ${still.frames} (jittery: ${table(jittery.seen)}; still: ${table(still.seen)})`,
+      );
+      assert.true(
+        jittery.seen.every(({ finger: f, tray }) => tray <= f + 0.01),
+        'never past the finger',
+      );
+    });
+  }
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: past fully open the content catches up with the finger, the tray stays at its edge`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      state.active = 2;
+      state.grip = LONG;
+      await renderDrawer(state);
+      const { finger, move, read } = fingerOnGrip(placement);
+      const band = (distance: number) =>
+        rubberBand(400 + distance, 0, 400, { dimension: 400 * 0.55 }) - 400;
+
+      // 4 screen px a frame, the pan is recognised at 12.
+      finger.down();
+      const seen: { finger: number; bounce: number; tray: number }[] = [];
+      for (let i = 0; i < 20; i++) {
+        clock.frame(FRAME);
+        move(4);
+        seen.push({
+          finger: read().finger,
+          bounce: bounce(placement),
+          tray: trayOffset(placement),
+        });
+      }
+      const log = seen
+        .map((s) => `${s.finger.toFixed(1)}/${s.bounce.toFixed(1)}`)
+        .join(' ');
+      const start = seen.findIndex(
+        ({ finger: f }) => f * containerScale() > 10,
+      );
+      assert.strictEqual(seen[start]!.bounce, 0, 'starts in place: no jump');
+      assert.true(
+        seen.every(({ tray }) => near(tray, 400)),
+        'the tray stays at its edge',
+      );
+      assert.true(
+        seen.every(
+          ({ finger: f, bounce: b }, i) =>
+            b <= band(f) + 0.01 && b >= (seen[i - 1]?.bounce ?? 0) - 0.01,
+        ),
+        `the content goes the finger's way, banded, never ahead (finger/bounce: ${log})`,
+      );
+      const caughtUp =
+        start + Math.ceil(catchUpDuration(seen[start]!.finger) / FRAME);
+      assert.true(caughtUp < seen.length, 'caught up before the release');
+      assert.true(
+        seen
+          .slice(caughtUp)
+          .every(({ finger: f, bounce: b }) => near(b, band(f))),
+        `then the band of the whole finger distance (finger/bounce: ${log})`,
+      );
+
+      finger.up();
+      const last = seen[seen.length - 1]!;
+      const [end] = state.dragEnds;
+      assert.true(
+        near(end!.offset, 400 + band(last.finger)),
+        `@onDragEnd: where the finger put it (${end?.offset})`,
+      );
+      clock.runUntilIdle();
+      await settled();
+      assert.strictEqual(trayOffset(placement), 400);
+      assert.strictEqual(bounce(placement), 0, 'the content springs back');
+    });
+  }
 });

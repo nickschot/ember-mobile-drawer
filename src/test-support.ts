@@ -67,7 +67,8 @@ const OPENING: Record<Placement, { x: number; y: number }> = {
 /**
  * How far (screen px) the finger moves before the drag starts: just past
  * the threshold of `didPan` (10px), so the pan is recognised. The drawer
- * only follows the finger from there.
+ * catches up with that distance over the first frames of the drag, so it
+ * counts towards the distance dragged.
  */
 const RECOGNISE = [DECISION_SLOP, 8, 11];
 
@@ -135,11 +136,13 @@ export async function closeDrawer(
  * the tray, such as a handle, or the tray when `target` is the drawer's root.
  * With `@handleOnly` pass a handle.
  *
- * It first moves the finger 11px the way it drags, so the drag starts (the
- * drawer doesn't follow the finger over that distance), then drags the
- * drawer by `distance`, or to the snap point `to`. A drawer that is
- * animating is caught where it is. Throws when no drag starts, for example
- * because the gesture scrolled the content instead.
+ * It first moves the finger 11px the way it drags, so the drag starts, then
+ * on until it has moved the drawer by `distance` from where the finger went
+ * down, or to the snap point `to`. The drawer catches up with those 11px
+ * over the first frames of the drag. A drag shorter than that goes back to
+ * where the finger went down first, and from there by `distance`. A drawer
+ * that is animating is caught where it is. Throws when no drag starts, for
+ * example because the gesture scrolled the content instead.
  *
  * Fires `@onDragStart` and `@onDragEnd`, and `@onSnapPointChange` when the
  * release picks another snap point.
@@ -203,6 +206,7 @@ export async function dragDrawer(
 
     // Start the drag. A drag of 0 starts towards closed: at the highest snap
     // point that drags rather than scrolls when the content is at its start.
+    const screen = distance * drawer.screenScale();
     const sign = distance > 0 ? 1 : -1;
     let moved = 0;
     for (const step of RECOGNISE) {
@@ -218,22 +222,31 @@ export async function dragDrawer(
       );
     }
 
-    // Drag. With a velocity, the fake time between steps makes it.
-    const screen = distance * drawer.screenScale();
+    // A drag shorter than that goes back to where the finger went down, and
+    // waits there, so the velocity only counts the rest of the drag.
+    let rest = screen - sign * moved;
+    if (Math.abs(screen) < moved) {
+      time += VELOCITY_WINDOW + FRAME;
+      finger.move(-sign * moved * opening.x, -sign * moved * opening.y);
+      rest = screen;
+    }
+
+    // Drag the rest. With a velocity, the fake time between steps makes it.
     const steps =
-      screen === 0
+      Math.abs(rest) < 1e-9
         ? 0
         : Math.min(
             MAX_STEPS,
-            Math.max(1, Math.ceil(Math.abs(screen) / MAX_STEP)),
+            Math.max(1, Math.ceil(Math.abs(rest) / MAX_STEP)),
           );
     const interval =
       velocity === 0
         ? FRAME
-        : (Math.abs(distance) / steps / Math.abs(velocity)) * 1000;
+        : (Math.abs(rest / drawer.screenScale()) / steps / Math.abs(velocity)) *
+          1000;
     for (let i = 0; i < steps; i++) {
       time += interval;
-      const by = screen / steps;
+      const by = rest / steps;
       finger.move(by * opening.x, by * opening.y);
     }
     // Without a velocity, hold still before letting go.

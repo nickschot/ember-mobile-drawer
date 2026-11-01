@@ -6,6 +6,7 @@ import { buildWaiter } from '@ember/test-waiters';
 import {
   DEFAULT_SPRING_CONFIG,
   Spring,
+  browserClock,
   type FrameClock,
   type SpringResult,
 } from '../-private/spring/spring.ts';
@@ -29,6 +30,7 @@ import {
 } from '../-private/lifecycle-modifier.ts';
 import { noop } from '../-private/noop-modifier.ts';
 import { VelocityTracker } from '../-private/gesture/velocity.ts';
+import { TURN_SLOP, catchUpLag } from '../-private/gesture/catch-up.ts';
 import { inertOutside } from '../-private/modal/inert.ts';
 import { lockBodyScroll } from '../-private/modal/scroll-lock.ts';
 import {
@@ -179,12 +181,41 @@ interface Drag {
   source: HTMLElement;
   /** Offset (px open) shown when the drag started. */
   startOffset: number;
-  /** Pointer coordinate along the drawer axis where the drag started. */
+  /** Pointer coordinate along the drawer axis where the finger went down. */
   startPosition: number;
   /** Screen px per px of drawer offset, see `#screenScale`. */
   scale: number;
-  /** Rendered offset, after rubber-banding. */
+  /**
+   * How far (drawer px, positive opens) the tray was behind the finger when
+   * the catch-up (re)started: at first the distance the finger had moved
+   * when the pan was recognised. The lag eases from this to `0`, see
+   * `catchUpLag` and `#follow`.
+   */
+  lagFrom: number;
+  /** Time (ms, see `#now`) the catch-up (re)started. */
+  lagStart: number;
+  /**
+   * Whether the tray holds still while the finger comes back towards it
+   * during the catch-up, see `onPan`.
+   */
+  holding: boolean;
+  /** Whether the finger moved since the last catch-up frame. */
+  moved: boolean;
+  /**
+   * The furthest `delta` the finger reached the way the tray catches up
+   * (the sign of `lagFrom`) since the catch-up (re)started, see `onPan`.
+   */
+  peak: number;
+  /** How far (drawer px) the finger has moved from where it went down. */
+  delta: number;
+  /** The tray's `delta`: `delta` minus the lag, as last drawn. */
+  drawn: number;
+  /** Where the finger puts the drawer: `#dragOffset` of `delta`. */
+  target: number;
+  /** Rendered offset, after rubber-banding, behind `target` while catching up. */
   offset: number;
+  /** The scheduled catch-up frame, see `#catchUpFrame`. */
+  frame?: number;
 }
 
 /** A scroll reset of the tray, see `#planScrollReset`. */
@@ -916,7 +947,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           if (this.#destroyed) return;
           this.args.onDragEnd?.({
             snapPoint: this.activeSnapPoint,
-            offset: drag.offset,
+            offset: drag.target,
             velocity: 0,
           });
         });
@@ -940,6 +971,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#lockedTouch = undefined;
       this.#reveal = undefined;
       this.#endHold();
+      this.#cancelCatchUp(this.#drag);
       this.#endBackdropPointer();
       this.#resizeObserver?.disconnect();
       this.#spring?.stop();
@@ -2611,20 +2643,43 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#stopScrollReset();
     this.#endHold();
     const offset = this.#renderedOffset;
-    // Anchored where didPan recognised the pan (past its threshold), so the
-    // drawer doesn't jump by the threshold and then follows 1:1. Anchored on
-    // the offset shown, also when that is past an end (`dragOffset`).
-    this.#drag = {
+    // didPan recognises the pan once the finger has moved past its threshold.
+    // Anchored at the touchdown the tray would jump by that distance, so the
+    // tray starts where it is and catches up with the finger over the first
+    // frames (`#follow`). Anchored on the offset shown, also when that is
+    // past an end (`dragOffset`).
+    const scale = this.#screenScale();
+    const initial = data.initial;
+    let down = this.axis === 'vertical' ? initial?.y : initial?.x;
+    let recognisedAt =
+      (OPENING_DIRECTION[this.placement] * (position - (down ?? NaN))) / scale;
+    if (!Number.isFinite(recognisedAt)) {
+      // No usable touchdown: follow from here, without a catch-up.
+      down = position;
+      recognisedAt = 0;
+    }
+    const drag: Drag = {
       source,
       startOffset: offset,
-      startPosition: position,
+      startPosition: down!,
+      scale,
+      lagFrom: recognisedAt,
+      lagStart: this.#now(),
+      holding: false,
+      moved: false,
+      peak: recognisedAt,
+      delta: recognisedAt,
+      drawn: 0,
+      target: offset,
       offset,
-      scale: this.#screenScale(),
     };
+    this.#drag = drag;
+    drag.target = this.#dragOffset(drag, recognisedAt);
     this.#velocity.reset();
-    this.#velocity.add(this.#timeOf(data.originalEvent), offset);
+    // The velocity of the finger (see `onPan`), not of the catch-up.
+    this.#velocity.add(this.#timeOf(data.originalEvent), drag.target);
     this.#queueState({ isDragging: true });
-    this.#render(offset);
+    this.#follow(drag, drag.lagStart);
     this.args.onDragStart?.({ snapPoint: this.activeSnapPoint, offset });
   };
 
@@ -2641,17 +2696,115 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
 
-    // How far the finger moved since the drag started, in drawer px.
+    // How far the finger moved since it went down, in drawer px.
     const delta =
       (OPENING_DIRECTION[this.placement] * (position - drag.startPosition)) /
       drag.scale;
     if (!Number.isFinite(delta)) return;
 
-    drag.offset = this.#dragOffset(drag, delta);
-    // The velocity of the drawer as shown (after resistance), so a release
-    // past an end doesn't hand the spring more speed than the tray had.
-    this.#velocity.add(this.#timeOf(data.originalEvent), drag.offset);
+    const now = this.#now();
+    const lag = drag.delta - drag.drawn;
+    const step = delta - drag.delta;
+    // The way the tray catches up: 1 or -1, 0 when it has caught up.
+    const way = Math.sign(drag.lagFrom);
+    if (drag.holding) {
+      if (lag === 0) {
+        // The finger reached the tray: 1:1 from here.
+        drag.holding = false;
+      } else if (step * lag > 0) {
+        // On again, away from the tray: ease the gap from here.
+        drag.lagFrom = lag;
+        drag.lagStart = now;
+        drag.holding = false;
+        drag.peak = delta;
+      } else {
+        // Holds until the finger reaches it.
+        const drawn =
+          way > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
+        drag.lagFrom = delta - drawn;
+      }
+    } else if (
+      lag !== 0 &&
+      (drag.peak - delta) * way > TURN_SLOP / drag.scale
+    ) {
+      // Back towards the tray during the catch-up, further than a jitter of
+      // the finger: the tray holds still until the finger reaches it, and
+      // then follows it. Easing on would take it against the finger, and
+      // past it. A jitter doesn't stop the easing: the tray then stays
+      // behind the finger by the lag.
+      const drawn =
+        way > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
+      drag.lagFrom = delta - drawn;
+      drag.lagStart = now;
+      drag.holding = true;
+    } else if (way !== 0) {
+      drag.peak =
+        way > 0 ? Math.max(drag.peak, delta) : Math.min(drag.peak, delta);
+    }
+    drag.moved = true;
+    drag.delta = delta;
+    drag.target = this.#dragOffset(drag, delta);
+    // The velocity of the drawer where the finger puts it (after
+    // resistance), so a release past an end doesn't hand the spring more
+    // speed than the tray had, and the catch-up adds none.
+    this.#velocity.add(this.#timeOf(data.originalEvent), drag.target);
+    this.#follow(drag, now);
+  };
+
+  /** The time (ms) on the clock that runs the frames. */
+  #now(): number {
+    return (this.#clock ?? browserClock).now();
+  }
+
+  /**
+   * Renders the drag at `time`: the tray follows the finger 1:1, but at the
+   * start of the drag it is behind it by the catch-up lag (`catchUpLag`),
+   * which eases from the distance moved before the pan was recognised to
+   * `0`. While it lags it is also moved every frame, so it catches up when
+   * the finger holds still. It is never past the finger: while the finger
+   * comes back towards it, it holds still (`holding`, see `onPan`).
+   */
+  #follow(drag: Drag, time: number): void {
+    const lag = drag.holding
+      ? drag.lagFrom
+      : catchUpLag(drag.lagFrom, time - drag.lagStart);
+    drag.drawn = drag.delta - lag;
+    drag.offset = lag === 0 ? drag.target : this.#dragOffset(drag, drag.drawn);
     this.#render(drag.offset);
+    if (lag === 0) {
+      this.#cancelCatchUp(drag);
+    } else if (drag.frame === undefined) {
+      drag.frame = (this.#clock ?? browserClock).requestFrame(
+        this.#catchUpFrame,
+      );
+    }
+  }
+
+  #cancelCatchUp(drag: Drag | undefined): void {
+    if (drag?.frame === undefined) return;
+    (this.#clock ?? browserClock).cancelFrame(drag.frame);
+    drag.frame = undefined;
+  }
+
+  /**
+   * A frame of the catch-up. At the time on the clock, not the frame's time
+   * stamp: input of the same frame is handled after that time stamp, and
+   * going back to it would move the tray back a little.
+   */
+  #catchUpFrame = (): void => {
+    const drag = this.#drag;
+    if (!drag || this.#destroyed) return;
+    drag.frame = undefined;
+    const now = this.#now();
+    if (drag.holding && !drag.moved) {
+      // The finger stopped before it reached the tray: catch up from here.
+      drag.holding = false;
+      drag.lagFrom = drag.delta - drag.drawn;
+      drag.lagStart = now;
+      drag.peak = drag.delta;
+    }
+    drag.moved = false;
+    this.#follow(drag, now);
   };
 
   private onPanEnd = (data: PanData, source: HTMLElement): void => {
@@ -2664,7 +2817,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const velocity = cancelled
       ? 0
       : this.#velocity.velocity(this.#timeOf(data.originalEvent));
-    this.#release(drag.offset, velocity);
+    this.#release(drag.offset, velocity, drag.target);
   };
 
   /**
@@ -2678,13 +2831,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (this.#drag?.source !== source) return;
     const drag = this.#endDrag()!;
     queueMicrotask(() => {
-      if (!this.#destroyed && !this.#drag) this.#release(drag.offset, 0);
+      if (!this.#destroyed && !this.#drag) {
+        this.#release(drag.offset, 0, drag.target);
+      }
     });
   };
 
   #endDrag(): Drag | undefined {
     const drag = this.#drag;
     this.#drag = undefined;
+    this.#cancelCatchUp(drag);
     this.#queueState({ isDragging: false });
     return drag;
   }
@@ -2696,13 +2852,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * meanwhile heads for the active snap point: the parent always wins, so the
    * drawer turns towards the new one once (and only if) the parent passes it
    * in. A parent that answers synchronously does so before the next frame.
+   * The spring starts at `offset`, where the tray is; the snap point is
+   * picked for `released`, where the finger put it (ahead of `offset` while
+   * the tray still catches up, see `#follow`), which `@onDragEnd` reports.
    */
-  #release(offset: number, velocity: number): void {
+  #release(offset: number, velocity: number, released = offset): void {
     const spring = this.#spring;
     const layout = this.#layout;
     if (!spring || !layout || this.#destroyed) return;
 
-    const target = selectSnapPoint(layout.resolved, offset, velocity, {
+    const target = selectSnapPoint(layout.resolved, released, velocity, {
       flingVelocity: FLING_VELOCITY,
     });
     const index = this.#indexOf(target);
@@ -2715,7 +2874,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.uncontrolledVersion++;
     }
     this.#moveToActive(true);
-    this.args.onDragEnd?.({ snapPoint: index, offset, velocity });
+    this.args.onDragEnd?.({ snapPoint: index, offset: released, velocity });
     if (index !== previous) this.args.onSnapPointChange?.(index);
   }
 
