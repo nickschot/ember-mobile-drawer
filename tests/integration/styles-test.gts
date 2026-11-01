@@ -906,6 +906,58 @@ module('Integration | styles.css', function (hooks) {
     });
   }
 
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: the iOS rules fill the spring gap at the sheet's edge with the sheet colour`, async function (assert) {
+      await renderDrawer(placement);
+      const tray = el('[data-test-tray]');
+      const baseShadow = getComputedStyle(tray).boxShadow;
+      const style = applyIosRules();
+      try {
+        const shadow = getComputedStyle(tray).boxShadow;
+        const fill: Record<Placement, string | undefined> = {
+          bottom: '0px 32px 0px 0px',
+          top: '0px -32px 0px 0px',
+          left: undefined,
+          right: undefined,
+        };
+        const expected = fill[placement];
+        if (expected) {
+          const background = getComputedStyle(tray).backgroundColor;
+          assert.true(
+            shadow.startsWith(`${background} ${expected}`),
+            `first layer: the sheet colour towards the edge (${shadow})`,
+          );
+          assert.true(shadow.endsWith(baseShadow), 'then the normal shadow');
+          tray.style.setProperty('--mobile-drawer-background', 'rgb(1 2 3)');
+          assert.true(
+            getComputedStyle(tray).boxShadow.startsWith(
+              `rgb(1, 2, 3) ${expected}`,
+            ),
+            'follows --mobile-drawer-background',
+          );
+          tray.style.setProperty('--_mobile-drawer-fill', 'rgb(4 5 6)');
+          assert.true(
+            getComputedStyle(tray).boxShadow.startsWith(
+              `rgb(4, 5, 6) ${expected}`,
+            ),
+            'a theme can set the fill colour',
+          );
+        } else {
+          assert.strictEqual(shadow, baseShadow, 'no fill for side drawers');
+        }
+
+        // At rest the root clips the fill.
+        tray.style.transform = 'none';
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-root]')).overflow,
+          'hidden',
+        );
+      } finally {
+        style.remove();
+      }
+    });
+  }
+
   for (const placement of ['left', 'right'] as const) {
     test(`${placement}: the iOS rules show no tints`, async function (assert) {
       await renderDrawer(placement);
