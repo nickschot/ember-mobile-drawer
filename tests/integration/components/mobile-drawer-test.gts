@@ -43,6 +43,32 @@ function el(selector: string): HTMLElement {
 
 const tray = () => el('.mobile-drawer__tray');
 
+/** The tray's overhang past its edge (`--mobile-drawer-overhang`), in px. */
+function overhang(): number {
+  return parseFloat(
+    tray().style.getPropertyValue('--mobile-drawer-overhang') || '0',
+  );
+}
+
+/**
+ * The length of the part of the tray that can be in view along the axis:
+ * its box (from computed styles, untransformed) minus the overhang.
+ */
+function visibleLength(placement: Placement): number {
+  const style = getComputedStyle(tray());
+  const box = axis(placement) === 'vertical' ? style.height : style.width;
+  return parseFloat(box) - overhang();
+}
+
+/** Whether the tray has an explicit (inline) size along the axis. */
+function hasExplicitSize(placement: Placement): boolean {
+  return (
+    (axis(placement) === 'vertical'
+      ? tray().style.height
+      : tray().style.width) !== ''
+  );
+}
+
 /** The tray's rendered translation as `"x y"` in px. */
 function translation(): string {
   const matrix = new DOMMatrix(getComputedStyle(tray()).transform);
@@ -251,9 +277,29 @@ module('Integration | Component | mobile-drawer', function (hooks) {
     state.active = 1;
     await renderDrawer(state);
 
-    assert.strictEqual(getComputedStyle(tray()).height, '80px');
-    assert.strictEqual(tray().style.height, '');
+    assert.strictEqual(visibleLength('bottom'), 80, 'the content size');
+    assert.false(hasExplicitSize('bottom'), 'no explicit size');
     assert.strictEqual(translation(), '0 40');
+  });
+
+  test('an app max size that adds the overhang keeps that visible max size', async function (assert) {
+    const style = document.createElement('style');
+    style.textContent =
+      '.mobile-drawer__tray { max-height: calc(50% + var(--mobile-drawer-overhang, 0px)); }';
+    document.head.append(style);
+    try {
+      drawerEnvironment.prefersReducedMotion = () => true;
+      const state = new State();
+      state.snapPoints = [0, '100%'];
+      state.active = 1;
+      await renderDrawer(state);
+
+      assert.true(overhang() > 0, `an overhang (${overhang()}px)`);
+      assert.strictEqual(visibleLength('bottom'), 300, 'half the container');
+      assert.strictEqual(translation(), '0 0', 'fully open at 100%');
+    } finally {
+      style.remove();
+    }
   });
 
   test('changing @activeSnapPoint animates to it without calling back', async function (assert) {
@@ -428,9 +474,10 @@ module('Integration | Component | mobile-drawer', function (hooks) {
 
       const size = placement === 'top' ? 'height' : 'width';
       const [natural, container] = placement === 'top' ? [80, 600] : [100, 400];
+      assert.true(hasExplicitSize(placement), 'an explicit size');
       assert.strictEqual(
-        tray().style[size],
-        `${container}px`,
+        visibleLength(placement),
+        container,
         'the tray is sized for the largest snap point',
       );
       assert.strictEqual(
@@ -503,7 +550,8 @@ module('Integration | Component | mobile-drawer', function (hooks) {
 
     assert.strictEqual(clock.pendingFrames, 0);
     assert.strictEqual(tray().style.height, '');
-    assert.strictEqual(tray().style.width, '400px');
+    assert.true(hasExplicitSize('right'), 'an explicit width');
+    assert.strictEqual(visibleLength('right'), 400);
     assert.strictEqual(translation(), '200 0');
   });
 
@@ -642,7 +690,8 @@ module('Integration | Component | mobile-drawer', function (hooks) {
     await resizeObserversDelivered();
 
     assert.strictEqual(translation(), '0 0');
-    assert.strictEqual(tray().style.height, '600px');
+    assert.true(hasExplicitSize('bottom'), 'an explicit height');
+    assert.strictEqual(visibleLength('bottom'), 600);
     assert.strictEqual(clock.pendingFrames, 0, 'without animating');
     assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-closed');
   });

@@ -392,8 +392,8 @@ module(
         );
         assert.true(result.dragging, 'dragging');
         assert.true(
-          result.shift > 0 && result.shift < 24,
-          `pulled a little past fully open (${result.shift})`,
+          result.shift > 0 && result.shift < (30 * STEP) / 2,
+          `pulled past fully open against the band, less than half the finger (${result.shift})`,
         );
         assert.true(result.prevented.every(Boolean), 'touchmoves cancelled');
         clock.runUntilIdle();
@@ -1230,8 +1230,8 @@ module(
         );
         assert.true(opening.dragging, 'the handle drags towards open');
         assert.true(
-          opening.shift > 0 && opening.shift < 24,
-          `rubber-bands (${opening.shift})`,
+          opening.shift > 0 && opening.shift < (30 * STEP) / 2,
+          `rubber-bands: less than half the finger (${opening.shift})`,
         );
         assert.true(
           opening.prevented.length > 0 && opening.prevented.every(Boolean),

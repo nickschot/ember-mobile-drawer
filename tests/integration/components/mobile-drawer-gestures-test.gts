@@ -6,6 +6,7 @@ import { htmlSafe } from '@ember/template';
 import { pan } from 'ember-gesture-modifiers/test-support';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
+import { rubberBand } from '#src/-private/snap-points/index.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 import '#src/styles.css';
 
@@ -93,6 +94,44 @@ function openOffset(placement: Placement, length = TRAY_LENGTH): number {
     left: length + m41,
     right: length - m41,
   }[placement];
+}
+
+/** The drawer's container size along the axis: 600 x 400 px. */
+const containerLength = (placement: Placement) =>
+  placement === 'bottom' || placement === 'top' ? 600 : 400;
+
+/** The tray's overhang past its edge (`--mobile-drawer-overhang`), in px. */
+function overhang(): number {
+  return parseFloat(tray().style.getPropertyValue('--mobile-drawer-overhang'));
+}
+
+/**
+ * The gap between the tray's box and the edge it opens from, in screen px:
+ * positive when the root's edge area shows through (the backdrop), zero or
+ * negative while the tray's box still reaches the edge.
+ */
+function edgeGap(placement: Placement): number {
+  const root = el('.mobile-drawer').getBoundingClientRect();
+  const box = tray().getBoundingClientRect();
+  return {
+    bottom: root.bottom - box.bottom,
+    top: box.top - root.top,
+    left: box.left - root.left,
+    right: root.right - box.right,
+  }[placement];
+}
+
+/** A point `distance` screen px from the root's `placement` edge, inside (+) or outside (-). */
+function nearEdge(placement: Placement, distance: number): [number, number] {
+  const root = el('.mobile-drawer').getBoundingClientRect();
+  const midX = (root.left + root.right) / 2;
+  const midY = (root.top + root.bottom) / 2;
+  return {
+    bottom: [midX, root.bottom - distance],
+    top: [midX, root.top + distance],
+    left: [root.left + distance, midY],
+    right: [root.right - distance, midY],
+  }[placement] as [number, number];
 }
 
 const near = (actual: number, expected: number, epsilon = 0.01) =>
@@ -350,24 +389,89 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     assert.deepEqual(state.changes, [], 'stays at 400');
   });
 
-  test('a long pull past fully open shows at most ~24px of overshoot', async function (assert) {
-    const state = new State();
-    // The grip has to fit in the 400px tray, or the tray grows.
-    state.grip = 340;
-    state.showHandle = false;
-    await renderDrawer(state);
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: a long pull past fully open follows the iOS rubber band and shows no gap`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      // The grip has to fit in the 400px tray, or the tray grows.
+      state.grip = 340;
+      state.showHandle = false;
+      await renderDrawer(state);
+      const container = containerLength(placement);
+      assert.strictEqual(
+        overhang(),
+        Math.ceil(rubberBand(container, 0, 0, { dimension: container * 0.55 })),
+        'the overhang covers a pull over the whole container',
+      );
 
-    let max = 0;
-    await onEveryMove(
-      () => (max = Math.max(max, openOffset('bottom'))),
-      () => pan('[data-test-grip]', 'up'),
-    );
-    assert.true(moved(340) > 250, `a long pull (${moved(340)}px)`);
-    assert.true(max > 410, `still rubber-bands (${max - 400}px)`);
-    assert.true(max <= 424, `capped at about 24px (${max - 400}px)`);
-    clock.runUntilIdle();
-    assert.strictEqual(openOffset('bottom'), 400);
-  });
+      let last = 400;
+      const gaps: number[] = [];
+      await onEveryMove(
+        () => {
+          last = openOffset(placement);
+          gaps.push(edgeGap(placement));
+        },
+        () => pan('[data-test-grip]', OPENING[placement]),
+      );
+      const finger = movedAtLastMove(340);
+      assert.true(finger > 250, `a long pull (${finger}px)`);
+      const expected = rubberBand(400 + finger, 0, 400, {
+        dimension: container * 0.55,
+      });
+      assert.true(
+        near(last, expected, 0.5),
+        `the iOS curve, d = 0.55 x ${container}px: ${last - 400}px past fully open (expected ${expected - 400}px)`,
+      );
+      assert.true(last - 400 > 24, `softer than a 24px cap (${last - 400}px)`);
+      assert.true(
+        last - 400 <= overhang(),
+        `within the overhang (${last - 400}px <= ${overhang()}px)`,
+      );
+      assert.true(
+        gaps.length > 0 && gaps.every((gap) => gap <= 0.01),
+        `the tray's box reaches the edge at every move (${Math.max(...gaps)})`,
+      );
+
+      clock.runUntilIdle();
+      await settled();
+      assert.strictEqual(openOffset(placement), 400);
+      assert.deepEqual(state.changes, [], 'stays fully open');
+    });
+
+    test(`${placement}: at rest the overhang is off screen: no scroll range, no hit area outside the root`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      state.showHandle = false;
+      await renderDrawer(state);
+      assert.strictEqual(openOffset(placement), 400, 'fully open');
+
+      const scale = el('.mobile-drawer').getBoundingClientRect().width / 400;
+      assert.true(
+        near(edgeGap(placement), -overhang() * scale, 0.5),
+        `the box reaches ${overhang()}px past the edge (${edgeGap(placement) / scale})`,
+      );
+      const vertical = placement === 'bottom' || placement === 'top';
+      const t = tray();
+      assert.strictEqual(
+        vertical
+          ? t.scrollHeight - t.clientHeight
+          : t.scrollWidth - t.clientWidth,
+        0,
+        'the overhang adds no scroll range',
+      );
+
+      const inside = document.elementFromPoint(...nearEdge(placement, 2));
+      assert.true(
+        t.contains(inside),
+        'just inside the edge is the tray, as before',
+      );
+      const outside = document.elementFromPoint(...nearEdge(placement, -2));
+      assert.false(
+        t.contains(outside),
+        'just outside the root the overhang takes no taps (the root clips it)',
+      );
+    });
+  }
 
   for (const [end, snapPoints, active, direction] of [
     ['fully open', [0, 200, 400], 2, 'up'],
@@ -449,15 +553,16 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     });
   }
 
-  test('catching an overshoot past the band limit still follows the finger', async function (assert) {
+  test('catching a spring overshoot past fully open still follows the finger', async function (assert) {
     // The tray (~360px of content) is longer than the largest snap point,
-    // so a spring overshoot past 200 is shown in full, beyond the 24px band.
+    // so a spring overshoot past 200 is shown in full.
     const state = new State();
     state.snapPoints = [0, 100, 200];
     state.active = 1;
     state.grip = 300;
     await renderDrawer(state);
-    const length = parseFloat(getComputedStyle(tray()).height);
+    // The visible length: the box minus the overhang past the edge.
+    const length = parseFloat(getComputedStyle(tray()).height) - overhang();
     assert.true(length > 250, `a long tray (${length}px)`);
     const offset = () => openOffset('bottom', length);
 
@@ -498,8 +603,8 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
       out.every(
         (value, i) =>
           Number.isFinite(value) && value >= (out[i - 1] ?? value) - 1e-9,
-      ) && out[out.length - 1]! - again < 1,
-      `barely moves further out, never back (${out.map((v) => (v - again).toFixed(3)).join(', ')})`,
+      ) && out[out.length - 1]! - again < moved(40) / 2,
+      `moves further out against the band, never back (${out.map((v) => (v - again).toFixed(3)).join(', ')})`,
     );
 
     clock.runUntilIdle();

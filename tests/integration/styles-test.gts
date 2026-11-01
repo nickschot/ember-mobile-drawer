@@ -384,6 +384,16 @@ module('Integration | styles.css', function (hooks) {
             padding[side] === '0' || padding[side] === '0px',
             `no ${side} padding: ${padding[side]}`,
           );
+        } else if (side === placement) {
+          // The edge side: the inset plus the tray's overhang, which is off
+          // screen (see the overhang tests below).
+          const value = padding[side] ?? '';
+          assert.true(
+            new RegExp(
+              `^calc\\(env\\(safe-area-inset-${side}, ?0px\\) \\+ var\\(--mobile-drawer-overhang, ?0px\\)\\)$`,
+            ).test(value),
+            `${side} padding is the ${side} inset plus the overhang: ${padding[side]}`,
+          );
         } else {
           assert.true(
             padding[side]?.startsWith(`env(safe-area-inset-${side}`),
@@ -492,6 +502,77 @@ module('Integration | styles.css', function (hooks) {
       } finally {
         style.remove();
       }
+    });
+
+    test(`${placement}: the overhang reaches past the edge and leaves the visible tray as it was`, async function (assert) {
+      await renderDrawer(placement);
+      const tray = el('[data-test-tray]');
+      tray.style.transform = 'none';
+      const vertical = placement === 'bottom' || placement === 'top';
+      const rects = () => ({
+        root: el('[data-test-root]').getBoundingClientRect(),
+        tray: tray.getBoundingClientRect(),
+        content: el('[data-test-content]').getBoundingClientRect(),
+      });
+      const range = () =>
+        vertical
+          ? tray.scrollHeight - tray.clientHeight
+          : tray.scrollWidth - tray.clientWidth;
+
+      const without = rects();
+      tray.style.setProperty('--mobile-drawer-overhang', '30px');
+      const withOverhang = rects();
+      // The root's edge, and the tray's leading edge (facing the page).
+      const leading = OPPOSITE[placement];
+      // Screen px per CSS px (the test container is scaled).
+      const scale = without.root.width / el('[data-test-root]').offsetWidth;
+      const outward = placement === 'bottom' || placement === 'right' ? 1 : -1;
+
+      assert.strictEqual(
+        withOverhang.tray[placement],
+        without.root[placement] + outward * 30 * scale,
+        `the box reaches 30px past the ${placement} edge`,
+      );
+      assert.strictEqual(
+        withOverhang.tray[leading],
+        without.tray[leading],
+        'the leading edge stays where it was',
+      );
+      assert.deepEqual(
+        withOverhang.content.toJSON(),
+        without.content.toJSON(),
+        'the content (inside the safe-area padding) stays where it was',
+      );
+      assert.strictEqual(range(), 0, 'no scroll range for short content');
+
+      // Tall content: the scroll range and its end don't change.
+      el('[data-test-content]').style.cssText = 'width: 5000px; height: 5000px';
+      tray.style.removeProperty('--mobile-drawer-overhang');
+      const tallRange = range();
+      tray.scrollTo(10000, 10000);
+      const tallEnd: unknown = el('[data-test-content]')
+        .getBoundingClientRect()
+        .toJSON();
+      tray.scrollTo(0, 0);
+      tray.style.setProperty('--mobile-drawer-overhang', '30px');
+      assert.strictEqual(range(), tallRange, 'the scroll range is unchanged');
+      tray.scrollTo(10000, 10000);
+      assert.deepEqual(
+        el('[data-test-content]').getBoundingClientRect().toJSON(),
+        tallEnd,
+        'at the end of the scroll range the content is where it was',
+      );
+      assert.strictEqual(
+        getComputedStyle(tray)[
+          `scrollPadding${placement[0]!.toUpperCase()}${placement.slice(1)}` as
+            | 'scrollPaddingTop'
+            | 'scrollPaddingBottom'
+            | 'scrollPaddingLeft'
+            | 'scrollPaddingRight'
+        ],
+        '30px',
+        'the edge-side scroll padding keeps scrolled-to elements in view',
+      );
     });
 
     test(`${placement}: the radius applies to the corners facing away from the edge`, async function (assert) {
