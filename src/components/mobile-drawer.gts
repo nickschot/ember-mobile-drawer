@@ -638,6 +638,13 @@ const clampIndex = (index: number, count: number) =>
  * drawer around that one. A tap on an element in a handle (a button) still
  * clicks.
  *
+ * Nested drawers: a drawer in this drawer's tray is a part of its tray, so
+ * its touches also reach this drawer's drag sources. A gesture that starts
+ * in a nested drawer (its tray, a handle or its backdrop) belongs to that
+ * drawer only (see `#inNested`): it never drags this drawer, also when the
+ * nested drawer is at its closed position and the finger moves on, and it
+ * doesn't hold this drawer's running animation.
+ *
  * With `@handleOnly` the content is locked below the highest snap point
  * too, so it only scrolls when the drawer is fully open, and swipes along
  * the axis on it are cancelled there without dragging (see
@@ -2451,12 +2458,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Decides whether a gesture on the tray drags the drawer or scrolls (see
-   * the class docs). A gesture that starts on a handle always drags. Called
-   * once per gesture, after a touch on a moving drawer has held it.
+   * the class docs). A gesture that starts on a handle always drags, one
+   * that starts in a nested drawer never does. Called once per gesture,
+   * after a touch on a moving drawer has held it.
    */
   private shouldDrag = (movement: number, target: Element | null): boolean => {
     const layout = this.#layout;
     const tray = this.#tray;
+    if (this.#inNested(target)) return false;
     if (!layout || !tray) return true;
     if (this.#renderedOffset < layout.maxOffset - EPSILON) return true;
     if (this.#onHandle(target)) return true;
@@ -2486,6 +2495,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #onHandle(target: Element | null): boolean {
     const tray = this.#tray;
+    if (this.#inNested(target)) return false;
     for (
       let element = target;
       element && element !== tray && tray?.contains(element);
@@ -2506,6 +2516,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   private shouldHandleDrag = (_movement: number, target: Element | null) =>
     this.#onHandle(target);
 
+  /**
+   * Whether `target` is in a drawer nested in this one (in its tray, a
+   * handle or its backdrop): its gestures belong to that drawer only, see
+   * the class docs.
+   */
+  #inNested(target: EventTarget | null): boolean {
+    const root = this.#root;
+    if (!root || !(target instanceof Element) || !root.contains(target)) {
+      return false;
+    }
+    return target.closest('.mobile-drawer') !== root;
+  }
+
   private onHandleInstall = (element: HTMLElement): void => {
     this.#handles.add(element);
   };
@@ -2519,11 +2542,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * A touch on a drag source holds a running animation right away, like
    * native sheets, instead of only once a pan is recognised (past didPan's
    * threshold). If no drag starts, lifting the finger resumes the animation,
-   * so taps on content keep working.
+   * so taps on content keep working. Not a touch in a nested drawer (see
+   * `#inNested`).
    */
   private onPointerDown = (event: PointerEvent): void => {
     const spring = this.#spring;
-    if (!spring?.isAnimating || this.#drag || this.#hold || this.#destroyed) {
+    if (
+      !spring?.isAnimating ||
+      this.#drag ||
+      this.#hold ||
+      this.#destroyed ||
+      this.#inNested(event.target)
+    ) {
       return;
     }
     spring.stop();
