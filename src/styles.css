@@ -16,11 +16,12 @@
  *     <div class="mobile-drawer__tray">
  *       <div class="mobile-drawer__content">...yielded content...</div>
  *     </div>
+ *     <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>
  *   </div>
  *
- * The backdrop and tray must be direct children of the root, and the content
- * a direct child of the tray; the placement rules use the child combinator so
- * nested drawers don't affect each other.
+ * The backdrop, tray and bar tint must be direct children of the root, and
+ * the content a direct child of the tray; the placement rules use the child
+ * combinator so nested drawers don't affect each other.
  *
  * .mobile-drawer            Root. A fixed overlay covering the viewport that
  *                           does not capture pointer events itself, so a
@@ -144,6 +145,10 @@
  *                           apps can pad it freely. With a sticky grabber,
  *                           don't pad the tray's leading edge: the grabber
  *                           sticks inside that padding.
+ * .mobile-drawer__bar-tint  Empty, after the tray. Only used on iOS (see
+ *                           "Safari 26 bars" below); elsewhere it is
+ *                           `display: none`. Its colour is
+ *                           `--mobile-drawer-background`.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
  *                           carries the safe-area padding (see below) and,
  *                           for top and left, the auto start margin (see the
@@ -229,8 +234,10 @@
  * `@supports (-webkit-touch-callout: none)` block (iOS WebKit only) makes
  * that colour right:
  *   - the backdrop fades with `filter: opacity()` instead of `opacity`, so
- *     Safari sees the dimmed colour from the first frame. The bars then show
- *     the backdrop at its max opacity until the drawer is closed
+ *     Safari sees the dimmed colour from the first frame. The bars that the
+ *     sheet does not touch (the status bar for a bottom drawer, the toolbar
+ *     for a top drawer, both for left and right) then show the backdrop at
+ *     its max opacity until the drawer is closed
  *     ([data-closed]): also at a lower snap point, while a drawer with a
  *     backdrop rests at a peek, and during the close animation, after which
  *     the bars change to the page colour in one step. Safari's hit test
@@ -242,19 +249,28 @@
  *     is 1, so an app's own `background` on the backdrop shows at full
  *     strength.
  *   - the tray is `position: fixed` (inside the root, which gets
- *     `contain: layout`), so a bar that the sheet touches takes the sheet's
- *     background. A tray with a backdrop-filter (e.g. the iOS theme's glass)
- *     gets Safari's own material there, so such a sheet still stops at the
- *     floating toolbar with a visible edge. Safari keeps the colour it took
- *     when the sheet opened. With motion on (and the glass look on), the iOS
- *     theme's sheet is glass when it opens, also on a direct open to its
- *     highest snap point (it fades to opaque there), so the toolbar area
- *     keeps the first-frame colour (light-coloured in light mode; dark mode
- *     is not checked) until the drawer is closed. With reduced motion
- *     (direct open to the highest snap point), reduced transparency or
- *     increased contrast the sheet is opaque from the first frame, so Safari
- *     probably takes the sheet colour (not verified in Safari).
- * Content can't paint under the bars, so the safe-area padding above is
+ *     `contain: layout`), so it stays in the root also in an embedded
+ *     drawer.
+ *   - the bar tint gives the bar at the sheet's edge the sheet colour:
+ *     the toolbar for a bottom drawer, the status bar for a top drawer
+ *     (none for left and right). It is a 16px fixed strip at that edge of
+ *     the root, in front of the tray, that paints nothing
+ *     (`background-clip: content-box` with all of its height as padding)
+ *     and takes no pointer events. Its background is
+ *     `--mobile-drawer-background`. Safari samples the first fixed element
+ *     at the edge, so it takes the strip and not the backdrop or the tray:
+ *     the sheet seems to go on under the bar, from the first frame of an
+ *     opening drawer. The strip is not viewport-sized, so Safari takes its
+ *     colour again when it changes (e.g. the iOS theme's glass that becomes
+ *     opaque at full height). A tray with a backdrop-filter does not give
+ *     Safari's own material at the bar any more: Safari blends the
+ *     translucent sheet colour over the page background. The strip is only
+ *     there while the drawer is not [data-closed]. Set the tray colour with
+ *     `--mobile-drawer-background`: with an app `background` on the tray,
+ *     also set the same `background-color` on `.mobile-drawer__bar-tint`.
+ * Content can't paint under the bars (Safari clips fixed elements there,
+ * also with `100lvh` or negative insets, and then finds no fixed element at
+ * the edge and shows the page there), so the safe-area padding above is
  * still correct. Other browsers don't get these rules.
  *
  * Motion: there are no CSS transitions here; the drawer moves with JS springs.
@@ -317,6 +333,11 @@
     );
     pointer-events: auto;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Only used on iOS, see the iOS block at the end. */
+  :where(.mobile-drawer__bar-tint) {
+    display: none;
   }
 
   :where(.mobile-drawer__tray) {
@@ -444,10 +465,13 @@
    *   Safari ignores elements with an opacity below 0.1 and keeps the first
    *   colour it finds for a viewport-sized layer, so with `opacity` it locks
    *   the page colour on the first frame of an opening drawer.
-   * - The tray is `position: fixed`, so Safari takes the sheet's colour for
-   *   the bar it touches. `contain: layout` on the root keeps the fixed tray
-   *   positioned in the root, also when an app embeds the drawer with
-   *   `position: absolute`.
+   * - The tray is `position: fixed`. `contain: layout` on the root keeps the
+   *   fixed tray positioned in the root, also when an app embeds the drawer
+   *   with `position: absolute`.
+   * - The bar tint is a fixed strip at the sheet's edge (bottom or top) that
+   *   paints nothing, with the sheet colour as its background. It is the
+   *   first fixed element at that edge, so Safari fills the bar with the
+   *   sheet colour, and samples it again when it changes.
    */
   @supports (-webkit-touch-callout: none) and
     (color: color-mix(in srgb, red 50%, transparent)) {
@@ -468,6 +492,34 @@
 
     :where(.mobile-drawer__tray) {
       position: fixed;
+    }
+
+    :where(
+      .mobile-drawer:not([data-closed]):not(
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__bar-tint
+    ) {
+      display: block;
+      position: fixed;
+      inset: auto 0 0;
+      z-index: 1;
+      box-sizing: border-box;
+      height: 16px;
+      padding-top: 16px;
+      background-color: var(--mobile-drawer-background, Canvas);
+      background-clip: content-box;
+      pointer-events: none;
+    }
+
+    :where(
+      .mobile-drawer[data-placement="top"]:not([data-closed])
+        > .mobile-drawer__bar-tint
+    ) {
+      inset: 0 0 auto;
+      padding-top: 0;
+      padding-bottom: 16px;
     }
   }
 }

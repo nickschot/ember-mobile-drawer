@@ -192,6 +192,15 @@ module('Integration | Component | mobile-drawer', function (hooks) {
         '[data-test-drawer] > .mobile-drawer__tray > .mobile-drawer__content > [data-test-block]',
       )
       .hasText('Drawer content');
+    assert
+      .dom(
+        '[data-test-drawer] > .mobile-drawer__tray + .mobile-drawer__bar-tint',
+      )
+      .exists({ count: 1 }, 'an empty bar tint after the tray');
+    assert
+      .dom('[data-test-drawer] > .mobile-drawer__bar-tint')
+      .hasAttribute('aria-hidden', 'true')
+      .hasNoText();
   });
 
   test('it starts closed at index 0 without animating', async function (assert) {

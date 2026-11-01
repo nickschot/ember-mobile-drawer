@@ -15,9 +15,9 @@
  * depend on load order, but load it after styles.css anyway. The real
  * properties it sets are `backdrop-filter` and `transition` on the tray and
  * the grabber's, which the base styles don't set, and `background` on the
- * expanded tray, which the base styles also set: that one rule has a
- * specificity above zero (see "Overriding"), so it wins over the base rule
- * in either order.
+ * expanded tray and `background-color` on its bar tint, which the base
+ * styles also set: those two rules have a specificity above zero (see
+ * "Overriding"), so they win over the base rules in either order.
  *
  * Opt in by putting the theme class on an ancestor of the drawer, e.g.
  *   <body class="mobile-drawer-theme-ios">
@@ -98,19 +98,15 @@
  * tray then gets no background at all (transparent and unblurred).
  *
  * iOS Safari 26 toolbar: Safari fills the toolbar with a colour from the
- * fixed element at the bottom edge, and for an element with a
- * backdrop-filter it uses its own material instead (see "Safari 26 bars" in
- * styles.css). So the glass sheet stops at the floating toolbar with a
- * visible edge. Safari keeps the colour that it took when the sheet opened,
- * until nothing fixed is at that edge. With motion on (and the glass look
- * on), the sheet is glass when it opens, also on a direct open to its
- * highest snap point (there it fades to opaque, see "Full height"). So the
- * toolbar area keeps the first-frame colour (light-coloured in light mode;
- * dark mode is not checked) until the drawer is closed, also when the sheet
- * is opaque at the top. With reduced motion, a direct open to the highest
- * snap point is opaque from the first frame; with reduced transparency or
- * increased contrast the sheet is always opaque. Then Safari probably takes
- * the sheet colour (not verified in Safari).
+ * fixed element at the bottom edge. The base styles put the bar tint there
+ * (`.mobile-drawer__bar-tint`, see "Safari 26 bars" in styles.css), which
+ * has the sheet colour. On the glass sheet that is the translucent tint, so
+ * Safari blends it over the page background: the toolbar area is close to
+ * the glass sheet, but Safari does not blur the page there. While the
+ * drawer is [data-expanded] the theme gives the bar tint the opaque sheet
+ * colour, and Safari takes the new colour, also after a fade or a drag to
+ * the top. With the page scale, the toolbar area has the sheet colour, not
+ * the black of `<body>`.
  *
  * Page scale (opt-in, see .mobile-drawer-theme-ios__page): the component
  * writes `--mobile-drawer-page-progress` (0-1) and
@@ -158,11 +154,12 @@
  *
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
- * wins. One exception: the expanded tray's `background` rule has the
- * specificity of one class (0,1,0), so it wins over the base styles' tray
- * background in any load order. App CSS in a later layer or unlayered still
- * wins over it; app CSS in the `ember-mobile-drawer` layer needs more than
- * one class, or must come later, to override it.
+ * wins. Two exceptions: the expanded tray's `background` rule and the
+ * expanded bar tint's `background-color` rule have the specificity of one
+ * class (0,1,0), so they win over the base styles' rules in any load order.
+ * App CSS in a later layer or unlayered still wins over them; app CSS in
+ * the `ember-mobile-drawer` layer needs more than one class, or must come
+ * later, to override them.
  * To change a theme value, set the custom property on the element that
  * carries the theme class or on anything between it and the drawer, e.g.
  *   .mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }
@@ -442,6 +439,16 @@
         > .mobile-drawer-theme-ios__grabber
     ) {
       background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
+    }
+
+    /* iOS Safari 26: the toolbar area gets the opaque sheet colour (see
+       "iOS Safari 26 toolbar" in the header). Specificity 0,1,0, as the
+       tray rule above. The base styles show the bar tint only on iOS. */
+    :where(.mobile-drawer-theme-ios .mobile-drawer[data-expanded])
+      > .mobile-drawer__bar-tint {
+      background-color: rgb(
+        from var(--mobile-drawer-background, Canvas) r g b / 1
+      );
     }
 
     /* The rim over the opaque strip. Only here: without relative colours

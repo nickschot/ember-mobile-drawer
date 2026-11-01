@@ -132,6 +132,7 @@ async function renderDrawer(placement?: Placement, closed = false) {
             </div>
           </div>
         </div>
+        <div class="mobile-drawer__bar-tint" data-test-bar-tint></div>
       </div>
     </template>,
   );
@@ -726,6 +727,133 @@ module('Integration | styles.css', function (hooks) {
       getComputedStyle(el('[data-test-root]')).contain,
       'none',
     );
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-bar-tint]')).display,
+      'none',
+      'no bar tint',
+    );
+  });
+
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: the bar tint is not shown in other browsers`, async function (assert) {
+      await renderDrawer(placement);
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-bar-tint]')).display,
+        'none',
+      );
+    });
+  }
+
+  /** Applies a copy of the iOS block's rules without its condition. */
+  function applyIosRules(): HTMLStyleElement {
+    const inner = Array.from(iosEdgesRule().cssRules)
+      .map((rule) => rule.cssText)
+      .join('\n');
+    return addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+  }
+
+  for (const placement of ['bottom', 'top'] as const) {
+    test(`${placement}: the iOS bar tint is an invisible strip in the sheet colour at the sheet's edge`, async function (assert) {
+      await renderDrawer(placement);
+      const style = applyIosRules();
+      try {
+        const root = el('[data-test-root]');
+        const tint = el('[data-test-bar-tint]');
+        const tray = el('[data-test-tray]');
+        const computed = getComputedStyle(tint);
+
+        assert.strictEqual(computed.display, 'block');
+        assert.strictEqual(computed.position, 'fixed');
+        assert.strictEqual(computed.pointerEvents, 'none', 'takes no hits');
+        assert.true(
+          Number(computed.zIndex) > 0,
+          'in front of the tray, so Safari samples it first',
+        );
+        assert.strictEqual(
+          tint.compareDocumentPosition(tray) & Node.DOCUMENT_POSITION_PRECEDING,
+          Node.DOCUMENT_POSITION_PRECEDING,
+          'after the tray in the markup',
+        );
+
+        // Invisible: all of its height is padding and the background is
+        // clipped to the empty content box.
+        assert.strictEqual(computed.height, '16px');
+        assert.strictEqual(computed.backgroundClip, 'content-box');
+        const padding =
+          placement === 'bottom' ? computed.paddingTop : computed.paddingBottom;
+        assert.strictEqual(padding, '16px', 'all of it is padding');
+        assert.strictEqual(
+          placement === 'bottom' ? computed.paddingBottom : computed.paddingTop,
+          '0px',
+        );
+        assert.strictEqual(tint.clientHeight, 16);
+
+        // At the sheet's edge of the root, across its full width.
+        const rootBox = root.getBoundingClientRect();
+        const box = tint.getBoundingClientRect();
+        assert.strictEqual(box.left, rootBox.left);
+        assert.strictEqual(box.width, rootBox.width);
+        if (placement === 'bottom') {
+          assert.strictEqual(box.bottom, rootBox.bottom, 'at the bottom');
+        } else {
+          assert.strictEqual(box.top, rootBox.top, 'at the top');
+        }
+
+        // The sheet colour, also an app value.
+        assert.strictEqual(
+          computed.backgroundColor,
+          getComputedStyle(tray).backgroundColor,
+          'the tray colour',
+        );
+        root.style.setProperty('--mobile-drawer-background', 'rgb(1 2 3)');
+        assert.strictEqual(computed.backgroundColor, 'rgb(1, 2, 3)');
+
+        root.setAttribute('data-closed', '');
+        assert.strictEqual(computed.display, 'none', 'not while closed');
+      } finally {
+        style.remove();
+      }
+    });
+  }
+
+  for (const placement of ['left', 'right'] as const) {
+    test(`${placement}: the iOS rules show no bar tint`, async function (assert) {
+      await renderDrawer(placement);
+      const style = applyIosRules();
+      try {
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-bar-tint]')).display,
+          'none',
+        );
+      } finally {
+        style.remove();
+      }
+    });
+  }
+
+  test('the iOS bar tint stays in an embedded root', async function (assert) {
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        <div style="position: relative; width: 300px; height: 200px">
+          <div class="mobile-drawer" style="position: absolute" data-test-root>
+            <div class="mobile-drawer__tray">
+              <div class="mobile-drawer__content"></div>
+            </div>
+            <div class="mobile-drawer__bar-tint" data-test-bar-tint></div>
+          </div>
+        </div>
+      </template>,
+    );
+    const style = applyIosRules();
+    try {
+      const rootBox = el('[data-test-root]').getBoundingClientRect();
+      const box = el('[data-test-bar-tint]').getBoundingClientRect();
+      assert.strictEqual(box.width, rootBox.width);
+      assert.strictEqual(box.bottom, rootBox.bottom);
+    } finally {
+      style.remove();
+    }
   });
 
   test('the iOS bar rules fade the backdrop with a filter and fix the tray in the root', async function (assert) {

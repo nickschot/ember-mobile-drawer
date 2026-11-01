@@ -449,7 +449,9 @@ const clampIndex = (index: number, count: number) =>
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
  * `@backdrop={{false}}`) and a `.mobile-drawer__tray`, with the block inside
- * `.mobile-drawer__content`. Attributes are applied to the root element.
+ * `.mobile-drawer__content`, and an empty `.mobile-drawer__bar-tint` after
+ * the tray (for the iOS Safari 26 bars, see styles.css). Attributes are
+ * applied to the root element.
  *
  * Backdrop: its opacity follows the drawer frame by frame through
  * `--mobile-drawer-progress`, written in `#render` like the transform. A tap
@@ -2335,6 +2337,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           }}
         </div>
       </div>
+      <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>
     </div>
   </template>
 }

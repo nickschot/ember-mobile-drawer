@@ -193,10 +193,43 @@ async function renderDrawer({
               {{/if}}
             </div>
           </div>
+          <div class="mobile-drawer__bar-tint" data-test-bar-tint></div>
         </div>
       </div>
     </template>,
   );
+}
+
+/**
+ * The rules of the base styles' iOS-only block (`-webkit-touch-callout`),
+ * without the condition, in the drawer layer. Adding them after the theme
+ * also loads them after it.
+ */
+function iosBaseRulesText(): string {
+  const visit = (rules: CSSRuleList): CSSSupportsRule | undefined => {
+    for (const rule of Array.from(rules)) {
+      if (
+        rule instanceof CSSSupportsRule &&
+        rule.conditionText.includes('-webkit-touch-callout: none')
+      ) {
+        return rule;
+      }
+      if (rule instanceof CSSGroupingRule) {
+        const found = visit(rule.cssRules);
+        if (found) return found;
+      }
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    const found = visit(sheet.cssRules);
+    if (found) {
+      const inner = Array.from(found.cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      return `@layer ember-mobile-drawer { ${inner} }`;
+    }
+  }
+  throw new Error('No iOS @supports rule in the base styles');
 }
 
 /**
@@ -875,6 +908,36 @@ module('Integration | themes/ios.css', function (hooks) {
       'not expanded: glass',
     );
   });
+
+  for (const scheme of SCHEMES) {
+    test(`${scheme}: the iOS Safari bar tint has the sheet colour, opaque while expanded, also with the base iOS rules after the theme`, async function (assert) {
+      await renderDrawer({ scheme, tall: true });
+      const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
+
+      // The iOS block only applies on iOS; force it, after the theme.
+      styles.push(addStyles(iosBaseRulesText()));
+      assert.strictEqual(tint().display, 'block');
+      assert.strictEqual(
+        tint().backgroundColor,
+        GLASS[scheme].background,
+        'below the top: the glass tint',
+      );
+
+      el('[data-test-root]').setAttribute('data-expanded', '');
+      finishTransitions();
+      assert.strictEqual(
+        rgb(tint().backgroundColor),
+        SOLID[scheme],
+        'expanded: the opaque sheet colour',
+      );
+      assert.strictEqual(
+        tint().backgroundColor,
+        getComputedStyle(el('[data-test-tray]')).backgroundColor,
+        'the same colour as the expanded tray',
+      );
+      assert.strictEqual(tint().transitionDuration, '0s', 'no transition');
+    });
+  }
 
   test('unlayered app CSS still wins over the expanded tray background', async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
