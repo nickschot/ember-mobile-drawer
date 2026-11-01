@@ -1947,6 +1947,29 @@ module(
       button.remove();
     });
 
+    test('a readonly text input that gets focus long after a key press uses :focus-visible', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const input = Object.assign(document.createElement('input'), {
+        readOnly: true,
+      });
+      el('.mobile-drawer__content').prepend(input);
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      clock.time += 1000;
+      // No recent input: the browser decides, and a readonly text field
+      // never counts as keyboard focus then.
+      input.focus({ focusVisible: true } as FocusOptions);
+      tray().scrollTop = 100;
+
+      await resize(state, 1100);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'reset');
+      input.remove();
+    });
+
     test('a disabled text input in the tray does not hold the reset', async function (assert) {
       const state = new State();
       state.active = 1;

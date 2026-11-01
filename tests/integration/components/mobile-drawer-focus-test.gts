@@ -654,6 +654,40 @@ module(
       assert.true(isVisible(last), 'on screen');
     });
 
+    test('focus without input long after a tap uses :focus-visible', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const last = el('[data-test-last]');
+      assert.false(isVisible(last), 'off screen at 40%');
+      // An earlier tap on the page.
+      const init = { bubbles: true, pointerId: 1 };
+      document.body.dispatchEvent(new PointerEvent('pointerdown', init));
+      document.body.dispatchEvent(new PointerEvent('pointerup', init));
+      clock.time += 1000;
+      // As a screen reader or switch access moves focus: no key or pointer
+      // event on the page, and the browser gives it a focus ring.
+      last.focus({ focusVisible: true } as FocusOptions);
+      assert.true(last.matches(':focus-visible'), 'a focus ring');
+      await settle();
+      assert.deepEqual(state.changes, [2]);
+      assert.true(isVisible(last), 'on screen');
+    });
+
+    test('focus right after a tap is pointer focus, also with :focus-visible', async function (assert) {
+      const state = new State();
+      await setup(state);
+      const last = el('[data-test-last]');
+      const init = { bubbles: true, pointerId: 1 };
+      document.body.dispatchEvent(new PointerEvent('pointerdown', init));
+      document.body.dispatchEvent(new PointerEvent('pointerup', init));
+      clock.time += 999;
+      last.focus({ focusVisible: true } as FocusOptions);
+      assert.true(last.matches(':focus-visible'), 'a focus ring');
+      await settle();
+      await nextFrames();
+      assert.deepEqual(state.changes, []);
+    });
+
     test('a tap on a partly visible button does not move the drawer', async function (assert) {
       const state = new State();
       await setup(state);
@@ -693,12 +727,12 @@ module(
 
     let clock: FakeClock;
     /**
-     * The capture `keydown` and `pointerdown` listeners on the document, as
+     * The capture `keydown` and `pointerdown` listeners on the window, as
      * `[type, listener]`.
      */
     let listeners: [string, EventListenerOrEventListenerObject][];
-    const add = document.addEventListener.bind(document);
-    const remove = document.removeEventListener.bind(document);
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
 
     /** Whether the test counts this listener. */
     const counts = (
@@ -718,7 +752,7 @@ module(
       drawerEnvironment.clock = clock;
       drawerEnvironment.prefersReducedMotion = () => false;
       listeners = [];
-      document.addEventListener = (
+      window.addEventListener = (
         type: string,
         listener: EventListenerOrEventListenerObject,
         options?: boolean | AddEventListenerOptions,
@@ -728,7 +762,7 @@ module(
         }
         add(type, listener, options);
       };
-      document.removeEventListener = (
+      window.removeEventListener = (
         type: string,
         listener: EventListenerOrEventListenerObject,
         options?: boolean | EventListenerOptions,
@@ -741,9 +775,9 @@ module(
 
     hooks.afterEach(function () {
       // @ts-expect-error: back to the method of the prototype.
-      delete document.addEventListener;
+      delete window.addEventListener;
       // @ts-expect-error: back to the method of the prototype.
-      delete document.removeEventListener;
+      delete window.removeEventListener;
       delete drawerEnvironment.clock;
       delete drawerEnvironment.prefersReducedMotion;
     });

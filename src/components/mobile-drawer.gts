@@ -156,36 +156,50 @@ type InputType = 'keyboard' | 'pointer';
 const shownDrawers = new Set<object>();
 
 /**
- * The input the user gave last while a drawer showed, or `undefined` when
- * there was none since then. See `trackInput`.
+ * The input the user gave last while a drawer showed, and when (ms, see
+ * `inputTime`), or `undefined` when there was none since then. See
+ * `trackInput`.
  */
-let lastInput: InputType | undefined;
+let lastInput: { type: InputType; time: number } | undefined;
+
+/**
+ * How long (ms) after a key press or a pointer that goes down a focus still
+ * counts as caused by it, see `focusInputOf`. A focus from Tab, a tap or a
+ * click, or from the app's own handler for the event, comes at once. A long
+ * press can take more time; then the browser decides, as for focus without
+ * input.
+ */
+const INPUT_WINDOW = 1000;
+
+/** The time for `lastInput`: the drawer's clock, as for its animations. */
+const inputTime = (): number => (drawerEnvironment.clock ?? performance).now();
 
 const onInputKeyDown = (): void => {
-  lastInput = 'keyboard';
+  lastInput = { type: 'keyboard', time: inputTime() };
 };
 
 const onInputPointerDown = (): void => {
-  lastInput = 'pointer';
+  lastInput = { type: 'pointer', time: inputTime() };
 };
 
 const INPUT_LISTENER = { capture: true, passive: true } as const;
 
 /**
  * Adds `drawer` to the drawers that show (`shown`) or removes it. While one
- * or more drawers show, listeners on the document record the input the user
+ * or more drawers show, listeners on the window record the input the user
  * gave last: a key press (`keydown`) or a pointer that goes down (mouse,
  * touch or pen, `pointerdown`). They are in the capture phase, so the record
  * is there before the focus that the input causes, also when the app moves
- * focus in its own handler for the event. When no drawer shows, the
- * listeners go and the record is forgotten. See `focusInputOf`.
+ * focus in its own handler for the event, and an app's listener that stops
+ * the event doesn't hide it. When no drawer shows, the listeners go and the
+ * record is forgotten. See `focusInputOf`.
  */
 function trackInput(drawer: object, shown: boolean): void {
   if (shown) {
     if (shownDrawers.has(drawer)) return;
     if (shownDrawers.size === 0) {
-      document.addEventListener('keydown', onInputKeyDown, INPUT_LISTENER);
-      document.addEventListener(
+      window.addEventListener('keydown', onInputKeyDown, INPUT_LISTENER);
+      window.addEventListener(
         'pointerdown',
         onInputPointerDown,
         INPUT_LISTENER,
@@ -193,8 +207,8 @@ function trackInput(drawer: object, shown: boolean): void {
     }
     shownDrawers.add(drawer);
   } else if (shownDrawers.delete(drawer) && shownDrawers.size === 0) {
-    document.removeEventListener('keydown', onInputKeyDown, INPUT_LISTENER);
-    document.removeEventListener(
+    window.removeEventListener('keydown', onInputKeyDown, INPUT_LISTENER);
+    window.removeEventListener(
       'pointerdown',
       onInputPointerDown,
       INPUT_LISTENER,
@@ -205,20 +219,25 @@ function trackInput(drawer: object, shown: boolean): void {
 
 /**
  * The input that gives `element` focus now: keyboard focus when the last
- * input was a key press (see `trackInput`). Also programmatic focus by the
- * app after a key press, like `:focus-visible` in Chrome. The same in every
- * browser, and for every element: a mouse click on a `readonly` text field
- * is pointer focus, though Chrome gives it `:focus-visible`.
+ * input was a key press (see `trackInput`) less than `INPUT_WINDOW` ago.
+ * Also programmatic focus by the app right after a key press, like
+ * `:focus-visible` in Chrome. The same in every browser, and for every
+ * element: a mouse click on a `readonly` text field is pointer focus, though
+ * Chrome gives it `:focus-visible`.
  *
- * When there was no input since a drawer showed (e.g. the app focuses an
- * element right after the click or key press that opened the drawer), the
- * browser decides: `:focus-visible`, but never for a `readonly` or
- * `disabled` text field (Chrome gives it `:focus-visible` after a mouse
- * click too). A browser without `:focus-visible` (Safari before 15.4)
- * throws; nothing then counts as keyboard focus.
+ * Without a recent input the browser decides: `:focus-visible`, but never
+ * for a `readonly` or `disabled` text field (Chrome gives it
+ * `:focus-visible` after a mouse click too). That is focus from a screen
+ * reader or switch access, which sends no key or pointer event to the page
+ * (an old tap must not make it pointer focus), and focus that the app moves
+ * right after the click or key press that opened the drawer, before the
+ * listeners were there. A browser without `:focus-visible` (Safari before
+ * 15.4) throws; nothing then counts as keyboard focus.
  */
 function focusInputOf(element: Element): InputType {
-  if (lastInput) return lastInput;
+  if (lastInput && inputTime() - lastInput.time < INPUT_WINDOW) {
+    return lastInput.type;
+  }
   if (isInactiveTextField(element)) return 'pointer';
   try {
     return element.matches(':focus-visible') ? 'keyboard' : 'pointer';
