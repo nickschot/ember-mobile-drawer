@@ -1032,9 +1032,14 @@ module('Integration | themes/ios.css', function (hooks) {
       root.offsetWidth,
       'the tray keeps the root width; its own clip cuts the sides',
     );
-    assert.strictEqual(
-      getComputedStyle(tray).clipPath,
-      'inset(0px 8px round 36px 36px 0px 0px)',
+    const clip = () => getComputedStyle(tray).clipPath;
+    assert.true(
+      clip().startsWith('polygon(8px calc(100% + 1000px), 8px 36px, '),
+      `the tray's own clip: its sides at the inset, the radius there (${clip()})`,
+    );
+    assert.true(
+      clip().includes('8px 0px, 8px -1000px, calc(100% - 8px) -1000px'),
+      'the clip goes above the top edge: the top shadow stays',
     );
     const content = getComputedStyle(
       el('[data-test-tray] > .mobile-drawer__content'),
@@ -1045,14 +1050,25 @@ module('Integration | themes/ios.css', function (hooks) {
       'the content is padded by the inset, at every snap point',
     );
     setProgress(1);
-    assert.strictEqual(
-      getComputedStyle(tray).clipPath,
-      'inset(0px round 36px 36px 0px 0px)',
+    assert.true(
+      clip().startsWith('polygon(0px calc(100% + 1000px), 0px 36px, '),
+      `at full height at the edges (${clip()})`,
     );
+    assert.true(
+      clip().includes('0px 0px, 0px -1000px, 100% -1000px, 100% 0px'),
+      `the top shadow stays (${clip()})`,
+    );
+
     assert.deepEqual(
       [content.paddingLeft, content.paddingRight],
       ['8px', '8px'],
       'also at full height',
+    );
+
+    styles.push(addStyles('[data-test-theme] { --mobile-drawer-inset: 0px; }'));
+    assert.true(
+      clip().startsWith('polygon(-10000px calc(100% + 1000px), '),
+      `no inset: the clip moves 10000px out and clips nothing (${clip()})`,
     );
   });
 

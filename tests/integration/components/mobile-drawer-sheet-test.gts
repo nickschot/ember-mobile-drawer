@@ -280,6 +280,14 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
       [r.top, r.right, r.bottom, r.left],
     );
     assert.strictEqual(tray().offsetWidth, 400);
+    // The tray's clip moves far out, so it doesn't cut an app's shadow.
+    const clip = getComputedStyle(tray()).clipPath;
+    assert.true(
+      clip.startsWith(
+        'polygon(-10000px calc(100% + 1000px), -10000px -10000px',
+      ),
+      `the tray clips nothing: ${clip}`,
+    );
   });
 
   test('with --mobile-drawer-inset the inset area does not take touches, at the highest snap point the tray does', async function (assert) {

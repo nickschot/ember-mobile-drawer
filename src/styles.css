@@ -264,8 +264,10 @@
  * of the tray is in the sheet. The inset area takes no pointer events. The
  * clipped sides of the tray hide `inset` px of the content on each side
  * below the highest snap point: pad the content by the inset (the iOS
- * theme does). The clips also hide the tray's outer shadow while the inset
- * is set. Themes round the sheet's bottom corners with `border-radius` on
+ * theme does). While an inset is set, the clips hide the tray's outer
+ * shadow on its sides and bottom; the shadow above its top edge stays.
+ * Without an inset the tray's clip clips nothing (also not a large app
+ * shadow). Themes round the sheet's bottom corners with `border-radius` on
  * the sheet.
  *
  * Defaults are given as var() fallbacks rather than declared on the root, so
@@ -574,11 +576,18 @@
   }
 
   /*
-   * The tray's sides at the inset, with the top radius at its corners. The
-   * clip moves out by 100px when `--mobile-drawer-inset`
-   * is 0, so then it clips nothing and the tray keeps its shadow: `100px -
-   * min(inset * 1000, 100px)` is 100px for an inset of 0 and 0 for an inset
-   * of 0.1px or more.
+   * The tray's top corners at the inset. The sheet's box already clips the
+   * tray's sides at the inset, but the tray's own top corners are at the
+   * root's edges: the sheet would cut them with a kink. This polygon gives
+   * the tray its top radius at the inset (each corner as 6 straight
+   * segments, which don't show at these radii), and it goes 1000px above
+   * the tray's top edge, across the sheet's width, so the tray's top shadow
+   * stays (the sheet cuts it at its sides, as the side shadow). The
+   * private `--_mobile-drawer-clip-out` moves every point 10000px out when
+   * `--mobile-drawer-inset` is 0: `10000px - min(inset * 100000, 10000px)`
+   * is 10000px for an inset of 0 and 0 for an inset of 0.1px or more. So
+   * without an inset the polygon clips nothing (also not a large app
+   * shadow).
    */
   :where(
     .mobile-drawer:not(
@@ -589,21 +598,176 @@
       > .mobile-drawer__sheet
       > .mobile-drawer__tray
   ) {
-    clip-path: inset(
-      calc(-100px + min(var(--mobile-drawer-inset, 0px) * 1000, 100px))
-        calc(
+    --_mobile-drawer-clip-out: calc(
+      10000px - min(var(--mobile-drawer-inset, 0px) * 100000, 10000px)
+    );
+    clip-path: polygon(
+      calc(
           var(--mobile-drawer-inset, 0px) *
-            (1 - var(--mobile-drawer-expand-progress)) - 100px +
-            min(var(--mobile-drawer-inset, 0px) * 1000, 100px)
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
         )
-        calc(-100px + min(var(--mobile-drawer-inset, 0px) * 1000, 100px))
-        calc(
+        calc(100% + 1000px),
+      calc(
           var(--mobile-drawer-inset, 0px) *
-            (1 - var(--mobile-drawer-expand-progress)) - 100px +
-            min(var(--mobile-drawer-inset, 0px) * 1000, 100px)
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
         )
-        round var(--mobile-drawer-radius, 0px) var(--mobile-drawer-radius, 0px)
-        0 0
+        calc(
+          var(--mobile-drawer-radius, 0px) * 1 - var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.03407 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.74118 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.13397 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.5 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.29289 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.29289 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.5 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.13397 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.74118 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.03407 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 1 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1000px - var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1000px - var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 1 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.74118 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.03407 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.5 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.13397 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.29289 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.29289 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.13397 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.5 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.03407 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.74118 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 1 - var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(100% + 1000px)
     );
   }
 

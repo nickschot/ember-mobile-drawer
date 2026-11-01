@@ -124,7 +124,8 @@
  * content of a bottom sheet by the inset on both sides, at every snap
  * point, so the clipped sides hide nothing: at full height the content has
  * 8px more side padding than a native sheet. The clips hide the tray's
- * outer shadow while the inset is set; the rim stays at the top edge. Top,
+ * outer shadow on its sides and bottom while the inset is set; the shadow
+ * above the top edge stays, so it separates the sheet from the page. Top,
  * left and right drawers don't float. The top corners have the theme
  * radius (36px) at every snap point.
  *
