@@ -149,6 +149,84 @@ const modalStack: object[] = [];
 /** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
 const mountedDrawers = new Set<object>();
 
+/** The kind of input the user gave last, see `trackInput`. */
+type InputType = 'keyboard' | 'pointer';
+
+/** The drawers that show (open or at a peek), see `trackInput`. */
+const shownDrawers = new Set<object>();
+
+/**
+ * The input the user gave last while a drawer showed, or `undefined` when
+ * there was none since then. See `trackInput`.
+ */
+let lastInput: InputType | undefined;
+
+const onInputKeyDown = (): void => {
+  lastInput = 'keyboard';
+};
+
+const onInputPointerDown = (): void => {
+  lastInput = 'pointer';
+};
+
+const INPUT_LISTENER = { capture: true, passive: true } as const;
+
+/**
+ * Adds `drawer` to the drawers that show (`shown`) or removes it. While one
+ * or more drawers show, listeners on the document record the input the user
+ * gave last: a key press (`keydown`) or a pointer that goes down (mouse,
+ * touch or pen, `pointerdown`). They are in the capture phase, so the record
+ * is there before the focus that the input causes, also when the app moves
+ * focus in its own handler for the event. When no drawer shows, the
+ * listeners go and the record is forgotten. See `focusInputOf`.
+ */
+function trackInput(drawer: object, shown: boolean): void {
+  if (shown) {
+    if (shownDrawers.has(drawer)) return;
+    if (shownDrawers.size === 0) {
+      document.addEventListener('keydown', onInputKeyDown, INPUT_LISTENER);
+      document.addEventListener(
+        'pointerdown',
+        onInputPointerDown,
+        INPUT_LISTENER,
+      );
+    }
+    shownDrawers.add(drawer);
+  } else if (shownDrawers.delete(drawer) && shownDrawers.size === 0) {
+    document.removeEventListener('keydown', onInputKeyDown, INPUT_LISTENER);
+    document.removeEventListener(
+      'pointerdown',
+      onInputPointerDown,
+      INPUT_LISTENER,
+    );
+    lastInput = undefined;
+  }
+}
+
+/**
+ * The input that gives `element` focus now: keyboard focus when the last
+ * input was a key press (see `trackInput`). Also programmatic focus by the
+ * app after a key press, like `:focus-visible` in Chrome. The same in every
+ * browser, and for every element: a mouse click on a `readonly` text field
+ * is pointer focus, though Chrome gives it `:focus-visible`.
+ *
+ * When there was no input since a drawer showed (e.g. the app focuses an
+ * element right after the click or key press that opened the drawer), the
+ * browser decides: `:focus-visible`, but never for a `readonly` or
+ * `disabled` text field (Chrome gives it `:focus-visible` after a mouse
+ * click too). A browser without `:focus-visible` (Safari before 15.4)
+ * throws; nothing then counts as keyboard focus.
+ */
+function focusInputOf(element: Element): InputType {
+  if (lastInput) return lastInput;
+  if (isInactiveTextField(element)) return 'pointer';
+  try {
+    return element.matches(':focus-visible') ? 'keyboard' : 'pointer';
+  } catch {
+    return 'pointer';
+  }
+}
+
 /**
  * Whether `element` can scroll along the axis in the direction a finger that
  * moved `movement` px (positive: down or right) pushes its content.
@@ -455,6 +533,20 @@ function isInactiveTextField(element: Element): boolean {
 }
 
 /**
+ * Whether `element` is a field the user types in: a text `<input>` or a
+ * `<textarea>` that isn't `readonly` or `disabled`, or contenteditable
+ * content. Focus on one of them opens an on-screen keyboard, also after a
+ * tap. Unlike `isEditable`, not a select or an iframe.
+ */
+function isTypingField(element: Element): boolean {
+  return (
+    isEditable(element) &&
+    !(element instanceof HTMLSelectElement) &&
+    !(element instanceof HTMLIFrameElement)
+  );
+}
+
+/**
  * Whether `element` is a field that takes text: a text `<input>` (not
  * `disabled`), a `<textarea>` or contenteditable content. Unlike
  * `isEditable`, `readonly` fields count: their text can still be selected.
@@ -752,6 +844,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #initialFocused?: Element;
   /**
+   * The element in the tray that got focus last, also inside an open shadow
+   * root, and the input that focused it (see `focusInputOf`), read when it
+   * got focus: a later key press (e.g. typing, or Space on a tapped button)
+   * doesn't make it keyboard focus. See `#onTrayFocusIn`.
+   */
+  #focused?: { element: Element; input: InputType };
+  /**
    * Set when the drawer closed and `#applyOpen` has yet to return focus:
    * whether focus was inside the drawer when it closed.
    */
@@ -1000,6 +1099,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#root?.removeEventListener('scroll', this.#onRootScroll);
       this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
       mountedDrawers.delete(this);
+      trackInput(this, false);
+      this.#focused = undefined;
       if (this.#root) {
         setPageProgress(this.#root, 0);
         unregisterDrawer(this.#root);
@@ -1340,18 +1441,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Whether focus in the tray holds a resize's scroll reset: focus on an
-   * editable element (see `isEditable`), or keyboard focus
-   * (`:focus-visible`) on any element in it, which the browser scrolled into
-   * view. Not the tray itself, which a modal drawer focuses when it opens.
-   * Also inside an open shadow root in the tray.
+   * editable element (see `isEditable`), or keyboard focus (focus after a
+   * key press, see `focusInputOf`) on any element in it, which the browser
+   * scrolled into view. Not the tray itself, which a modal drawer focuses
+   * when it opens. Also inside an open shadow root in the tray.
    *
    * Keyboard focus that the drawer gave itself (the initial focus of a
    * modal drawer, see `#activateModal`) doesn't hold it: that focus doesn't
    * scroll, so the content end of a top drawer stays at its leading edge.
    * It holds it again when focus moves. An editable element always holds
-   * it: an on-screen keyboard can open for it. A `readonly` or `disabled`
-   * text field never does: Chrome gives it `:focus-visible` also after a
-   * mouse click.
+   * it: an on-screen keyboard can open for it. A `readonly` text field
+   * holds it like any other element: after a key press, not after a click
+   * or a tap.
    */
   #focusHoldsReset(): boolean {
     const tray = this.#tray!;
@@ -1363,13 +1464,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       active = active.shadowRoot.activeElement;
     }
     if (isEditable(active)) return true;
-    if (initial || isInactiveTextField(active)) return false;
-    try {
-      return active.matches(':focus-visible');
-    } catch {
-      // A browser without `:focus-visible` (Safari before 15.4).
-      return false;
-    }
+    if (initial) return false;
+    return this.#inputOf(active) === 'keyboard';
+  }
+
+  /**
+   * The input that focused `element`, which has focus: as read when it got
+   * focus (see `#focused`), or now when the drawer didn't see that focus.
+   */
+  #inputOf(element: Element): InputType {
+    const focused = this.#focused;
+    return focused?.element === element ? focused.input : focusInputOf(element);
   }
 
   #onResize(): void {
@@ -1805,6 +1910,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const target = this.#offsetOf(this.activeSnapPoint);
     const open = target > layout.resolved[0]!.offset;
     this.#hidden = target <= 0;
+    trackInput(this, !this.#hidden);
     if (!this.#hasReportBaseline) {
       // The first open state the drawer knows (on insertion, or once a
       // drawer inserted while hidden is measured) is not a change.
@@ -2359,16 +2465,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * `#onRootFocusOut`). Not while the drawer closes to `0`. When the drawer arrives, the tray scrolls the
    * element into view if the browser didn't (see `#revealFocus`).
    *
-   * Only keyboard focus (`:focus-visible`, also for programmatic focus after
-   * a key press, such as the Tab wrap): a tap focuses what is under the
-   * finger, which shows. Not the initial focus of a modal drawer (see
-   * `#activateModal`): the drawer moves focus in itself, and the app chose
-   * the snap point it opens (or is inserted) at, so that one is kept. Browsers give text fields `:focus-visible` for every focus,
-   * so a tap on a text field that is only partly visible moves the drawer
-   * too, which shows the field above an on-screen keyboard. Not during a
-   * drag or while a touch holds the drawer, and not for the tray itself or
-   * for the content of a drawer nested in this one, whose own tray handles
-   * it.
+   * Only keyboard focus (focus after a key press, see `focusInputOf`, also
+   * programmatic focus after a key press, such as the Tab wrap): a tap
+   * focuses what is under the finger, which shows. Not the initial focus of
+   * a modal drawer (see `#activateModal`): the drawer moves focus in itself,
+   * and the app chose the snap point it opens (or is inserted) at, so that
+   * one is kept. Also any focus on a field the user types in (see
+   * `isTypingField`): a tap on a text field that is only partly visible
+   * moves the drawer too, which shows the field above an on-screen keyboard.
+   * Not a tap on a `readonly` text field, which opens no keyboard. Not
+   * during a drag or while a touch holds the drawer, and not for the tray
+   * itself or for the content of a drawer nested in this one, whose own tray
+   * handles it.
    *
    * Visibility is checked where the element will be once the drawer rests
    * at its active snap point, not where it is now: a drawer that is still
@@ -2379,6 +2487,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #onTrayFocusIn = (event: FocusEvent): void => {
     const tray = this.#tray;
     const { target, relatedTarget: from } = event;
+    // The focused element itself, also inside an open shadow root.
+    const element = event.composedPath()[0];
+    if (element instanceof Element) {
+      this.#focused = { element, input: focusInputOf(element) };
+    }
     if (
       (from instanceof HTMLElement || from instanceof SVGElement) &&
       !this.#root?.contains(from)
@@ -2399,9 +2512,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     ) {
       return;
     }
-    // The focused element itself, also inside an open shadow root.
-    const element = event.composedPath()[0];
-    if (!(element instanceof Element) || !this.#hasKeyboardFocus(element)) {
+    if (
+      !(element instanceof Element) ||
+      (this.#inputOf(element) !== 'keyboard' && !isTypingField(element))
+    ) {
       return;
     }
     const offset = this.#offsetOf(this.activeSnapPoint);
@@ -2492,19 +2606,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #onRootScroll = (): void => {
     if (!this.#destroyed) this.#resetRootScroll();
   };
-
-  /**
-   * Whether `element` has keyboard focus: it matches `:focus-visible`. A
-   * browser without `:focus-visible` (Safari before 15.4) throws; nothing
-   * then counts as keyboard focus.
-   */
-  #hasKeyboardFocus(element: Element): boolean {
-    try {
-      return element.matches(':focus-visible');
-    } catch {
-      return false;
-    }
-  }
 
   /**
    * The part of the root that the tray covers along the axis, in screen px,

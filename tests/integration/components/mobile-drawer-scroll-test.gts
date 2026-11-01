@@ -51,14 +51,38 @@ function el(selector: string): HTMLElement {
 
 const tray = () => el('.mobile-drawer__tray');
 
+/** Gives the input before a focus, see `focus`. */
+function inputBefore(element: HTMLElement, visible: boolean): () => void {
+  if (visible) {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Shift',
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return () => {};
+  }
+  const init = { bubbles: true, composed: true, pointerId: 1 };
+  element.dispatchEvent(new PointerEvent('pointerdown', init));
+  return () => element.dispatchEvent(new PointerEvent('pointerup', init));
+}
+
 /**
- * Focuses `element` as the keyboard (`visible`, with a focus ring) or a
- * pointer does: test events are not trusted, so they don't count for the
- * browser's `:focus-visible` heuristics. `focusVisible` isn't in
- * TypeScript's `FocusOptions` yet; the tests check `:focus-visible`.
+ * Focuses `element` as the keyboard (`visible`) or a pointer does. A key
+ * press or a pointer that goes down comes first (the drawer reads the last
+ * input, see `focusInputOf`): a `keydown` of Shift (a key the drawer doesn't
+ * handle, unlike Tab, so the test moves focus itself) on the element that
+ * has focus, or a `pointerdown` on `element` (with its `pointerup` after the
+ * focus, as a tap). Test events are not trusted, so they don't count for the
+ * browser's `:focus-visible` heuristics: the focus also asks for a focus
+ * ring or not. `focusVisible` isn't in TypeScript's `FocusOptions` yet.
  */
-const focus = (element: HTMLElement, visible: boolean) =>
+function focus(element: HTMLElement, visible: boolean): void {
+  const up = inputBefore(element, visible);
   element.focus({ focusVisible: visible } as FocusOptions);
+  up();
+}
 
 /** Scrolls `element` along the drawer's axis to its start, middle or end. */
 function scrollTo(
@@ -1834,16 +1858,20 @@ module(
           Object.assign(document.createElement('textarea'), { readOnly: true }),
       ],
     ] as const) {
-      test(`${name} in the tray with :focus-visible does not hold the reset`, async function (assert) {
+      test(`${name} in the tray that a click focuses does not hold the reset, also with :focus-visible`, async function (assert) {
         const state = new State();
         state.active = 1;
         await renderDrawer(state);
         const element = create();
         el('.mobile-drawer__content').prepend(element);
-        // As a mouse click on it does in Chrome: focus with a focus ring.
-        focus(element, true);
+        // As a mouse click on it does in Chrome: a pointer goes down, and
+        // the field gets focus with a focus ring.
+        const init = { bubbles: true, pointerId: 1 };
+        element.dispatchEvent(new PointerEvent('pointerdown', init));
+        element.focus({ focusVisible: true } as FocusOptions);
+        element.dispatchEvent(new PointerEvent('pointerup', init));
         assert.strictEqual(document.activeElement, element, 'focused');
-        assert.true(element.matches(':focus-visible'), 'keyboard focus');
+        assert.true(element.matches(':focus-visible'), 'a focus ring');
         tray().scrollTop = 100;
 
         await resize(state, 1100);
@@ -1851,7 +1879,73 @@ module(
         assert.strictEqual(tray().scrollTop, 0, 'reset');
         element.remove();
       });
+
+      test(`${name} in the tray that a key press focuses holds the reset`, async function (assert) {
+        const state = new State();
+        state.active = 1;
+        await renderDrawer(state);
+        const element = create();
+        // Where it shows: keyboard focus on a field off screen would move
+        // the drawer to its highest snap point.
+        el('.mobile-drawer__content').prepend(element);
+        focus(element, true);
+        assert.strictEqual(document.activeElement, element, 'focused');
+        tray().scrollTop = 100;
+
+        await resize(state, 1100);
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, 100, 'kept');
+
+        element.blur();
+        await resize(state, 1200);
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, 0, 'reset after the blur');
+        element.remove();
+      });
     }
+
+    test('a key press after a tap on a button does not make it hold the reset', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const button = document.createElement('button');
+      button.textContent = 'At the start';
+      el('.mobile-drawer__content').prepend(button);
+      focus(button, false);
+      // The focus stays where the tap put it: the browser didn't scroll.
+      button.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }),
+      );
+      assert.strictEqual(document.activeElement, button, 'still focused');
+      tray().scrollTop = 100;
+
+      await resize(state, 1100);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'reset');
+      button.remove();
+    });
+
+    test('a button that the app focuses after a key press holds the reset, also without :focus-visible', async function (assert) {
+      const state = new State();
+      state.active = 1;
+      await renderDrawer(state);
+      const button = document.createElement('button');
+      button.textContent = 'At the start';
+      el('.mobile-drawer__content').prepend(button);
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      // Programmatic focus: the key press counts, not the browser's focus
+      // ring, so the result is the same in every browser.
+      button.focus({ focusVisible: false } as FocusOptions);
+      assert.false(button.matches(':focus-visible'), 'no focus ring');
+      tray().scrollTop = 100;
+
+      await resize(state, 1100);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 100, 'kept');
+      button.remove();
+    });
 
     test('a disabled text input in the tray does not hold the reset', async function (assert) {
       const state = new State();
