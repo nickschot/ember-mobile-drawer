@@ -31,10 +31,14 @@
  * it (see styles.css). It changes nothing that is in the drawer: the field
  * and the content don't move.
  *
- * The strip is `-top` of the root's client rect: the screen is as high as
- * the layout viewport, from the top of the visual viewport. Other browsers
- * (e.g. Chrome) keep the client coordinates in the layout viewport, so the
- * root's top is 0 there, also with a keyboard open, and nothing is filled.
+ * The strip is as high as the layout viewport's top is above the visual
+ * viewport's: the screen is as high as the layout viewport, and the root
+ * ends at its bottom. That is the root's computed `top` (its offset in the
+ * layout viewport, e.g. 5px with `@transparentStatusBar`, #124) minus the
+ * top of its client rect; `-top` of the client rect alone would make the
+ * fill that offset too short. Other browsers (e.g. Chrome) keep the client
+ * coordinates in the layout viewport, so the root's client top is its
+ * computed `top` there, also with a keyboard open, and nothing is filled.
  * Only while the visual viewport is lower than the root, the page isn't
  * zoomed in (a pinch zoom also moves the visual viewport) and the root is
  * `position: fixed` (an embedded drawer's root is in the page, and can be
@@ -250,8 +254,12 @@ export class KeyboardFill {
     if ((viewport.scale ?? 1) > 1.01) return undefined;
     const rect = root.getBoundingClientRect();
     if (viewport.height >= rect.height - MIN_STRIP) return undefined;
-    if (getComputedStyle(root).position !== 'fixed') return undefined;
-    const height = -rect.top;
+    const style = getComputedStyle(root);
+    if (style.position !== 'fixed') return undefined;
+    // The root's own offset from the top of the layout viewport (e.g. the
+    // 5px of `@transparentStatusBar`): its client top without it is the
+    // top of the layout viewport, and so of the screen.
+    const height = (parseFloat(style.top) || 0) - rect.top;
     if (height < MIN_STRIP) return undefined;
     return { top: rect.bottom, height };
   }
