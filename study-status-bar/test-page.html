@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>status bar study</title>
+<script>
+  const P = new URLSearchParams(location.search);
+  const V = P.get('v') || '1';
+  if (P.get('theme')) {
+    const m = document.createElement('meta'); m.name = 'theme-color'; m.content = P.get('theme');
+    document.head.appendChild(m);
+  }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html { background: #fff; }
+  body { margin: 0; font: 16px/1.3 -apple-system, sans-serif; }
+  .blk { height: 120px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 22px; }
+  .hud { position: absolute; left: 50%; transform: translateX(-50%); }
+  /* drawer pieces */
+  .root { position: fixed; inset: 0; z-index: 10; }
+  .root.contain { contain: layout; }
+  .backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; height: 45%; background: #fff; border-radius: 16px 16px 0 0; padding: 16px; font-size: 14px; }
+  .strip { position: fixed; inset: 0 0 auto; height: 16px; padding-bottom: 16px; background-clip: content-box; z-index: 1; pointer-events: none; }
+  @keyframes move { 0%,100% { height: 30%; } 50% { height: 70%; } }
+  @keyframes dim { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
+  .anim .sheet { animation: move 6s ease-in-out infinite; }
+  .anim .backdrop { animation: dim 6s ease-in-out infinite; }
+</style>
+</head>
+<body>
+<div id="page"></div>
+<script>
+  const colors = ['#e53935','#fb8c00','#fdd835','#43a047','#00acc1','#1e88e5','#5e35b1','#d81b60'];
+  const page = document.getElementById('page');
+  for (let i = 0; i < 40; i++) {
+    const d = document.createElement('div'); d.className = 'blk';
+    d.style.background = colors[i % colors.length]; d.textContent = 'Block ' + i;
+    page.appendChild(d);
+  }
+  const html = document.documentElement, body = document.body;
+  function lockFixed() {
+    const y = scrollY;
+    body.style.position = 'fixed'; body.style.top = -y + 'px'; body.style.left = '0'; body.style.right = '0';
+    html.style.overflow = 'hidden';
+  }
+  function lockOverflow() { html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; }
+  function el(cls, parent, css) { const e = document.createElement('div'); e.className = cls; if (css) e.style.cssText = css; (parent || body).appendChild(e); return e; }
+  function drawer({ backdropCss = '', strip = null, rootCss = '', backdropCls = 'backdrop', parent = body, rootCls = 'root contain' } = {}) {
+    const root = el(rootCls, parent, rootCss);
+    const bd = el(backdropCls, root, backdropCss);
+    const sh = el('sheet', root);
+    if (P.get('sh') === 'full') { sh.style.top = OFF + 'px'; sh.style.height = 'auto'; }
+    if (P.get('sh') === 'full0') { sh.style.top = '0'; sh.style.height = 'auto'; }
+    sh.innerHTML = '<b>Variant ' + V + '</b><br>' + (DESC[V] || '') + '<br><span id=m></span>';
+    if (strip) el('strip', root, 'background-color:' + strip);
+    if (P.get('anim')) root.classList.add('anim');
+    return root;
+  }
+  const DESC = {
+    '1': 'baseline, no fixed element',
+    '2': 'current: fixed root + full backdrop + body fixed + tint strip',
+    '2b': 'current without strip',
+    '3': 'backdrop top: OFFSET px, html/body overflow hidden',
+    '4': 'backdrop top: OFFSET px, body fixed',
+    '5a': 'alpha 0 strip at top, backdrop top OFFSET, overflow lock',
+    '5b': 'alpha 0 strip over full backdrop, overflow lock',
+    '5c': 'alpha .01 strip, backdrop top OFFSET, overflow lock',
+    '6a': 'absolute backdrop over document, overflow lock',
+    '6b': 'absolute backdrop, body fixed',
+    '7a': 'theme-color + no fixed at top (as 3)',
+    '7b': 'sticky full-height backdrop',
+    '7c': 'backdrop-filter strip at top (no dim)',
+    '7d': 'backdrop top OFFSET + absolute dim over document behind it',
+    '7e': 'top OFFSET backdrop + box-shadow upward',
+  };
+  const OFF = P.get('off') || '10';
+  for (const k in DESC) DESC[k] = DESC[k].replace('OFFSET', OFF);
+  addEventListener('load', () => {
+    window.scrollTo(0, +(P.get('y') || 900));
+    setTimeout(apply, 300);
+  });
+  function apply() {
+    if (V === 'x') {
+      const lock = P.get('lock') || 'overflow', bd = P.get('bd') || 'off', shp = P.get('sheet') || '40', strip = P.get('strip'), rootp = P.get('root') || 'off';
+      if (lock === 'fixed') lockFixed(); else if (lock === 'overflow') lockOverflow();
+      const desc = `shadow=${P.get('shadow')||0} absdim=${P.get('absdim')||0} lock=${lock} root=${rootp} bd=${bd} sheet=${shp} strip=${strip||'none'} off=${OFF}`;
+      const root = el('root contain', body, rootp === 'off' ? 'top:' + OFF + 'px' : '');
+      // children are fixed: position relative to viewport (contain: layout makes root the containing block, so use root-relative values)
+      const t = rootp === 'off' ? -OFF : 0; // offset to reach viewport top from root
+      const vtop = (v) => (v + t) + 'px';
+      if (bd !== 'none') el('backdrop', root, 'top:' + (bd === 'off' ? vtop(+OFF) : vtop(0)) + (P.get('shadow') ? ';box-shadow:0 -' + (+OFF + 2) + 'px 0 0 rgb(0 0 0 / 0.4)' : '') + (P.get('bdbg') ? ';background:' + P.get('bdbg') : ''));
+      if (P.get('absdim')) el('', body, 'position:absolute;left:0;right:0;top:0;height:' + document.documentElement.scrollHeight + 'px;background:rgb(0 0 0 / 0.4);z-index:5;pointer-events:none');
+      if (shp !== 'none') {
+        const sh = el('sheet', root);
+        if (shp === 'full0') { sh.style.top = vtop(0); sh.style.height = 'auto'; }
+        if (shp === 'fulloff') { sh.style.top = vtop(+OFF); sh.style.height = 'auto'; }
+        sh.innerHTML = '<b>' + desc + '</b><br><span id=m></span>';
+      }
+      if (strip) el('strip', root, 'top:' + vtop(0) + ';background-color:' + strip);
+      if (P.get('anim')) root.classList.add('anim');
+      if (shp === 'none') { const m = el('', body, 'position:absolute;top:' + (scrollY + 300) + 'px;left:20px;right:20px;background:#fff;padding:12px;border-radius:12px'); m.textContent = desc; }
+    }
+    switch (V) {
+      case '1': {
+        const m = el('', body, 'position:absolute;top:' + (scrollY + 300) + 'px;left:20px;right:20px;background:#fff;padding:12px;border-radius:12px');
+        m.textContent = 'Variant 1: ' + DESC['1']; break;
+      }
+      case '2': lockFixed(); drawer({ strip: 'rgb(0 0 0 / 0.4)' }); break;
+      case '2b': lockFixed(); drawer(); break;
+      case '3': case '7a': lockOverflow(); drawer({ backdropCss: 'top:' + OFF + 'px' }); break;
+      case '4': lockFixed(); drawer({ backdropCss: 'top:' + OFF + 'px' }); break;
+      case '5a': lockOverflow(); drawer({ backdropCss: 'top:' + OFF + 'px', strip: 'rgb(0 0 0 / 0)' }); break;
+      case '5b': lockOverflow(); drawer({ strip: 'rgb(0 0 0 / 0)' }); break;
+      case '5c': lockOverflow(); drawer({ backdropCss: 'top:' + OFF + 'px', strip: 'rgb(0 0 0 / 0.01)' }); break;
+      case '6a': case '6b': {
+        if (V === '6b') lockFixed(); else lockOverflow();
+        const h = document.documentElement.scrollHeight;
+        // root not fixed: absolute over whole document
+        const root = el('', body, 'position:absolute;left:0;right:0;top:0;height:' + h + 'px;z-index:10');
+        el('', root, 'position:absolute;inset:0;background:rgb(0 0 0 / 0.4)');
+        const y = V === '6b' ? -parseFloat(body.style.top) : scrollY;
+        const sh = el('sheet', root, 'position:absolute;top:' + (y + innerHeight * 0.55) + 'px;height:' + (innerHeight * 0.45) + 'px;bottom:auto');
+        sh.innerHTML = '<b>Variant ' + V + '</b><br>' + DESC[V];
+        break;
+      }
+      case '7b': {
+        html.style.overflow = 'hidden';
+        const s = el('', body, 'position:sticky;top:0;height:100lvh;background:rgb(0 0 0 / 0.4);z-index:10');
+        page.before(s); s.style.marginTop = '0'; s.style.marginBottom = '-100vh';
+        drawer({ backdropCls: 'none' });
+        break;
+      }
+      case '7c': lockOverflow(); drawer({ backdropCss: 'top:' + OFF + 'px' }); el('strip', body, 'background:rgb(0 0 0 / 0.01);-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px);z-index:20;padding:0;height:16px'); break;
+      case '7d': {
+        lockOverflow();
+        el('', body, 'position:absolute;left:0;right:0;top:0;height:' + document.documentElement.scrollHeight + 'px;background:rgb(0 0 0 / 0.4);z-index:5');
+        drawer({ backdropCss: 'top:' + OFF + 'px;background:transparent' });
+        break;
+      }
+      case '7e': lockOverflow(); drawer({ backdropCss: 'top:' + OFF + 'px;box-shadow:0 -' + OFF + 'px 0 0 rgb(0 0 0 / 0.4)' }); break;
+    }
+    const m = document.getElementById('m');
+    if (m) m.textContent = 'innerH ' + innerHeight + ' scrollY ' + scrollY + ' sat ' + getComputedStyle(document.documentElement).getPropertyValue('--x');
+  }
+</script>
+</body>
+</html>
