@@ -3,6 +3,7 @@ import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
+import { statusBar } from '../lib/status-bar.ts';
 
 const ITEMS = Array.from({ length: 30 }, (_, index) => ({
   title: `Place ${index + 1}`,
@@ -36,6 +37,7 @@ export default class BottomSheetExample extends Component {
     </button>
 
     <MobileDrawer
+      @transparentStatusBar={{statusBar.transparent}}
       @placement="bottom"
       @snapPoints={{this.snapPoints}}
       @activeSnapPoint={{this.active}}

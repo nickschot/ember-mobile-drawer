@@ -11,6 +11,7 @@ import {
   type Placement,
   type SnapPoint,
 } from '#src/index.ts';
+import { statusBar } from '../lib/status-bar.ts';
 import { formatSnapPoints, parseSnapPoints } from '../lib/parse-snap-points.ts';
 import {
   CUSTOM,
@@ -147,6 +148,7 @@ export default class DrawerDemo extends Component<{
         ? ['@closeOnBackdropClick={{false}}']
         : []),
       ...(this.springPreset === 'default' ? [] : ['@spring={{this.spring}}']),
+      ...(statusBar.transparent ? ['@transparentStatusBar={{true}}'] : []),
     ];
     const lines = [
       `snapPoints: SnapPoint[] = [${formatSnapPoints(this.snapPoints)}];`,
@@ -222,6 +224,11 @@ export default class DrawerDemo extends Component<{
     this.tall = (event.target as HTMLInputElement).checked;
   };
 
+  /** For every demo drawer, see `statusBar`. */
+  setTransparentStatusBar = (event: Event) => {
+    statusBar.transparent = (event.target as HTMLInputElement).checked;
+  };
+
   /** Like the drawer's default, the backdrop follows the modal setting. */
   setModal = (event: Event) => {
     this.modal = (event.target as HTMLInputElement).checked;
@@ -293,6 +300,7 @@ export default class DrawerDemo extends Component<{
   <template>
     <div class="demo-playground-drawer" style={{this.drawerStyle}}>
       <MobileDrawer
+        @transparentStatusBar={{statusBar.transparent}}
         @placement={{this.placement}}
         @snapPoints={{this.snapPoints}}
         @activeSnapPoint={{this.active}}
@@ -434,6 +442,14 @@ export default class DrawerDemo extends Component<{
           {{on "change" this.setModal}}
         />
         Modal (@modal: focus trap, inert page, Escape closes)
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={{statusBar.transparent}}
+          {{on "change" this.setTransparentStatusBar}}
+        />
+        Transparent iOS status bar (@transparentStatusBar, all demo drawers)
       </label>
       <label>
         <input
