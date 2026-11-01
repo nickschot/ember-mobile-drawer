@@ -24,8 +24,11 @@
  *   element between the touch and the allowed element can scroll further in
  *   the direction of the swipe, so the swipe can't chain to (or rubber-band)
  *   the page. The page keeps its scroll position: a scroll of the page
- *   while locked (iOS does that to show a focused text field above the
- *   on-screen keyboard) is undone at once, and again on unlock.
+ *   while locked is undone at once, and again on unlock. Not while a text
+ *   field in a drawer has focus (the on-screen keyboard): iOS scrolls the
+ *   visual viewport to show the field, which moves the fixed drawer with
+ *   it, as with the fixed `<body>`. The page goes back when the field loses
+ *   focus or the keyboard closes (#116).
  *
  * @module
  * @internal
@@ -88,16 +91,71 @@ let lastTouch: { x: number; y: number } | undefined;
 let pinned: { x: number; y: number } | undefined;
 
 /**
- * iOS still scrolls the page with `overflow: hidden`, to show a focused text
- * field above the on-screen keyboard (the field is in the fixed drawer, so
- * that only moves the page behind it). Scroll it back at once.
+ * Whether the on-screen keyboard is (or is about to be) open: the visual
+ * viewport is shorter than the layout viewport (pinch zoom aside), or a
+ * field the user types in has focus in one of the locked drawers.
  */
-const onScroll = (): void => {
+function keyboardOpen(): boolean {
+  const viewport = window.visualViewport;
+  if (viewport && viewport.height * viewport.scale < window.innerHeight - 1) {
+    return true;
+  }
+  return typingFieldFocused();
+}
+
+/** Whether a field the user types in has focus in a locked drawer. */
+function typingFieldFocused(): boolean {
+  const active = document.activeElement;
+  return (
+    active instanceof HTMLElement &&
+    (active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLInputElement ||
+      active.isContentEditable) &&
+    allowed.some((element) => element.contains(active))
+  );
+}
+
+/** Scrolls the page back to where it was when it was locked. */
+function restorePinned(): void {
   if (!pinned) return;
   const { x, y } = pinned;
   if (window.scrollX !== x || window.scrollY !== y) {
     window.scrollTo({ left: x, top: y, behavior: 'instant' });
   }
+}
+
+/**
+ * iOS still scrolls the page with `overflow: hidden`: to show a focused text
+ * field above the on-screen keyboard, it moves the visual viewport (and with
+ * it `scrollY`) so that the field is in the middle of the part that the
+ * keyboard doesn't cover. The fixed drawer moves with the visual viewport, so
+ * that is what shows the field (the #71 lock gets the same scroll, see
+ * #116). Thus while the keyboard is open, the scroll stays: scrolling it back
+ * hid the field and made the sheet jump. Any other scroll of the page is
+ * undone at once. When the keyboard closes, the page goes back to its
+ * position (see `onViewportResize`).
+ */
+const onScroll = (): void => {
+  if (!pinned || keyboardOpen()) return;
+  restorePinned();
+};
+
+/** The keyboard closed: put the page back where it was. */
+const onViewportResize = (): void => {
+  if (!pinned || keyboardOpen()) return;
+  restorePinned();
+};
+
+/**
+ * Focus left a field in a drawer, and not for another one: put the page back
+ * at once, as iOS does with the #71 lock, and not only once the keyboard
+ * has closed.
+ */
+const onFocusOut = (): void => {
+  // `activeElement` is the new focus only after the focusout.
+  setTimeout(() => {
+    if (pinned && !typingFieldFocused()) restorePinned();
+  }, 0);
 };
 
 const onTouchStart = (event: TouchEvent): void => {
@@ -182,6 +240,8 @@ function lock(): Saved {
     body.style.overscrollBehavior = 'none';
     pinned = { x, y };
     window.addEventListener('scroll', onScroll, { passive: true });
+    window.visualViewport?.addEventListener('resize', onViewportResize);
+    document.addEventListener('focusout', onFocusOut);
     document.addEventListener('touchstart', onTouchStart, { passive: true });
     document.addEventListener('touchmove', onTouchMoveOverflow, {
       passive: false,
@@ -209,6 +269,8 @@ function unlock(state: Saved): void {
   const { position, overflow } = state;
   if (overflow) {
     window.removeEventListener('scroll', onScroll);
+    window.visualViewport?.removeEventListener('resize', onViewportResize);
+    document.removeEventListener('focusout', onFocusOut);
     document.removeEventListener('touchstart', onTouchStart);
     document.removeEventListener('touchmove', onTouchMoveOverflow);
     lastTouch = undefined;

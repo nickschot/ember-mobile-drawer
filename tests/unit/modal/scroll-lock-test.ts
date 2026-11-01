@@ -100,6 +100,46 @@ module(
       release();
     });
 
+    test('keeps the scroll of a focused field (keyboard), else scrolls back', async function (assert) {
+      const spacer = document.createElement('div');
+      spacer.style.height = `${window.innerHeight + 2000}px`;
+      fixture.append(spacer);
+      const input = document.createElement('input');
+      tray.append(input);
+      const scrolled = () =>
+        new Promise<void>((resolve) => {
+          window.addEventListener('scroll', () => setTimeout(resolve, 0), {
+            once: true,
+          });
+        });
+      const start = window.scrollY;
+      window.scrollTo({ top: start + 100, behavior: 'instant' });
+      const y = window.scrollY;
+      const release = lockBodyScroll(tray);
+      // The test page has `overflow: hidden` now; scripts can still scroll.
+      let event = scrolled();
+      window.scrollTo({ top: y + 300, behavior: 'instant' });
+      await event;
+      assert.strictEqual(window.scrollY, y, 'other scrolls are undone');
+
+      input.focus();
+      event = scrolled();
+      window.scrollTo({ top: y + 300, behavior: 'instant' });
+      await event;
+      assert.strictEqual(
+        window.scrollY,
+        y + 300,
+        'the scroll that shows a focused field stays',
+      );
+
+      event = scrolled();
+      input.blur();
+      await event;
+      assert.strictEqual(window.scrollY, y, 'restored when the field blurs');
+      release();
+      window.scrollTo({ top: start, behavior: 'instant' });
+    });
+
     test('the default iOS lock still fixes <body>', function (assert) {
       delete drawerEnvironment.iosScrollLock;
       const release = lockBodyScroll(tray);

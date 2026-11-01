@@ -8,6 +8,8 @@
  * - `?modal=0`: the "Scroll lock test" drawer isn't modal.
  * - `?scroll=<id>` (with `debug=1`): scrolls to that element after load,
  *   e.g. `scroll=example-lock-spike`.
+ * - `?log=<url>` (with `debug=1`): sends the measurements to that URL, see
+ *   `logSample`.
  *
  * Read once, when this module loads (before the app renders).
  */
@@ -34,6 +36,64 @@ drawerEnvironment.iosScrollLock = lockSpike.lock;
  *   lock state changed, so over all gestures while the drawer is open. If
  *   the page never moved, min = max = `page`; else it shows `MOVED`.
  */
+/**
+ * `?log=<url>` (with `debug=1`): sends a line to that URL (GET, `?l=`) each
+ * time the viewport, the page or the sheet moves, for measurements in the
+ * iOS Simulator. Not for real use.
+ */
+const logUrl = params.get('log');
+let lastSample = '';
+let pending: string[] = [];
+const start = performance.now();
+function logSample(page: number, tag = 'raf'): void {
+  const viewport = window.visualViewport;
+  const tray = document
+    .querySelector('#lock-spike-title')
+    ?.closest('.mobile-drawer__tray');
+  const field = document.querySelector('.lock-spike-fields input');
+  const r = (n: number | undefined) => Math.round(n ?? NaN);
+  const trayRect = tray?.getBoundingClientRect();
+  const fieldRect = field?.getBoundingClientRect();
+  const sample = [
+    `vvTop=${r(viewport?.offsetTop)}`,
+    `vvH=${r(viewport?.height)}`,
+    `ih=${window.innerHeight}`,
+    `sY=${r(window.scrollY)}`,
+    `page=${page}`,
+    `tray=${r(trayRect?.top)}..${r(trayRect?.bottom)}`,
+    `field=${r(fieldRect?.top)}..${r(fieldRect?.bottom)}`,
+    `focus=${document.activeElement?.tagName ?? '-'}`,
+  ].join(' ');
+  if (tag === 'raf') {
+    if (sample === lastSample) return;
+    lastSample = sample;
+  }
+  pending.push(`${Math.round(performance.now() - start)} ${tag} ${sample}`);
+  if (pending.length === 1) {
+    setTimeout(() => {
+      const lines = pending.join('\n');
+      pending = [];
+      void fetch(`${logUrl}?l=${encodeURIComponent(lines)}`, {
+        mode: 'no-cors',
+      }).catch(() => {});
+    }, 100);
+  }
+}
+
+if (logUrl) {
+  const pageTop = () =>
+    Math.round(
+      document.querySelector('.demo-page')?.getBoundingClientRect().top ?? NaN,
+    );
+  window.addEventListener('scroll', () => logSample(pageTop(), 'ev:scroll'));
+  window.visualViewport?.addEventListener('scroll', () =>
+    logSample(pageTop(), 'ev:vvscroll'),
+  );
+  window.visualViewport?.addEventListener('resize', () =>
+    logSample(pageTop(), 'ev:vvresize'),
+  );
+}
+
 function startDebugLabel(): void {
   const label = document.createElement('div');
   label.className = 'demo-lock-debug';
@@ -67,6 +127,7 @@ function startDebugLabel(): void {
       touchMax = Math.max(touchMax, top);
     }
     const viewport = window.visualViewport;
+    if (logUrl) logSample(top);
     label.textContent = [
       `lock=${lockSpike.lock} ${locked ? 'LOCKED' : 'free'}`,
       `scrollY=${Math.round(window.scrollY)} page=${top}`,
