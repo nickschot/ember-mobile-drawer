@@ -82,12 +82,25 @@ const OPENING_DIRECTION: Record<Placement, 1 | -1> = {
 };
 
 /**
- * Rubber-band dimension (px) past the largest snap point: the most the tray
- * can be pulled past fully open. Small, because the tray then leaves its
- * edge and the backdrop shows in the gap. Past the smallest snap point the
- * container size is used.
+ * The rubber band past the largest snap point, like the content of an iOS
+ * sheet: the classic UIScrollView curve `(1 - 1 / (x * c / d + 1)) * d` with
+ * `c = DEFAULT_RUBBER_BAND_FACTOR` (0.55) and a dimension `d` of this ratio
+ * times the tray's length (the scroll container's size along the axis).
+ * Measured in the iOS 27 simulator (iPhone 17e): a sheet at its largest
+ * detent doesn't move, its content bounces with c ≈ 0.55 and d ≈ 440pt for
+ * a scroll view of about 800pt, so d ≈ 0.55 × the scroll view's size. Past
+ * the tray's length only the content moves (see `#renderBounce`); the tray
+ * stays at its edge. Past the smallest snap point the container size is
+ * used.
  */
-const OPEN_RUBBER_BAND = 24;
+const OPEN_RUBBER_BAND_RATIO = 0.55;
+
+/**
+ * Marks an element in `.mobile-drawer__content` that stays at the tray's
+ * edge while the content bounces past fully open, such as a sticky grabber
+ * or header: the component writes the opposite `translate` on it.
+ */
+const PINNED_ATTRIBUTE = 'data-mobile-drawer-pinned';
 
 /**
  * Marks an element inside the tray as a scroll container for scroll vs drag
@@ -424,8 +437,9 @@ const clampIndex = (index: number, count: number) =>
  *
  * The tray can be dragged with touch or pen input along the drawer's axis
  * (through `didPan` from ember-gesture-modifiers). It follows the finger 1:1,
- * with rubber-band resistance past the first and last snap point (stiff past
- * the last one: at most `OPEN_RUBBER_BAND` px). On release the drawer's
+ * with rubber-band resistance past the first and last snap point. Past the
+ * last one the tray stays at its edge and its content bounces, like an iOS
+ * sheet (see `OPEN_RUBBER_BAND_RATIO` and `#renderBounce`). On release the drawer's
  * velocity is handed to the spring and the snap point nearest to where the
  * release would carry the drawer is picked; a release faster than
  * `FLING_VELOCITY` always moves at least one snap point its way. A touch
@@ -537,6 +551,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   #root?: HTMLElement;
   #tray?: HTMLElement;
+  #content?: HTMLElement;
+  /** Whether the content is moved past fully open, see `#renderBounce`. */
+  #bouncing = false;
+  /** The pinned elements while bouncing, see `PINNED_ATTRIBUTE`. */
+  #pinned: HTMLElement[] = [];
+  /** The content's inline `will-change` before a bounce, put back after. */
+  #contentWillChange?: { value: string; priority: string };
   #backdrop?: HTMLElement;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
@@ -773,6 +794,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#root = root;
       this.#tray = root.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__tray',
+      )!;
+      this.#content = this.#tray.querySelector<HTMLElement>(
+        ':scope > .mobile-drawer__content',
       )!;
       const { clock } = drawerEnvironment;
       this.#clock = clock;
@@ -1313,7 +1337,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#overshoot = clamp(open - layout.trayLength, 0, this.#overshoot);
     }
     this.#renderedOffset = open;
-    const distance = layout.trayLength - open;
+    // Past the tray's length the tray stays at its edge; the content moves
+    // on inside it (see `#renderBounce`).
+    const distance = Math.max(0, layout.trayLength - open);
     const transform = {
       bottom: `translate3d(0, ${distance}px, 0)`,
       top: `translate3d(0, ${-distance}px, 0)`,
@@ -1322,6 +1348,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }[this.placement];
 
     this.#tray!.style.transform = transform;
+    this.#renderBounce(Math.max(0, open - layout.trayLength));
     const atTop = open >= layout.maxOffset - EPSILON;
     if (atTop !== this.#atTop) {
       this.#atTop = atTop;
@@ -1354,6 +1381,64 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
+   * Moves the content `bounce` px past fully open, in the opening direction,
+   * with an inline `translate` on `.mobile-drawer__content` (the individual
+   * property, so it composes with an app `transform` there). The tray stays
+   * at its edge and clips the content. Pinned elements (`PINNED_ATTRIBUTE`)
+   * get the opposite `translate`, so they stay at the tray's edge. Runs every
+   * frame; it only writes inline styles. While the content is moved it gets
+   * `will-change: translate` (its own layer, so a frame doesn't paint it
+   * again) and scrolling along the axis is locked (`#syncScrollLock`): the
+   * moved content widens the scrollable overflow of a top or left tray for
+   * the moment, and no scroll may start on top of the bounce.
+   */
+  #renderBounce(bounce: number): void {
+    const content = this.#content;
+    if (!content) return;
+    const bouncing = bounce > 0;
+    const value = (b: number) =>
+      bouncing
+        ? {
+            bottom: `0px ${-b}px`,
+            top: `0px ${b}px`,
+            left: `${b}px 0px`,
+            right: `${-b}px 0px`,
+          }[this.placement]
+        : '';
+    if (bouncing !== this.#bouncing) {
+      this.#bouncing = bouncing;
+      const { style } = content;
+      if (bouncing) {
+        this.#contentWillChange = {
+          value: style.getPropertyValue('will-change'),
+          priority: style.getPropertyPriority('will-change'),
+        };
+        style.setProperty('will-change', 'translate');
+        this.#pinned = Array.from(
+          content.querySelectorAll<HTMLElement>(`[${PINNED_ATTRIBUTE}]`),
+        ).filter(
+          (element) => element.closest('.mobile-drawer__content') === content,
+        );
+      } else {
+        const saved = this.#contentWillChange;
+        style.setProperty('will-change', saved?.value ?? '', saved?.priority);
+        this.#contentWillChange = undefined;
+        for (const element of this.#pinned) element.style.translate = '';
+        this.#pinned = [];
+      }
+      this.#syncScrollLock();
+    }
+    const translate = value(bounce);
+    if (content.style.translate !== translate) {
+      content.style.translate = translate;
+    }
+    if (bouncing) {
+      const opposite = value(-bounce);
+      for (const element of this.#pinned) element.style.translate = opposite;
+    }
+  }
+
+  /**
    * Locks scrolling along the axis below the highest snap point, so the
    * content and the drag never fight there: the tray and the marked scroll
    * containers in it (`data-mobile-drawer-scroll`, not those of a nested
@@ -1377,7 +1462,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #syncScrollLock(): void {
     const tray = this.#tray;
     if (!tray) return;
-    const lock = !this.#destroyed && !this.#atTop;
+    const lock = !this.#destroyed && (!this.#atTop || this.#bouncing);
     const property = this.axis === 'vertical' ? 'overflow-y' : 'overflow-x';
     this.#scrollLockProperty = lock ? property : undefined;
     for (const [element, saved] of this.#scrollLock) {
@@ -1956,10 +2041,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * Where the drag puts the drawer after the finger moved `delta` px (in
    * drawer px, positive opens) since the drag started: 1:1 inside the snap
    * range and back towards it, rubber-banded outside it (stiff past fully
-   * open, see `OPEN_RUBBER_BAND`). See `dragOffset`.
+   * open like an iOS sheet's content, see `OPEN_RUBBER_BAND_RATIO`). See
+   * `dragOffset`.
    */
   #dragOffset(drag: Drag, delta: number): number {
-    const { resolved, container } = this.#layout!;
+    const { resolved, container, trayLength } = this.#layout!;
     return dragOffset(
       drag.startOffset,
       delta,
@@ -1967,7 +2053,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       resolved[resolved.length - 1]!.offset,
       {
         below: { dimension: container },
-        above: { dimension: OPEN_RUBBER_BAND },
+        above: { dimension: trayLength * OPEN_RUBBER_BAND_RATIO },
       },
     );
   }

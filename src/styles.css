@@ -98,11 +98,9 @@
  *                             right:  translate3d( Npx, 0, 0)
  *                           where trayLength is the tray's untransformed
  *                           height (bottom/top) or width (left/right). N is
- *                           negative while the user drags the drawer past
- *                           fully open (rubber-banding) and while it springs
- *                           back from there: the tray then leaves its edge
- *                           and the backdrop shows in the gap. The band is
- *                           stiff there, so the gap stays under 24px. Use a
+ *                           never negative: past fully open the tray stays
+ *                           at its edge and only its content moves (see
+ *                           .mobile-drawer__content). Use a
  *                           fractional size from getComputedStyle (its px
  *                           height/width), not the rounded offsetHeight/
  *                           offsetWidth, so no sliver stays visible when
@@ -152,6 +150,27 @@
  *                           `content` snap point, measure the tray's natural
  *                           (untransformed) size rather than this element,
  *                           so tray padding and borders are included.
+ *                           Past fully open the content bounces, like the
+ *                           content of an iOS sheet: the component writes an
+ *                           inline `translate` (the individual property) on
+ *                           it, every frame, in the opening direction, and
+ *                           removes it when the content is back. The tray
+ *                           stays at its edge and clips the content. An app
+ *                           `transform` on the content still applies (the
+ *                           `translate` property composes with it); don't set
+ *                           `translate` on the content, the inline value
+ *                           wins. While the content is moved it also gets an
+ *                           inline `will-change: translate` (the app's inline
+ *                           value is put back after), and the tray's overflow
+ *                           along the axis is `hidden` (as below the highest
+ *                           snap point). Needs the individual transform
+ *                           properties (Safari 14.1+, Chrome 104+, Firefox
+ *                           72+); elsewhere the content doesn't move.
+ * [data-mobile-drawer-pinned]
+ *                           On an element in the content (e.g. a sticky
+ *                           grabber or header): it stays at the tray's edge
+ *                           while the content bounces. The component writes
+ *                           the opposite inline `translate` on it.
  *
  * Custom properties (set them on the root, any ancestor or :root)
  * ---------------------------------------------------------------

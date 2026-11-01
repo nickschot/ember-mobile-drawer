@@ -186,7 +186,7 @@ Animations respect `prefers-reduced-motion`: with reduced motion the drawer jump
 
 ### Dragging
 
-The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. Past fully open the resistance is stiff: the tray moves off its edge by at most 24px, with the backdrop showing in the gap. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
+The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. Past fully open the tray stays at its edge, and its content bounces, like the content of an iOS sheet. The bounce follows the classic UIScrollView rubber band, `(1 − 1 / (x × 0.55 / d + 1)) × d` for a pull of `x` px, with `d` = 0.55 × the tray's length (measured in the iOS simulator, see [#51](https://github.com/nickschot/ember-mobile-drawer/issues/51)). The component moves the content with an inline `translate` on `.mobile-drawer__content`, so an app `transform` on it still applies; don't set `translate` on it. Put `data-mobile-drawer-pinned` on an element in the content that must stay at the tray's edge during the bounce, such as a sticky grabber or header. On release the content springs back with the drawer's spring. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
 
 When `@activeSnapPoint` is set, letting go calls `@onSnapPointChange` with the snap point the drag ended on. Until you pass that index back in, the drawer heads back to the current `@activeSnapPoint`; if you never do, it stays there.
 
@@ -234,6 +234,8 @@ Put the grabber (with or without the `handle` modifier) at the tray's leading ed
   background: var(--mobile-drawer-background, Canvas);
 }
 ```
+
+Give the grabber `data-mobile-drawer-pinned`, so it stays at the tray's edge while the content bounces past fully open (see [Dragging](#dragging)).
 
 For the other placements, stick it to the other leading edges:
 
@@ -391,7 +393,7 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 ```hbs
 <div class="mobile-drawer-theme-ios">
   <MobileDrawer as |drawer|>
-    <div class="mobile-drawer-theme-ios__grabber"></div>
+    <div class="mobile-drawer-theme-ios__grabber" data-mobile-drawer-pinned></div>
     ...
   </MobileDrawer>
 </div>

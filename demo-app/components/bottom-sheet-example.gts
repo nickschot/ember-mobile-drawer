@@ -43,7 +43,11 @@ export default class BottomSheetExample extends Component {
       aria-labelledby="example-sheet-title"
       as |drawer|
     >
-      <div class="example-sheet-header" {{drawer.handle}}>
+      <div
+        class="example-sheet-header"
+        data-mobile-drawer-pinned
+        {{drawer.handle}}
+      >
         <div class="demo-grabber"></div>
         <div class="example-sheet-title">
           <h3 id="example-sheet-title">Nearby</h3>
