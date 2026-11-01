@@ -20,7 +20,9 @@ import '#src/themes/ios.css';
  * in the layout viewport, and the client coordinates follow it, so the
  * fixed root moves up (`top` < 0) and ends above the bottom of the screen.
  * A fake visual viewport (`drawerEnvironment.visualViewport`) gives the
- * height and the events; an inline `top` on the root moves it. The drawer
+ * height and the events; an inline `translate` on the root moves it, as
+ * Safari's client coordinates do: its computed `top` (its offset in the
+ * layout viewport) stays the same. The drawer
  * renders in `<body>`, outside the scaled test container, so its client
  * coordinates are the window's, as in Safari.
  */
@@ -44,12 +46,19 @@ class State {
   @tracked embedded = false;
   @tracked inset = '8px';
   @tracked transparentStatusBar = false;
+  /**
+   * The root's offset from the top of the layout viewport (px), e.g. the
+   * 5px that the iOS CSS gives with `@transparentStatusBar`.
+   */
+  @tracked offset = 0;
+  @tracked fields = true;
 
   get rootStyle() {
     return htmlSafe(
       [
         `inset: auto; left: 0; width: 400px; height: ${HEIGHT}px`,
-        `top: ${-this.shift}px`,
+        `top: ${this.offset}px`,
+        `translate: 0 ${-this.shift}px`,
         this.embedded ? 'position: absolute' : '',
       ].join('; '),
     );
@@ -93,8 +102,10 @@ async function renderDrawer(state: State) {
             style={{state.rootStyle}}
             data-test-drawer
           >
-            <input type="text" aria-label="First" data-test-field />
-            <input type="text" aria-label="Second" data-test-second />
+            {{#if state.fields}}
+              <input type="text" aria-label="First" data-test-field />
+              <input type="text" aria-label="Second" data-test-second />
+            {{/if}}
             <button type="button" data-test-button>Button</button>
             <div style="height: 1000px"></div>
           </MobileDrawer>
@@ -258,6 +269,57 @@ module('Integration | Component | mobile-drawer | keyboard', function (hooks) {
     state.active = 0;
     await settle();
     assert.strictEqual(document.body.style.position, '', 'lock released');
+  });
+
+  test('@transparentStatusBar: with the 5px offset the fill still reaches the bottom of the screen (#124)', async function (assert) {
+    drawerEnvironment.isIOS = () => true;
+    const state = new State();
+    state.modal = true;
+    state.transparentStatusBar = true;
+    state.fields = false;
+    state.active = 0;
+    await renderDrawer(state);
+    await settle();
+    state.active = 1;
+    await settle();
+    assert.notStrictEqual(document.body.style.position, 'fixed', 'no fix');
+    assert.dom(root()).hasAttribute('data-status-bar', 'transparent');
+    // The iOS CSS moves the root 5px down; Chrome doesn't apply it.
+    state.offset = 5;
+    await settled();
+
+    // A field that the drawer adds after it opens keeps the overflow lock.
+    state.fields = true;
+    await settle();
+    assert.dom(root()).hasAttribute('data-status-bar', 'transparent');
+    el('[data-test-field]').focus();
+    await openKeyboard(state);
+    assert.strictEqual(fills().length, 1, 'the fill shows');
+    const rootRect = root().getBoundingClientRect();
+    const rect = fill().getBoundingClientRect();
+    assert.true(
+      Math.abs(rect.top - rootRect.bottom) < 0.5,
+      `from the bottom of the root (${rect.top} / ${rootRect.bottom})`,
+    );
+    // The screen ends 250px below the root's bottom (the layout viewport
+    // moved up 250px), whatever the root's offset in it.
+    assert.true(
+      Math.abs(rect.height - 250) < 0.5,
+      `to the bottom of the screen, no gap (${rect.height})`,
+    );
+
+    state.shift = 200;
+    await settled();
+    viewport.dispatchEvent(new Event('scroll'));
+    assert.true(
+      Math.abs(fill().getBoundingClientRect().height - 200) < 0.5,
+      'follows the visual viewport',
+    );
+
+    await closeKeyboard(state);
+    assert.strictEqual(fills().length, 0, 'no fill at the offset alone');
+    state.active = 0;
+    await settle();
   });
 
   test('focus that leaves the fields hides the fill at once; focus on another field keeps it', async function (assert) {
