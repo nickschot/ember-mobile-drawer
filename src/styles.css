@@ -14,6 +14,12 @@
  *   <div class="mobile-drawer" data-placement="bottom" data-closed>
  *     <div class="mobile-drawer__backdrop"></div>
  *     <div class="mobile-drawer__backdrop-tint" aria-hidden="true"></div>
+ *     <div class="mobile-drawer__shadow" aria-hidden="true">
+ *       <div class="mobile-drawer__shadow-edge"></div>
+ *       <div class="mobile-drawer__shadow-clip">
+ *         <div class="mobile-drawer__shadow-body"></div>
+ *       </div>
+ *     </div>
  *     <div class="mobile-drawer__sheet">
  *       <div class="mobile-drawer__tray">
  *         <div class="mobile-drawer__content">...yielded content...</div>
@@ -22,10 +28,10 @@
  *     <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>
  *   </div>
  *
- * The backdrop, the tints and the sheet must be direct children of the
- * root, the tray a direct child of the sheet, and the content a direct child
- * of the tray; the placement rules use the child combinator so nested
- * drawers don't affect each other. Select the tray with
+ * The backdrop, the tints, the shadow and the sheet must be direct children
+ * of the root, the tray a direct child of the sheet, and the content a
+ * direct child of the tray; the placement rules use the child combinator so
+ * nested drawers don't affect each other. Select the tray with
  * `.mobile-drawer > .mobile-drawer__sheet > .mobile-drawer__tray`.
  *
  * .mobile-drawer            Root. A fixed overlay covering the viewport that
@@ -235,6 +241,19 @@
  *                           component writes `--mobile-drawer-progress` and
  *                           `--mobile-drawer-expand-progress` on it, as on
  *                           the backdrop.
+ * .mobile-drawer__shadow    Empty layer before the sheet, for a theme's
+ *                           outer shadow of a floating bottom sheet (the
+ *                           iOS theme uses it). `display: none` here. The
+ *                           sheet clips the tray, so the tray's own shadow
+ *                           can't show around a floating sheet. For bottom
+ *                           drawers the component gives it the tray's
+ *                           length (an inline `height`) and every frame the
+ *                           tray's inline `transform`, and writes
+ *                           `--mobile-drawer-expand-progress` on it. Its
+ *                           `.mobile-drawer__shadow-body` gets the opposite
+ *                           transform, so it stays where it is. The theme
+ *                           draws the shadow on these elements (see
+ *                           themes/ios.css). Other drawers don't use it.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
  *                           carries the safe-area padding (see below) and,
  *                           for top and left, the auto start margin (see the
@@ -513,6 +532,13 @@
     );
     pointer-events: auto;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Only used by a theme, see the header. */
+  :where(.mobile-drawer__shadow) {
+    display: none;
+    position: absolute;
+    pointer-events: none;
   }
 
   /* Only used on iOS, see the iOS block at the end. */

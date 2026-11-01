@@ -1244,6 +1244,67 @@ module('Integration | themes/ios.css', function (hooks) {
     );
   });
 
+  test("the tray shadow: the theme's value, or an app's --mobile-drawer-shadow as is", async function (assert) {
+    const trayShadow = () => getComputedStyle(el('[data-test-tray]')).boxShadow;
+    const rim = 'rgba(255, 255, 255, 0.22) 0px 0px 0px 0.5px inset';
+
+    await renderDrawer({ scheme: 'dark' });
+    assert.strictEqual(
+      trayShadow(),
+      rim,
+      'bottom, the theme: only the rim (the shadow layer draws the outer shadow)',
+    );
+    await renderDrawer({ scheme: 'dark', placement: 'top' });
+    assert.true(
+      trayShadow().startsWith(rim) && trayShadow().includes('32px'),
+      `top, the theme: the rim and an outer shadow (${trayShadow()})`,
+    );
+
+    // A value on an ancestor of the theme element doesn't apply.
+    const rootStyle = addStyles(
+      ':root { --mobile-drawer-shadow: rgb(1, 2, 3) 0px 0px 5px 0px; }',
+    );
+    styles.push(rootStyle);
+    await renderDrawer({ scheme: 'dark' });
+    assert.strictEqual(
+      trayShadow(),
+      rim,
+      'bottom: a :root value does not apply',
+    );
+    rootStyle.remove();
+
+    for (const placement of ['bottom', 'left'] as const) {
+      const style = addStyles(
+        '[data-test-theme] { --mobile-drawer-shadow: none; }',
+      );
+      await renderDrawer({ scheme: 'dark', placement });
+      assert.strictEqual(
+        trayShadow(),
+        'none',
+        `${placement}: --mobile-drawer-shadow: none removes the rim`,
+      );
+      style.remove();
+    }
+
+    styles.push(
+      addStyles(
+        '[data-test-theme] { --mobile-drawer-shadow: inset 0 0 0 1px rgb(1 2 3); }',
+      ),
+    );
+    await renderDrawer({ scheme: 'dark' });
+    assert.strictEqual(
+      trayShadow(),
+      'rgb(1, 2, 3) 0px 0px 0px 1px inset',
+      'bottom: an app rim applies as is',
+    );
+    el('[data-test-root]').setAttribute('data-nested', '');
+    finishTransitions();
+    assert.true(
+      trayShadow().startsWith('rgb(1, 2, 3) 0px 0px 0px 1px inset, '),
+      `bottom, nested: the app rim and the dim (${trayShadow()})`,
+    );
+  });
+
   test('unlayered app CSS still wins over the expanded tray background', async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     styles.push(
@@ -1335,6 +1396,8 @@ module('Integration | themes/ios.css', function (hooks) {
 
 class SheetState {
   @tracked active = 0;
+  /** The theme wrapper's inline style, e.g. a `color-scheme`. */
+  style = htmlSafe('');
   placement: 'bottom' | 'top';
   constructor(placement: 'bottom' | 'top') {
     this.placement = placement;
@@ -1384,7 +1447,8 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
     const lines = TALL_LINES;
     await render(
       <template>
-        <div class="mobile-drawer-theme-ios">
+        {{! template-lint-disable no-inline-styles }}
+        <div class="mobile-drawer-theme-ios" style={{state.style}}>
           <MobileDrawer
             @placement={{state.placement}}
             @snapPoints={{SHEET_SNAP_POINTS}}
@@ -1512,4 +1576,217 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
       );
     });
   }
+
+  /**
+   * The shadow layer's boxes, in px relative to the root (the test container
+   * may be scaled): the edge's clip, the body's clip and the body.
+   */
+  function shadowGeometry(root: HTMLElement) {
+    const r = root.getBoundingClientRect();
+    const scale = r.width / root.offsetWidth;
+    const box = (selector: string) => {
+      const b = root.querySelector(selector)!.getBoundingClientRect();
+      const px = (value: number) => Math.round(value / scale);
+      return {
+        top: px(b.top - r.top),
+        left: px(b.left - r.left),
+        right: px(r.right - b.right),
+        bottom: px(r.bottom - b.bottom),
+      };
+    };
+    return {
+      tray: box('.mobile-drawer__tray'),
+      edge: box('.mobile-drawer__shadow-edge'),
+      clip: box('.mobile-drawer__shadow-clip'),
+      body: box('.mobile-drawer__shadow-body'),
+    };
+  }
+
+  const IOS_SHADOW: Record<Scheme, string> = {
+    light:
+      'rgba(0, 0, 0, 0.12) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.12) 0px 7px 32px 0px',
+    dark: 'rgba(0, 0, 0, 0.6) 0px 0px 0px 0.5px, rgba(0, 0, 0, 0.18) 0px 7px 32px 0px',
+  };
+
+  for (const scheme of SCHEMES) {
+    test(`${scheme}: bottom: the shadow layer draws the outer shadow in the shape of the floating sheet`, async function (assert) {
+      const state = new SheetState('bottom');
+      state.style = htmlSafe(`color-scheme: ${scheme}`);
+      const root = (await renderSheet(state)) as HTMLElement;
+      const shadow = root.querySelector<HTMLElement>('.mobile-drawer__shadow')!;
+      const edge = root.querySelector<HTMLElement>(
+        '.mobile-drawer__shadow-edge',
+      )!;
+      const body = root.querySelector<HTMLElement>(
+        '.mobile-drawer__shadow-body',
+      )!;
+      const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+
+      state.active = 1;
+      await frames();
+      assert.strictEqual(getComputedStyle(shadow).display, 'block');
+      assert.strictEqual(getComputedStyle(shadow).pointerEvents, 'none');
+      assert.strictEqual(
+        getComputedStyle(edge, '::before').boxShadow,
+        IOS_SHADOW[scheme],
+        'the edge has the shadow',
+      );
+      assert.strictEqual(
+        getComputedStyle(body).boxShadow,
+        IOS_SHADOW[scheme],
+        'the body has the same shadow',
+      );
+      assert.strictEqual(
+        getComputedStyle(tray).boxShadow,
+        scheme === 'light'
+          ? 'rgba(255, 255, 255, 0.8) 0px 0px 0px 0.5px inset'
+          : 'rgba(255, 255, 255, 0.22) 0px 0px 0px 0.5px inset',
+        'the tray has only the rim, so its clip cuts no shadow',
+      );
+
+      const g = shadowGeometry(root);
+      assert.strictEqual(
+        shadow.style.transform,
+        tray.style.transform,
+        'the layer moves with the tray',
+      );
+      assert.strictEqual(
+        g.edge.top + 120 + 36,
+        g.tray.top + 36,
+        'the edge clip ends 36px (the top radius) below the tray top',
+      );
+      assert.strictEqual(
+        g.clip.top,
+        g.tray.top + 36,
+        'the body clip starts there',
+      );
+      assert.deepEqual(
+        [g.body.left, g.body.right, g.body.bottom],
+        [8, 8, 8],
+        "the body has the floating sheet's sides and bottom edge",
+      );
+      const before = getComputedStyle(edge, '::before');
+      assert.deepEqual(
+        [before.left, before.right, before.top],
+        ['8px', '8px', '120px'],
+        "the edge box has the sheet's sides, its top at the tray's top",
+      );
+      assert.strictEqual(before.borderTopLeftRadius, '36px');
+      assert.strictEqual(getComputedStyle(body).borderBottomLeftRadius, '36px');
+
+      state.active = 2;
+      await frames();
+      const h = shadowGeometry(root);
+      assert.strictEqual(
+        shadow.style.transform,
+        tray.style.transform,
+        'highest: the layer moves with the tray',
+      );
+      assert.strictEqual(h.clip.top, h.tray.top + 36);
+      assert.deepEqual(
+        [h.body.left, h.body.right, h.body.bottom],
+        [0, 0, 0],
+        'highest: edge-to-edge',
+      );
+      assert.deepEqual(
+        [
+          getComputedStyle(edge, '::before').left,
+          getComputedStyle(body).borderBottomLeftRadius,
+        ],
+        ['0px', '0px'],
+        'highest: no inset, square bottom corners',
+      );
+      assert.strictEqual(
+        getComputedStyle(body).boxShadow,
+        IOS_SHADOW[scheme],
+        'highest: the same shadow, so it does not come in suddenly',
+      );
+      assert.false(
+        getComputedStyle(tray).boxShadow.includes('32px'),
+        'highest: no outer shadow on the tray',
+      );
+    });
+  }
+
+  test('bottom: the shadow body stays at the bottom edge while the layer moves', async function (assert) {
+    const state = new SheetState('bottom');
+    const root = (await renderSheet(state)) as HTMLElement;
+    const body = root.querySelector<HTMLElement>(
+      '.mobile-drawer__shadow-body',
+    )!;
+    for (const active of [1, 0, 1]) {
+      state.active = active;
+      await frames();
+      const match = /translate3d\(0px, ([\d.-]+)px, 0px\)/.exec(
+        root.querySelector<HTMLElement>('.mobile-drawer__tray')!.style
+          .transform,
+      );
+      assert.ok(match, 'the tray has a transform');
+      assert.strictEqual(
+        body.style.transform,
+        `translate3d(0px, ${-Number(match![1])}px, 0px)`,
+        `${active}: the body gets the opposite transform`,
+      );
+    }
+    assert.strictEqual(shadowGeometry(root).body.bottom, 8);
+    const shadow = root.querySelector<HTMLElement>('.mobile-drawer__shadow')!;
+    assert.strictEqual(
+      shadow.style.height,
+      `${root.querySelector<HTMLElement>('.mobile-drawer__tray')!.offsetHeight}px`,
+      "the layer has the tray's length",
+    );
+  });
+
+  test('--mobile-drawer-ios-shadow: none removes the shadow', async function (assert) {
+    const state = new SheetState('bottom');
+    state.style = htmlSafe('--mobile-drawer-ios-shadow: none');
+    const root = await renderSheet(state);
+    state.active = 1;
+    await frames();
+    assert.strictEqual(
+      getComputedStyle(
+        root.querySelector('.mobile-drawer__shadow-edge')!,
+        '::before',
+      ).boxShadow,
+      'none',
+    );
+    assert.strictEqual(
+      getComputedStyle(root.querySelector('.mobile-drawer__shadow-body')!)
+        .boxShadow,
+      'none',
+    );
+  });
+
+  test('top: no shadow layer; the tray keeps its own shadow', async function (assert) {
+    const state = new SheetState('top');
+    const root = await renderSheet(state);
+    state.active = 1;
+    await frames();
+    assert.strictEqual(
+      getComputedStyle(root.querySelector('.mobile-drawer__shadow')!).display,
+      'none',
+    );
+    assert.true(
+      getComputedStyle(
+        root.querySelector('.mobile-drawer__tray')!,
+      ).boxShadow.includes('32px'),
+      'the outer shadow is on the tray',
+    );
+  });
+
+  test('without the theme the shadow layer is not shown', async function (assert) {
+    await render(
+      <template>
+        <MobileDrawer @snapPoints={{SHEET_SNAP_POINTS}} @activeSnapPoint={{1}}>
+          <p>Content</p>
+        </MobileDrawer>
+      </template>,
+    );
+    await frames();
+    assert.strictEqual(
+      getComputedStyle(find('.mobile-drawer__shadow')!).display,
+      'none',
+    );
+    assert.dom('.mobile-drawer__shadow').hasAttribute('aria-hidden', 'true');
+  });
 });

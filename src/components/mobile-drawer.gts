@@ -697,7 +697,9 @@ const clampIndex = (index: number, count: number) =>
  * `.mobile-drawer__tray` in it, with the block inside
  * `.mobile-drawer__content`, and an empty `.mobile-drawer__bar-tint` after
  * the sheet and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
- * after the backdrop (for the iOS Safari 26 bars, see styles.css).
+ * after the backdrop (for the iOS Safari 26 bars, see styles.css), and a
+ * `.mobile-drawer__shadow` before the sheet, for a theme's outer shadow of
+ * a floating bottom sheet (see `#paintShadow`).
  * Attributes are applied to the root element.
  *
  * Sheet: the sheet clips the tray. Every frame the component writes the
@@ -801,6 +803,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #content?: HTMLElement;
   /** The root's `.mobile-drawer__bar-tint` child, if any. */
   #barTint?: HTMLElement;
+  /** The root's `.mobile-drawer__shadow` child, see `#paintShadow`. */
+  #shadow?: HTMLElement;
+  /** The `.mobile-drawer__shadow-body` in it, see `#paintShadow`. */
+  #shadowBody?: HTMLElement;
   /**
    * The sheet's colour below the root while an on-screen keyboard is open
    * in iOS Safari, see `KeyboardFill`.
@@ -1116,6 +1122,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#barTint =
         root.querySelector<HTMLElement>(':scope > .mobile-drawer__bar-tint') ??
         undefined;
+      this.#shadow =
+        root.querySelector<HTMLElement>(':scope > .mobile-drawer__shadow') ??
+        undefined;
+      this.#shadowBody =
+        this.#shadow?.querySelector<HTMLElement>(
+          '.mobile-drawer__shadow-body',
+        ) ?? undefined;
       this.#content = this.#tray.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__content',
       )!;
@@ -1337,6 +1350,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
 
     this.#layout = { resolved, container, trayLength, maxOffset };
+    // The shadow layer has the tray's length (bottom sheets only).
+    if (this.#shadow) {
+      this.#shadow.style.height =
+        this.placement === 'bottom' ? `${trayLength}px` : '';
+    }
     return true;
   }
 
@@ -1733,6 +1751,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }[this.placement];
 
     this.#tray!.style.transform = transform;
+    this.#paintShadow(transform, distance);
     this.#renderBounce(Math.max(0, open - layout.trayLength));
     const atTop = open >= layout.maxOffset - EPSILON;
     this.#paintExpand(open, atTop);
@@ -1792,6 +1811,24 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
+   * Moves the shadow layer (`.mobile-drawer__shadow`, see styles.css) with
+   * the tray: the same `transform` as the tray. Its body
+   * (`.mobile-drawer__shadow-body`) gets the opposite transform, so it
+   * stays at the sheet's bottom edge while the layer around it moves. Both
+   * are transforms only, so a theme's shadow on them is not painted again
+   * while the drawer moves. Only for bottom drawers: the layer is only used
+   * for a floating bottom sheet.
+   */
+  #paintShadow(transform: string, distance: number): void {
+    const shadow = this.#shadow;
+    if (!shadow || this.placement !== 'bottom') return;
+    shadow.style.transform = transform;
+    if (this.#shadowBody) {
+      this.#shadowBody.style.transform = `translate3d(0, ${-distance}px, 0)`;
+    }
+  }
+
+  /**
    * Writes the expand progress for `open` (px open) as
    * `--mobile-drawer-expand-progress` on the sheet: `0` at or below the
    * second-highest snap point (or closed, for a drawer with one open snap
@@ -1819,6 +1856,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const value = String(progress);
     this.#sheet?.style.setProperty('--mobile-drawer-expand-progress', value);
     this.#barTint?.style.setProperty('--mobile-drawer-expand-progress', value);
+    this.#shadow?.style.setProperty('--mobile-drawer-expand-progress', value);
     // A theme may change the tray's colour with it (e.g. the iOS theme's
     // glass that becomes opaque), see `KeyboardFill`.
     this.#keyboardFill?.paint();
@@ -3575,6 +3613,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         ></div>
         <div class="mobile-drawer__backdrop-tint" aria-hidden="true"></div>
       {{/if}}
+      <div class="mobile-drawer__shadow" aria-hidden="true">
+        <div class="mobile-drawer__shadow-edge"></div>
+        <div class="mobile-drawer__shadow-clip">
+          <div class="mobile-drawer__shadow-body"></div>
+        </div>
+      </div>
       <div class="mobile-drawer__sheet">
         <div
           class="mobile-drawer__tray"
