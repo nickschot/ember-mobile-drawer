@@ -1039,8 +1039,12 @@ module('Integration | themes/ios.css', function (hooks) {
       `the tray's own clip: its sides at the inset, the radius there (${clip()})`,
     );
     assert.true(
-      clip().includes('8px 0px, 8px -1000px, calc(100% - 8px) -1000px'),
-      'the clip goes above the top edge: the top shadow stays',
+      clip().includes('44px 0px, calc(100% - 44px) 0px'),
+      `the clip's top edge is the tray's top edge, from corner to corner (${clip()})`,
+    );
+    assert.notOk(
+      /-\d/.test(clip()),
+      `no point above the top edge or left of the root: no flat shadow band above the floating sheet (${clip()})`,
     );
     const content = getComputedStyle(
       el('[data-test-tray] > .mobile-drawer__content'),
@@ -1050,14 +1054,28 @@ module('Integration | themes/ios.css', function (hooks) {
       ['8px', '8px'],
       'the content is padded by the inset, at every snap point',
     );
+    setProgress(0.5);
+    assert.true(
+      clip().startsWith('polygon(4px calc(100% + 1000px), 4px 36px, '),
+      `half way: the sides at 4px (${clip()})`,
+    );
+    assert.notOk(
+      /-\d/.test(clip()),
+      `still no point above the top edge (${clip()})`,
+    );
     setProgress(1);
     assert.true(
-      clip().startsWith('polygon(0px calc(100% + 1000px), 0px 36px, '),
-      `at full height at the edges (${clip()})`,
+      clip().startsWith(
+        'polygon(-10000px calc(100% + 1000px), -10000px -9964px, ',
+      ),
+      `at full height the clip moves 10000px out and clips nothing: the whole shadow shows (${clip()})`,
     );
-    assert.true(
-      clip().includes('0px 0px, 0px -1000px, 100% -1000px, 100% 0px'),
-      `the top shadow stays (${clip()})`,
+    assert.strictEqual(
+      getComputedStyle(
+        el('[data-test-tray] > .mobile-drawer__content'),
+      ).getPropertyValue('--_mobile-drawer-clip-out'),
+      '0px',
+      'the clip offset is not inherited by the content',
     );
 
     assert.deepEqual(
