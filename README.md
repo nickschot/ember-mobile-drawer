@@ -19,7 +19,7 @@ Try it in the [playground](https://nickschot.github.io/ember-mobile-drawer/). It
 - [Compatibility](#compatibility)
 - [Installation](#installation)
 - [Quick start](#quick-start): [bottom](#bottom-sheet), [top](#top-drawer), [left](#left-drawer), [right](#right-drawer)
-- [Usage](#usage): [snap points](#snap-points), [controlled and uncontrolled](#controlled-and-uncontrolled), [backdrop](#backdrop), [spring](#spring), [events](#events), [accessibility](#accessibility), [dragging](#dragging), [scrolling content](#scrolling-content), [nested drawers](#nested-drawers), [public imports](#public-imports), [TypeScript](#typescript)
+- [Usage](#usage): [snap points](#snap-points), [controlled and uncontrolled](#controlled-and-uncontrolled), [backdrop](#backdrop), [spring](#spring), [events](#events), [accessibility](#accessibility), [dragging](#dragging), [grabber](#grabber), [scrolling content](#scrolling-content), [nested drawers](#nested-drawers), [public imports](#public-imports), [TypeScript](#typescript)
 - [Styles](#styles): [state attributes](#state-attributes), [floating sheet](#floating-sheet), [iOS theme](#ios-theme)
 - [Testing](#testing)
 - [API reference](#api-reference)
@@ -68,7 +68,7 @@ Give every modal drawer (the default) a name with `aria-labelledby` or `aria-lab
 
 ### Bottom sheet
 
-A sheet that opens to half the screen, then to full height, with a grabber that always drags it:
+A sheet that opens to half the screen, then to full height, with a grabber that always drags it and that moves the sheet between half and full height on a tap:
 
 ```gts
 import Component from '@glimmer/component';
@@ -94,7 +94,7 @@ export default class PlacesSheet extends Component {
       aria-labelledby="places-title"
       as |drawer|
     >
-      <div class="grabber" data-mobile-drawer-pinned {{drawer.handle}}></div>
+      <drawer.Grabber class="grabber" data-mobile-drawer-pinned />
       <h2 id="places-title">Places</h2>
       <button type="button" {{on "click" drawer.open}}>Expand</button>
       <button type="button" {{on "click" drawer.close}}>Close</button>
@@ -104,7 +104,7 @@ export default class PlacesSheet extends Component {
 }
 ```
 
-`@placement="bottom"` is the default. The sheet scrolls its content at its highest snap point (see [Scrolling content](#scrolling-content)), and [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge) has the CSS for a sticky grabber.
+`@placement="bottom"` is the default. The sheet scrolls its content at its highest snap point (see [Scrolling content](#scrolling-content)), and [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge) has the CSS for a sticky grabber. The yielded `Grabber` is a button for keyboard and screen reader users too, see [Grabber](#grabber).
 
 ### Top drawer
 
@@ -341,7 +341,7 @@ A drawer is "open" while it is above its smallest snap point.
 
 By default the drawer is modal (`@modal={{true}}`), like a dialog. While it is open:
 
-- focus moves into it: to the first element with `autofocus`, else the first focusable element, else the tray itself;
+- focus moves into it: to the first element with `autofocus`, else the first focusable element (not a yielded [`Grabber`](#grabber)), else the tray itself;
 - Tab and Shift+Tab stay inside the drawer, wrapping around at the ends;
 - the rest of the page is [`inert`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert): the siblings of the drawer and of each of its ancestors, up to `<body>` (see the limits below);
 - the page doesn't scroll. On iOS the body is fixed in place at its scroll position, which is restored on close;
@@ -417,7 +417,29 @@ A handle gets `touch-action: pan-x` (for `bottom` and `top`) or `pan-y` (for `le
 
 A handle wins over the elements in it. A `data-mobile-drawer-scroll` element in a handle can't scroll along the drawer's axis: a gesture on it drags the drawer. Keep handles small: a grabber, a header with a title and buttons. Don't put scrolling content or form fields in a handle. One exception: a text field in a handle (a text `<input>`, a `<textarea>` or contenteditable content) is not part of the handle, so you can still select text in it. Without `@handleOnly` a gesture on it works as on the rest of the tray; with `@handleOnly` it doesn't drag.
 
-The demo's bottom sheet example has the `handle` modifier on its sticky header, and the iOS sheet example on its grabber.
+The demo's bottom sheet example has the `handle` modifier on its sticky header, and the iOS sheet example a yielded `Grabber` (see below).
+
+#### Grabber
+
+The yielded `Grabber` component is an accessible grabber, like the grabber of an iOS sheet. It renders a `<button type="button">` with the `handle` modifier, so a drag that starts on it drags the drawer, with and without `@handleOnly`. Attributes go on the button. It has no styles of its own: give it a class, for example `mobile-drawer-theme-ios__grabber` (see [iOS theme](#ios-theme)).
+
+```gts
+<MobileDrawer @snapPoints={{array 0 "40%" "100%"}} aria-label="Places" as |drawer|>
+  <drawer.Grabber class="grabber" data-mobile-drawer-pinned />
+  ...
+</MobileDrawer>
+```
+
+- **Tap, click, Enter or Space:** the drawer moves to the next larger open snap point. From the largest open snap point it moves back to the smallest open one. It never closes the drawer: a snap point at `0` is not in the cycle. A peek (a smallest snap point above `0`) is in the cycle. With fewer than two open snap points the grabber does nothing. When `@activeSnapPoint` is set, it calls `@onSnapPointChange`, as `snapTo` does.
+- **Drag:** a drag that starts on the grabber drags the drawer. A pointer that dragged the drawer doesn't also click the grabber when it lifts, so a short drag doesn't also move the drawer to the next snap point.
+- **Screen readers:** the button's name is `@label` (default `'Sheet grabber'`, as the iOS grabber). Its description is the snap point the drawer is at: `@snapPointLabels[index]`, else `'Expanded'` (the largest open snap point), `'Collapsed'` (the smallest of two or more open ones), `'Partly expanded'` (between them) or `'Closed'`. After an activation, a status element (`role="status"`) right after the button announces the new snap point, for VoiceOver and TalkBack. The text shows once the drawer's active snap point is that snap point (a controlled drawer: once you pass it in), and goes when the drawer moves in another way (a drag, the backdrop, Escape, your app), so no stale text stays in it. Pass translated texts with `@label` and `@snapPointLabels`.
+- **Target size:** the iOS theme's strip is 14px high, as the native grabber. [WCAG 2.5.8 (target size, minimum)](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html) asks for 24×24px, or enough space around a smaller target. The full-width strip usually meets the spacing exception, but a control near the centre of the strip can break it. Then make the strip taller with `padding-block`, for example `.mobile-drawer-theme-ios__grabber { padding-block: 10px; }` (24px in all). The bar stays centred in the strip.
+- **Focus:** the grabber is in the tab order. A modal drawer that opens doesn't focus it: focus goes to the first other focusable element (or the element with `autofocus`), so a screen reader starts at the content.
+
+| Argument           | Type                              | Default           | Description |
+| ------------------ | --------------------------------- | ----------------- | ----------- |
+| `@label`           | `string`                          | `'Sheet grabber'` | The button's accessible name. |
+| `@snapPointLabels` | `readonly (string \| undefined)[]` | by position, see above | What a screen reader says the drawer is at, one text per snap point, indexed like `@snapPoints`. |
 
 #### Keep the grabber at the leading edge
 
@@ -707,6 +729,8 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 </div>
 ```
 
+The grabber class also styles the yielded [`Grabber`](#grabber) button the same way, with a focus ring around the bar for keyboard focus: `<drawer.Grabber class="mobile-drawer-theme-ios__grabber" data-mobile-drawer-pinned />`.
+
 `mobile-drawer-theme-ios__grabber` draws a 58×4px bar for bottom and top drawers, 5px below the sheet's edge, like the grabber of an iOS 27 sheet. Put it directly in the drawer: first in a bottom drawer and last in a top drawer. The element is a 14px strip (the 4px bar with 5px padding above and below) across the tray that stays at the tray's leading edge (see [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge)): sticky at the top of a bottom drawer and at the bottom of a top drawer, so it stays in view while the content scrolls at the highest snap point. Don't wrap the grabber in another element: a sticky element only sticks inside its parent, so a wrapped grabber scrolls away with its wrapper. While the drawer is at its highest snap point (`data-at-highest`) the sheet is opaque (see **Full height** below) and the strip has the same colour, so the content scrolling under it doesn't show through and the strip doesn't show as a band (browsers that can't make the colour opaque, such as Safari before 18, keep the glass sheet and give the strip the translucent sheet colour). Below the highest snap point the strip is transparent, so it looks like the rest of the sheet. That works because no content is under the strip there: the component keeps the tray at its scroll start below the highest snap point (the start of the content at the top of a bottom drawer, the end of the content at the bottom of a top drawer; see [Scrolling content](#scrolling-content)). There is one short exception, a run down from a scrolled sheet. `data-at-highest` goes away on the first frame below the highest snap point, but the tray only gets back to its scroll start during the run, in step with the tray (or, for a close, once the drawer is closed). So for that moment the rows that were scrolled under the strip show under the bar. In the demo, when you close a fully open, scrolled sheet with "Done", a part of a row shows under the bar while the sheet slides away (about half a second). The strip's 5px padding above and below the bar doesn't collapse with a neighbour's margin, as the old 5px margins did. The bar is drawn by the strip's `::before`, so style the bar there, for example `.mobile-drawer-theme-ios__grabber::before { width: 48px; }`. To make the grabber always drag the sheet, also when the content is scrolled (and with `@handleOnly`), put the `handle` modifier on the grabber itself, not on a wrapper; the hit area of the grabber (the only part that drags with `@handleOnly`) is this 14px strip, so for a larger touch target give it more padding, for example `.mobile-drawer-theme-ios__grabber { padding-block: 12px; }`.
 
 The glass rim (the light inner edge of the sheet, an inset shadow on the tray) is part of the tray's background, so the content paints over it. While the strip has the opaque colour, the strip's `::after` draws the rim again over the strip, along the leading edge and its rounded corners. The strip spans the full width of the tray, also over the side safe areas that the content pads (for example in iPhone landscape), so the rim follows the sheet edge. The theme doesn't set `--mobile-drawer-shadow` (it resets it to `initial`): without your value, the tray gets the theme's rim (and, on top, left and right drawers, an outer shadow). If you set `--mobile-drawer-shadow` on the element with the theme class or closer to the drawer, the tray uses your value as is, on every placement, so you can change or remove the rim there. The strip rim always uses the theme's rim colour, not the value in your `--mobile-drawer-shadow`. If you remove the rim with your `--mobile-drawer-shadow`, also remove it from the strip: `.mobile-drawer-theme-ios__grabber::after { box-shadow: none; }`. If you change only the rim colour, also give the strip rim your colour. Use the same selector and `@supports` condition as the theme, so the strip gets the rim only where it is opaque:
@@ -909,6 +933,7 @@ The block gets one value, of type `MobileDrawerApi`:
 | `isAnimating`     | `boolean`                                     | Whether the drawer is animating towards a snap point. |
 | `progress`        | `number`                                      | How far open the drawer is, from `0` (closed) to `1` (largest snap point), for the snap point it rests at or is moving to. Not updated every frame: for styles that follow the drawer frame by frame, use `--mobile-drawer-progress` on the backdrop. |
 | `handle`          | modifier, `ModifierLike<{ Element: HTMLElement }>` | Makes an element a drag handle: a gesture on it always drags the drawer. See [Dragging](#dragging). |
+| `Grabber`         | component, a `<button>`, with optional `@label` (`string`) and `@snapPointLabels` (`readonly (string \| undefined)[]`) arguments | An accessible grabber: a drag handle that moves the drawer to the next open snap point on a tap, Enter or Space, and announces it. See [Grabber](#grabber). |
 | `Nested`          | component, with an optional `@destination` argument (`Element \| null`) | Renders a nested drawer outside this drawer's tray. See [Nested drawers](#nested-drawers). |
 
 ### Event objects
@@ -968,6 +993,7 @@ See [State attributes](#state-attributes) for details.
 | `.mobile-drawer__tray`          | The visible drawer and its scroll container. The component writes its `transform` and, below the highest snap point and during the bounce past fully open, `overflow`. It writes `touch-action` only when the tray is a drag source (not with `@handleOnly`). |
 | `.mobile-drawer__content`       | Your block. Has the safe-area padding. If you set padding on it, you replace the insets (the iOS theme sets its own side padding here). |
 | `.mobile-drawer__bar-tint`      | iOS Safari 26 only: colours the bar at the sheet's edge. |
+| `.mobile-drawer__visually-hidden` | In your block, rendered by the yielded `Grabber`: text for screen readers only (its description and its status element). |
 | `.mobile-drawer-nested`         | Not in the root: the `display: contents` element that the yielded `Nested` renders into. Gets `data-closed` with its drawer. |
 | `.mobile-drawer__dim`           | Not in the root: the dim layer before the root, with `@transparentStatusBar` only. |
 | `.mobile-drawer-keyboard-fill`  | Not in the root: a child of `<html>` below an open bottom drawer while the iOS Safari keyboard is open. |
@@ -1019,7 +1045,7 @@ iOS theme (`ember-mobile-drawer/themes/ios.css`), under the `mobile-drawer-theme
 | `--mobile-drawer-ios-page-radius`     | `12px`                                  | Page scale: radius of the page's top corners. |
 | `--mobile-drawer-ios-page-background` | `Canvas`                                | Page scale: background of the page element. |
 
-Theme classes: `mobile-drawer-theme-ios` (on an ancestor of the drawers), `mobile-drawer-theme-ios__grabber` (the grabber, directly in the drawer's block) and `mobile-drawer-theme-ios__page` (with `data-mobile-drawer-page`, for the page scale). See [iOS theme](#ios-theme).
+Theme classes: `mobile-drawer-theme-ios` (on an ancestor of the drawers), `mobile-drawer-theme-ios__grabber` (the grabber, a `<div>` or the yielded `Grabber`, directly in the drawer's block) and `mobile-drawer-theme-ios__page` (with `data-mobile-drawer-page`, for the page scale). See [iOS theme](#ios-theme).
 
 ### JavaScript exports
 

@@ -359,6 +359,41 @@
     /* Clips the rim in ::after to the strip. */
     overflow: hidden;
     background: transparent;
+    /* The yielded `Grabber` is a <button>: no button look, and as wide as a
+       <div> strip (a block button is only as wide as its content). The
+       bottom and top rules below set the margins again. A button is
+       border-box in the browser styles; the strip's height excludes its
+       padding, as a <div>'s does. */
+    box-sizing: content-box;
+    width: -moz-available;
+    width: -webkit-fill-available;
+    width: stretch;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    color: inherit;
+    font: inherit;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /*
+   * Keyboard focus on a `Grabber`: a ring around the bar, in the 5px of
+   * padding (the strip clips what goes further).
+   */
+  :where(
+    .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber
+  ):focus-visible {
+    outline: none;
+  }
+
+  :where(
+      .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber
+    ):focus-visible::before {
+    outline: 2px solid Highlight;
+    outline-color: -webkit-focus-ring-color;
+    outline-offset: 2px;
   }
 
   /*

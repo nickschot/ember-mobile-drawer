@@ -52,6 +52,7 @@ import {
   removePortal,
 } from '../-private/nesting.ts';
 import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
+import Grabber, { type GrabberOwner } from '../-private/grabber.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
 import { KeyboardFill } from '../-private/keyboard-fill.ts';
 import type { MobileDrawerSpring } from '../springs.ts';
@@ -355,6 +356,7 @@ interface PendingState {
   isAnimating?: boolean;
   isDragging?: boolean;
   progress?: number;
+  openSnapPoints?: readonly (readonly number[])[];
 }
 
 export interface MobileDrawerSignature {
@@ -756,6 +758,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /** Whether the modal behaviour is on, for `aria-modal`. */
   @tracked modalActive = false;
   /**
+   * For the yielded `Grabber`: the indices of the open snap points (offset
+   * above `0`), one entry per resolved snap point, ascending by offset.
+   * Updated after each measurement (see `#measure`), so empty before the
+   * first one.
+   */
+  @tracked openSnapPoints: readonly (readonly number[])[] = [];
+  /**
    * The parent element of the root, once the drawer is in the DOM: where
    * the yielded `Nested` renders without `@destination`.
    */
@@ -902,6 +911,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * The elements with the yielded `handle` modifier, see `#onHandle`.
    */
   #handles = new Set<HTMLElement>();
+
+  /** Drags started so far, see `GrabberOwner`. */
+  #dragCount = 0;
   /**
    * The element whose keyboard focus moves the drawer to its highest snap
    * point, to show in the tray when it arrives, see `#onTrayFocusIn`.
@@ -1089,6 +1101,35 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.uncontrolledVersion++;
     }
     this.args.onSnapPointChange?.(index);
+  };
+
+  /**
+   * The yielded `Grabber`'s action, like the grabber of an iOS sheet: moves
+   * to the next larger open snap point (offset above `0`), and from the
+   * largest back to the smallest open one. It never closes the drawer.
+   * Returns the index it moved to, or `undefined` when there is nothing to
+   * move to: before the drawer is measured, during a drag, or with fewer
+   * than two open snap points.
+   */
+  #cycle(): number | undefined {
+    const layout = this.#layout;
+    if (!layout || this.#drag || this.#destroyed) return undefined;
+    const open = layout.resolved.filter((snapPoint) => snapPoint.offset > 0);
+    if (open.length < 2) return undefined;
+    const active = this.activeSnapPoint;
+    const at = open.findIndex((snapPoint) =>
+      snapPoint.indices.includes(active),
+    );
+    const next = open[at === -1 || at === open.length - 1 ? 0 : at + 1]!;
+    const index = this.#indexOf(next);
+    this.snapTo(index);
+    return index;
+  }
+
+  /** What the yielded `Grabber` gets, see `grabber.gts`. */
+  grabberOwner: GrabberOwner = {
+    cycle: () => this.#cycle(),
+    dragCount: () => this.#dragCount,
   };
 
   open = (): void => {
@@ -1354,6 +1395,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (this.#shadow) {
       this.#shadow.style.height =
         this.placement === 'bottom' ? `${trayLength}px` : '';
+    }
+    const open = resolved
+      .filter((snapPoint) => snapPoint.offset > 0)
+      .map((snapPoint) => snapPoint.indices);
+    if (JSON.stringify(open) !== JSON.stringify(this.openSnapPoints)) {
+      this.#queueState({ openSnapPoints: open });
     }
     return true;
   }
@@ -3350,6 +3397,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       offset,
     };
     this.#drag = drag;
+    this.#dragCount++;
     drag.target = this.#dragOffset(drag, recognisedAt);
     this.#velocity.reset();
     // The velocity of the finger (see `onPan`), not of the catch-up.
@@ -3587,6 +3635,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       ) {
         this.isDragging = pending.isDragging;
       }
+      if (pending.openSnapPoints) {
+        this.openSnapPoints = pending.openSnapPoints;
+      }
     });
   }
 
@@ -3641,32 +3692,46 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           )}}
         >
           <div class="mobile-drawer__content">
-            {{yield
-              (hash
-                snapTo=this.snapTo
-                open=this.open
-                close=this.close
-                activeSnapPoint=this.activeSnapPoint
-                handle=(modifier
-                  dragSource
-                  axis=this.axis
-                  pointerTypes=POINTER_TYPES
-                  onPointerDown=this.onPointerDown
-                  onPanStart=this.onPanStart
-                  onPan=this.onPan
-                  onPanEnd=this.onPanEnd
-                  onInstall=this.onHandleInstall
-                  shouldDrag=this.shouldHandleDrag
-                  onTeardown=this.onHandleTeardown
-                )
-                isDragging=this.isDragging
-                isAnimating=this.isAnimating
-                progress=this.progress
-                Nested=(component
-                  NestedPortal owner=this.nestedOwner fallback=this.nestedParent
-                )
+            {{#let
+              (modifier
+                dragSource
+                axis=this.axis
+                pointerTypes=POINTER_TYPES
+                onPointerDown=this.onPointerDown
+                onPanStart=this.onPanStart
+                onPan=this.onPan
+                onPanEnd=this.onPanEnd
+                onInstall=this.onHandleInstall
+                shouldDrag=this.shouldHandleDrag
+                onTeardown=this.onHandleTeardown
               )
+              as |handle|
             }}
+              {{yield
+                (hash
+                  snapTo=this.snapTo
+                  open=this.open
+                  close=this.close
+                  activeSnapPoint=this.activeSnapPoint
+                  handle=handle
+                  Grabber=(component
+                    Grabber
+                    owner=this.grabberOwner
+                    handle=handle
+                    activeSnapPoint=this.activeSnapPoint
+                    openSnapPoints=this.openSnapPoints
+                  )
+                  isDragging=this.isDragging
+                  isAnimating=this.isAnimating
+                  progress=this.progress
+                  Nested=(component
+                    NestedPortal
+                    owner=this.nestedOwner
+                    fallback=this.nestedParent
+                  )
+                )
+              }}
+            {{/let}}
           </div>
         </div>
       </div>

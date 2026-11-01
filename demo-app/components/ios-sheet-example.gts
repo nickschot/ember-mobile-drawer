@@ -37,10 +37,14 @@ type Placement = 'bottom' | 'top';
  * class on an ancestor of the drawer opts in, and
  * `mobile-drawer-theme-ios__grabber` draws the grabber bar, sticky at the
  * sheet's page-facing edge. The list is longer than the screen, so it
- * scrolls under the grabber when the sheet is fully open. The grabber has
- * the `handle` modifier, so a drag on it always moves the sheet, also when
- * the list is scrolled, and `data-mobile-drawer-pinned`, so it stays at the
- * sheet's edge while the list bounces past fully open. It moves with `springPresets.ios`.
+ * scrolls under the grabber when the sheet is fully open. The grabber is
+ * the yielded `Grabber`: a button that is a drag handle, so a drag on it
+ * always moves the sheet, also when the list is scrolled, and a tap (or
+ * Enter or Space) moves the sheet between 40% and full height, as on iOS.
+ * It has `data-mobile-drawer-pinned`, so it stays at the sheet's edge while
+ * the list bounces past fully open. The nested sheet has one open snap
+ * point, so it has nothing to cycle: its grabber stays a `<div>` with the
+ * `handle` modifier. It moves with `springPresets.ios`.
  *
  * "Scale the page" turns on the theme's page scale effect: the application
  * template's page element gets `mobile-drawer-theme-ios__page` and
@@ -125,11 +129,10 @@ export default class IosSheetExample extends Component {
             as |drawer|
           >
             {{#unless this.isTop}}
-              <div
+              <drawer.Grabber
                 class="mobile-drawer-theme-ios__grabber"
                 data-mobile-drawer-pinned
-                {{drawer.handle}}
-              ></div>
+              />
             {{/unless}}
             <div class="example-ios-title">
               <h3 id="example-ios-title">Find nearby</h3>
@@ -183,11 +186,10 @@ export default class IosSheetExample extends Component {
               </MobileDrawer>
             </drawer.Nested>
             {{#if this.isTop}}
-              <div
+              <drawer.Grabber
                 class="mobile-drawer-theme-ios__grabber"
                 data-mobile-drawer-pinned
-                {{drawer.handle}}
-              ></div>
+              />
             {{/if}}
           </MobileDrawer>
         </div>

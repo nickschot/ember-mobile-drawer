@@ -55,6 +55,48 @@ export interface MobileDrawerApi {
    */
   handle: ModifierLike<{ Element: HTMLElement }>;
   /**
+   * An accessible grabber, like the grabber of an iOS sheet: a
+   * `<button type="button">` with the `handle` modifier, so a drag that
+   * starts on it drags the drawer (also with `@handleOnly`). A tap, a
+   * click, Enter or Space moves the drawer to the next larger open snap
+   * point, and from the largest back to the smallest open one; it never
+   * closes the drawer (a snap point at `0` is skipped). With fewer than two
+   * open snap points it does nothing. A pointer that dragged the drawer
+   * doesn't also click it.
+   *
+   * For screen readers it is named by `@label` (default
+   * `'Sheet grabber'`) and described by the snap point the drawer is at:
+   * `@snapPointLabels[index]`, else `'Expanded'` (largest), `'Collapsed'`
+   * (smallest of two or more open ones), `'Partly expanded'` (between) or
+   * `'Closed'`. After an activation a status element (`role="status"`)
+   * right after the button announces the new snap point, once the drawer
+   * is there; the text goes when the drawer moves in another way. The
+   * button has
+   * no styles of its own: give it a class, e.g.
+   * `mobile-drawer-theme-ios__grabber`. A modal drawer that opens doesn't
+   * focus it (see `@modal`): focus goes to the first other focusable
+   * element.
+   *
+   * ```gts
+   * <MobileDrawer @snapPoints={{array 0 "40%" "100%"}} as |drawer|>
+   *   <drawer.Grabber class="grabber" data-mobile-drawer-pinned />
+   * </MobileDrawer>
+   * ```
+   */
+  Grabber: ComponentLike<{
+    Element: HTMLButtonElement;
+    Args: {
+      /** The accessible name. Default `'Sheet grabber'`. */
+      label?: string;
+      /**
+       * What a screen reader says the drawer is at, one text per snap
+       * point, indexed like `@snapPoints`. Missing entries get the default
+       * text.
+       */
+      snapPointLabels?: readonly (string | undefined)[];
+    };
+  }>;
+  /**
    * Whether the user is dragging the drawer: from the moment a pan along the
    * drawer's axis is recognised until the finger lifts. Dragging works with
    * touch and pen input.

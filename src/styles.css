@@ -285,6 +285,11 @@
  *                           the opposite inline `translate` on it, and puts
  *                           back the element's own inline `translate` after
  *                           the bounce.
+ .mobile-drawer__visually-hidden
+ *                           Rendered by the yielded `Grabber`, in and after
+ *                           its button: text for screen readers only (the
+ *                           snap point the drawer is at, and a status element
+ *                           that announces the new one). Clipped to 1px.
  *
  * Custom properties (set them on the root, any ancestor or :root)
  * ---------------------------------------------------------------
@@ -516,6 +521,23 @@
    */
   :where(.mobile-drawer-nested) {
     display: contents;
+  }
+
+  /*
+   * Text for screen readers only, rendered by the yielded `Grabber`: its
+   * description (the snap point the drawer is at) and its status element
+   * (the new snap point after an activation).
+   */
+  :where(.mobile-drawer__visually-hidden) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   :where(.mobile-drawer-nested[data-closed]) {

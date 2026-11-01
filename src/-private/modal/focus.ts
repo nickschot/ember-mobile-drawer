@@ -54,7 +54,10 @@ export function tabbables(container: Element): HTMLElement[] {
 
 /**
  * The element to focus when a modal drawer opens: the first element with
- * `autofocus`, else the first tabbable element, else `fallback`.
+ * `autofocus`, else the first tabbable element that isn't a yielded
+ * `Grabber` (`data-mobile-drawer-grabber`), else `fallback`. The grabber
+ * comes first in a bottom drawer, but it is a control for the drawer, not
+ * its content, so focus (and a screen reader) starts at the content.
  */
 export function initialFocus(
   container: Element,
@@ -63,7 +66,13 @@ export function initialFocus(
   const autofocus = [
     ...container.querySelectorAll<HTMLElement>('[autofocus]'),
   ].find((element) => !element.closest('[inert]') && isVisible(element));
-  return autofocus ?? tabbables(container)[0] ?? fallback;
+  return (
+    autofocus ??
+    tabbables(container).find(
+      (element) => !element.hasAttribute('data-mobile-drawer-grabber'),
+    ) ??
+    fallback
+  );
 }
 
 /** `element.focus()` without scrolling to it. */
