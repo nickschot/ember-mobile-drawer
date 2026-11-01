@@ -304,6 +304,62 @@ module('Integration | Component | mobile-drawer | Grabber', function (hooks) {
     assert.strictEqual(status(), '', 'nothing announced');
   });
 
+  test('the status text goes when the drawer moves in another way', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+    await settle();
+    const grabber = el('[data-test-grabber]');
+
+    tapClick(grabber);
+    await settle();
+    assert.strictEqual(status(), 'Expanded', 'announced');
+
+    // The app (as a drag or the backdrop does) moves the drawer.
+    state.active = 1;
+    await settle();
+    assert.strictEqual(status(), '', 'cleared: no stale text');
+    state.active = 2;
+    await settle();
+    assert.strictEqual(status(), '', 'and it does not come back');
+
+    // Escape closes it: also cleared.
+    tapClick(grabber);
+    await settle();
+    assert.strictEqual(status(), 'Collapsed');
+    await triggerKeyEvent(grabber, 'keydown', 'Escape');
+    await settle();
+    assert.dom('[data-test-active]').hasText('0');
+    assert.strictEqual(status(), '');
+  });
+
+  test('a controlled parent that answers later: announced on arrival', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+    await settle();
+    state.accept = false;
+    tapClick(el('[data-test-grabber]'));
+    await settle();
+    assert.strictEqual(status(), '', 'not there yet');
+    state.active = 2;
+    await settle();
+    assert.strictEqual(status(), 'Expanded', 'announced when it gets there');
+  });
+
+  test('a controlled parent that refuses: nothing announced', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+    await settle();
+    state.accept = false;
+    tapClick(el('[data-test-grabber]'));
+    await settle();
+    // The app moves the drawer elsewhere, then to the asked snap point.
+    state.active = 0;
+    await settle();
+    state.active = 2;
+    await settle();
+    assert.strictEqual(status(), '', 'the old request is not announced');
+  });
+
   test('a controlled drawer is asked to move', async function (assert) {
     const state = new State();
     await renderDrawer(state);

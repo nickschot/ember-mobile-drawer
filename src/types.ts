@@ -69,7 +69,9 @@ export interface MobileDrawerApi {
    * `@snapPointLabels[index]`, else `'Expanded'` (largest), `'Collapsed'`
    * (smallest of two or more open ones), `'Partly expanded'` (between) or
    * `'Closed'`. After an activation a status element (`role="status"`)
-   * right after the button announces the new snap point. The button has
+   * right after the button announces the new snap point, once the drawer
+   * is there; the text goes when the drawer moves in another way. The
+   * button has
    * no styles of its own: give it a class, e.g.
    * `mobile-drawer-theme-ios__grabber`. A modal drawer that opens doesn't
    * focus it (see `@modal`): focus goes to the first other focusable

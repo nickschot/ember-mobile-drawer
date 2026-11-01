@@ -43,6 +43,20 @@ export interface GrabberSignature {
 
 let ids = 0;
 
+/** An activation's announcement, see `Grabber#announcements`. */
+interface Announcement {
+  id: number;
+  text: string;
+  /** The snap point the activation moves to. */
+  index: number;
+  /** The active snap point at the activation. */
+  from: number;
+  /** Whether the drawer got to `index` (its snap point became active). */
+  reached: boolean;
+  /** Whether the drawer moved on in another way: the text is stale. */
+  gone: boolean;
+}
+
 /**
  * The yielded `Grabber` component of `<MobileDrawer>`: a `<button>` that is
  * a drag handle (the drawer's `handle` modifier) and, on a tap, a click,
@@ -57,7 +71,7 @@ export default class Grabber extends Component<GrabberSignature> {
   readonly valueId = `mobile-drawer-grabber-${++ids}`;
 
   /** The last announcement; a new `id` renders a new text node. */
-  @tracked announcement?: { id: number; text: string };
+  @tracked announcement?: Announcement;
 
   /** `dragCount` at the last pointerdown on the button, until its click. */
   #downDrags?: number;
@@ -70,8 +84,26 @@ export default class Grabber extends Component<GrabberSignature> {
     return this.stateText(this.args.activeSnapPoint);
   }
 
-  get announcements(): { id: number; text: string }[] {
-    return this.announcement ? [this.announcement] : [];
+  /**
+   * The status text: the last activation's announcement while the drawer is
+   * at its snap point. It shows once the snap point is active (a controlled
+   * parent can pass it in later), and goes for good when the drawer moves
+   * in another way (a drag, the backdrop, Escape, the app), so no stale
+   * text stays in the status element. The flags are not tracked: they only
+   * change here, as `activeSnapPoint` changes.
+   */
+  get announcements(): Announcement[] {
+    const announcement = this.announcement;
+    if (!announcement || announcement.gone) return [];
+    const active = this.args.activeSnapPoint;
+    if (active === announcement.index) {
+      announcement.reached = true;
+      return [announcement];
+    }
+    // Not there yet: wait while the drawer is still where it was.
+    if (!announcement.reached && active === announcement.from) return [];
+    announcement.gone = true;
+    return [];
   }
 
   /**
@@ -107,10 +139,15 @@ export default class Grabber extends Component<GrabberSignature> {
     ) {
       return;
     }
+    const from = this.args.activeSnapPoint;
     const index = this.args.owner.cycle();
     if (index === undefined) return;
     this.announcement = {
       id: (this.announcement?.id ?? 0) + 1,
+      index,
+      from,
+      reached: false,
+      gone: false,
       text: this.stateText(index),
     };
   };
