@@ -12,6 +12,7 @@ import {
 import {
   dragOffset,
   findSnapPoint,
+  rubberBand,
   resolveSnapPoints,
   selectSnapPoint,
   type ResolvedSnapPoint,
@@ -82,12 +83,50 @@ const OPENING_DIRECTION: Record<Placement, 1 | -1> = {
 };
 
 /**
- * Rubber-band dimension (px) past the largest snap point: the most the tray
- * can be pulled past fully open. Small, because the tray then leaves its
- * edge and the backdrop shows in the gap. Past the smallest snap point the
- * container size is used.
+ * The rubber band past the largest snap point, like iOS: the classic
+ * UIScrollView curve `(1 - 1 / (x * c / d + 1)) * d` with
+ * `c = DEFAULT_RUBBER_BAND_FACTOR` (0.55) and a dimension `d` of
+ * `OPEN_RUBBER_BAND_RATIO` times the container. Measured in the iOS 27
+ * simulator (iPhone 17e): at the top of a sheet the content follows this
+ * curve with c ≈ 0.55 and d ≈ 440pt for a sheet of about 800pt, so
+ * d ≈ 0.55 × the sheet's height. Past the smallest snap point the container
+ * size is used.
  */
-const OPEN_RUBBER_BAND = 24;
+const OPEN_RUBBER_BAND_RATIO = 0.55;
+
+/**
+ * The longest pull past fully open (px of finger movement, as a fraction of
+ * the container) that the overhang must cover: a pull over the whole
+ * container. With the band above that gives at most 0.275 × the container
+ * (half the band dimension). A longer pull (only possible with a pointer
+ * that leaves the viewport) is clamped there, so no gap ever shows.
+ */
+const MAX_OPEN_PULL_RATIO = 1;
+
+/**
+ * How far (px) the tray's box reaches past its edge, off screen, for a
+ * container of `container` px: the rubber band's offset at the longest pull
+ * (see `MAX_OPEN_PULL_RATIO`), rounded up. While the drawer is pulled past
+ * fully open this part of the tray comes into view and fills the gap at the
+ * edge with the tray's own background, blur and rim.
+ *
+ * Written on each measure as the read-only `--mobile-drawer-overhang` on
+ * the tray. The base styles move the tray's edge out by it, add it to the
+ * tray's max size and to the content's edge-side padding (so the content
+ * still ends at the visible edge), and to the tray's edge-side
+ * `scroll-padding` (so focus doesn't scroll an element behind the edge).
+ * Every length in `Layout` except `overhang` is without it: the part of the
+ * tray that can be in view.
+ */
+function overhangFor(container: number): number {
+  const dimension = container * OPEN_RUBBER_BAND_RATIO;
+  return Math.ceil(
+    rubberBand(container * MAX_OPEN_PULL_RATIO, 0, 0, { dimension }),
+  );
+}
+
+/** The read-only custom property that holds the overhang on the tray. */
+const OVERHANG_PROPERTY = '--mobile-drawer-overhang';
 
 /**
  * Marks an element inside the tray as a scroll container for scroll vs drag
@@ -316,10 +355,15 @@ interface Layout {
   resolved: ResolvedSnapPoint[];
   /** The space the tray can open into, in px. */
   container: number;
-  /** Untransformed tray size along the drawer axis, in px. */
+  /**
+   * Untransformed tray size along the drawer axis, in px, without the
+   * overhang: the length of the part that can be in view.
+   */
   trayLength: number;
   /** Offset of the largest snap point, in px. */
   maxOffset: number;
+  /** How far the tray's box reaches past its edge, in px (`overhangFor`). */
+  overhang: number;
 }
 
 /**
@@ -424,8 +468,9 @@ const clampIndex = (index: number, count: number) =>
  *
  * The tray can be dragged with touch or pen input along the drawer's axis
  * (through `didPan` from ember-gesture-modifiers). It follows the finger 1:1,
- * with rubber-band resistance past the first and last snap point (stiff past
- * the last one: at most `OPEN_RUBBER_BAND` px). On release the drawer's
+ * with rubber-band resistance past the first and last snap point (past the
+ * last one like iOS, see `OPEN_RUBBER_BAND_RATIO`; the tray's overhang
+ * fills the gap at its edge, see `overhangFor`). On release the drawer's
  * velocity is handed to the spring and the snap point nearest to where the
  * release would carry the drawer is picked; a release faster than
  * `FLING_VELOCITY` always moves at least one snap point its way. A touch
@@ -912,6 +957,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const size = vertical ? 'height' : 'width';
     const { style } = tray;
     const { height, width } = style;
+    const overhangValue = style.getPropertyValue(OVERHANG_PROPERTY);
+    // Measured without the overhang, which depends on the container.
+    style.setProperty(OVERHANG_PROPERTY, '0px');
 
     // The tray's natural size.
     style.height = '';
@@ -926,10 +974,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!content || !available) {
       style.height = height;
       style.width = width;
+      style.setProperty(OVERHANG_PROPERTY, overhangValue);
       return false;
     }
     const { length: natural, extra } = content;
     const container = available.length;
+    // The box gets the overhang on top of these lengths (max size, content
+    // padding and an explicit size below all include it).
+    const overhang = overhangFor(container);
+    style.setProperty(OVERHANG_PROPERTY, `${overhang}px`);
 
     const resolved = resolveSnapPoints(this.snapPoints, {
       container,
@@ -940,13 +993,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     let trayLength = natural;
     if (maxOffset > natural) {
       // A snap point needs more than the content: grow the tray to it.
-      style[size] = `${maxOffset - extra}px`;
+      style[size] = `${maxOffset + overhang - extra}px`;
       trayLength = maxOffset;
     } else {
       style[size] = '';
     }
 
-    this.#layout = { resolved, container, trayLength, maxOffset };
+    this.#layout = { resolved, container, trayLength, maxOffset, overhang };
     return true;
   }
 
@@ -1929,7 +1982,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const layout = this.#layout!;
     const rect = this.#tray!.getBoundingClientRect();
     const scale =
-      (this.axis === 'vertical' ? rect.height : rect.width) / layout.trayLength;
+      (this.axis === 'vertical' ? rect.height : rect.width) /
+      (layout.trayLength + layout.overhang);
     return Number.isFinite(scale) && scale > 0 ? scale : 1;
   }
 
@@ -1955,21 +2009,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * Where the drag puts the drawer after the finger moved `delta` px (in
    * drawer px, positive opens) since the drag started: 1:1 inside the snap
-   * range and back towards it, rubber-banded outside it (stiff past fully
-   * open, see `OPEN_RUBBER_BAND`). See `dragOffset`.
+   * range and back towards it, rubber-banded outside it (past fully open
+   * like iOS, see `OPEN_RUBBER_BAND_RATIO`). See `dragOffset`. Never further
+   * past the tray's length than its overhang, so no gap shows at its edge.
    */
   #dragOffset(drag: Drag, delta: number): number {
-    const { resolved, container } = this.#layout!;
-    return dragOffset(
+    const { resolved, container, trayLength, overhang } = this.#layout!;
+    const offset = dragOffset(
       drag.startOffset,
       delta,
       resolved[0]!.offset,
       resolved[resolved.length - 1]!.offset,
       {
         below: { dimension: container },
-        above: { dimension: OPEN_RUBBER_BAND },
+        above: { dimension: container * OPEN_RUBBER_BAND_RATIO },
       },
     );
+    return Math.min(offset, Math.max(drag.startOffset, trayLength + overhang));
   }
 
   /**

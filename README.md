@@ -186,7 +186,7 @@ Animations respect `prefers-reduced-motion`: with reduced motion the drawer jump
 
 ### Dragging
 
-The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. Past fully open the resistance is stiff: the tray moves off its edge by at most 24px, with the backdrop showing in the gap. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
+The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. Past fully open the resistance is like an iOS sheet: the classic UIScrollView rubber band, `(1 − 1 / (x × 0.55 / d + 1)) × d` for a pull of `x` px, with `d` = 0.55 × the space the drawer opens into (measured in the iOS simulator, see [#51](https://github.com/nickschot/ember-mobile-drawer/issues/51)). A pull over the whole screen moves the tray 0.275 × that space off its edge. The tray's [overhang](#the-trays-overhang) fills that gap, so the backdrop doesn't show at the edge. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
 
 When `@activeSnapPoint` is set, letting go calls `@onSnapPointChange` with the snap point the drag ended on. Until you pass that index back in, the drawer heads back to the current `@activeSnapPoint`; if you never do, it stays there.
 
@@ -319,9 +319,11 @@ Customise it with CSS custom properties, set on `:root`, any ancestor or the dra
 | `--mobile-drawer-backdrop-opacity` | `0.4`          | Backdrop opacity when the drawer is fully open, a number from 0 to 1 |
 | `--mobile-drawer-z-index`          | `1000`         | Stacking order of the drawer overlay            |
 
+One more custom property is read-only: `--mobile-drawer-overhang`, how far the tray reaches past its edge, in px. See [The tray's overhang](#the-trays-overhang).
+
 The base styles are easy to override. Every selector is wrapped in `:where()` (zero specificity), and the whole file lives in the `ember-mobile-drawer` cascade layer.
 
-- Unlayered app CSS always wins, whatever its specificity or import order. For example, `.mobile-drawer__tray { width: 20rem; }` gives a side drawer a width.
+- Unlayered app CSS always wins, whatever its specificity or import order. For example, `.mobile-drawer__tray { width: calc(20rem + var(--mobile-drawer-overhang, 0px)); }` gives a side drawer a visible width of 20rem (see [The tray's overhang](#the-trays-overhang)).
 - If your app uses cascade layers (your own `@layer` rules or Tailwind v4), declare the drawer's layer after your resets and before your components and utilities. Put this line at the top of your main stylesheet:
 
   ```css
@@ -332,7 +334,7 @@ The base styles are easy to override. Every selector is wrapped in `:where()` (z
 
 Cascade layers need Safari/iOS 15.4+, Chrome 99+ or Firefox 97+.
 
-When a snap point makes the tray larger than its content, the content sits against the tray's leading edge, the edge that comes into view first. A drawer that is partly open shows its content rather than empty space. Bottom and right drawers do this through normal block layout. For top and left drawers the tray is a flex container and `.mobile-drawer__content` gets an auto start margin (`margin-top: auto` for top, `margin-left: auto` for left). Content taller or wider than the tray still scrolls; below its highest snap point, a top drawer's tray is scrolled to the end of its content, so the end of the content is at its leading edge (see [Scrolling content](#scrolling-content)). To align the content differently, override `display` on `.mobile-drawer__tray` or `margin` on `.mobile-drawer__content`, for example:
+When a snap point makes the tray larger than its content, the content sits against the tray's leading edge, the edge that comes into view first. A drawer that is partly open shows its content rather than empty space. Bottom drawers do this through normal block layout, right drawers through a flex row (so content wider than the tray keeps the content's right padding in the scroll range). For top and left drawers the tray is a flex container and `.mobile-drawer__content` gets an auto start margin (`margin-top: auto` for top, `margin-left: auto` for left). Content taller or wider than the tray still scrolls; below its highest snap point, a top drawer's tray is scrolled to the end of its content, so the end of the content is at its leading edge (see [Scrolling content](#scrolling-content)). To align the content differently, override `display` on `.mobile-drawer__tray` or `margin` on `.mobile-drawer__content`, for example:
 
 ```css
 .mobile-drawer[data-placement="top"] > .mobile-drawer__tray {
@@ -341,6 +343,30 @@ When a snap point makes the tray larger than its content, the content sits again
 ```
 
 The safe-area insets are padding on the `.mobile-drawer__content` element inside the tray. The base styles set no padding on the tray itself, so padding you add to `.mobile-drawer__tray` adds to the insets instead of replacing them. Don't set padding on `.mobile-drawer__content`, because that would remove the insets. Unlayered resets that set padding on `*` or `div` remove them too, because unlayered CSS always wins over the drawer's layer. In the same way, an unlayered `* { margin: 0 }` reset undoes the leading-edge alignment of top and left drawers. Put such resets in a layer before `ember-mobile-drawer`.
+
+### The tray's overhang
+
+The tray's box reaches past the edge it opens from, by 0.275 × the space the drawer opens into (for example 233px for a bottom drawer on an 844px tall screen): the furthest the rubber band can move the tray off its edge. That part is off screen while the drawer rests. When you pull the drawer past fully open, the tray moves off its edge, and this part comes into view. It fills the gap with the tray's own background, blur and rim, so the backdrop doesn't show at the edge.
+
+The component writes the length as `--mobile-drawer-overhang` (in px) inline on the tray each time it measures. The property is read-only: don't set it. It is defined on the tray and its descendants only. The base styles use it:
+
+- The tray's edge-side inset is minus the overhang (for example `bottom: -233px` for a bottom drawer), and its `max-height` (bottom, top) or `max-width` (left, right) is the overhang larger.
+- `.mobile-drawer__content` has the overhang in its edge-side padding, after the safe-area inset. That padding is off screen, so the content (and its safe-area padding) still ends at the visible edge, and the scroll range doesn't change.
+- The tray has the overhang as its edge-side `scroll-padding`, so focus doesn't scroll an element behind the edge.
+
+So the tray's box is the overhang larger than the part that can be in view. If your CSS sets a size, a max size or an edge-side inset on the tray, add the overhang:
+
+```css
+.my-sheet > .mobile-drawer__tray {
+  max-height: calc(90% + var(--mobile-drawer-overhang, 0px));
+}
+
+.my-side-drawer > .mobile-drawer__tray {
+  width: calc(20rem + var(--mobile-drawer-overhang, 0px));
+}
+```
+
+Without it, the visible part of the tray is the overhang smaller. If your code measures the tray (for example its natural size), subtract the overhang. Don't override the content's padding or the tray's `scroll-padding` on the edge side.
 
 ### State attributes
 
@@ -497,7 +523,7 @@ Optional, and off by default: while a modal bottom sheet is open, the page behin
 - A page element that is rendered while a sheet is open (for example after a route change) follows the sheet at once, also while the sheet is at rest. A page element that is removed gets its properties removed.
 - **`position: fixed`**: while the page is scaled it has a `transform`, so `position: fixed` content in it is positioned against the page element instead of the viewport. That is only right when the page element fills the viewport (for example an app shell whose content scrolls inside it); otherwise such content can move while a sheet is open. While no modal sheet is open the page has no `transform` at all, so fixed content works as usual.
 - **Black around the page**: the theme makes `<body>` black while a drawer moves the page (the component then puts `data-mobile-drawer-page-active` on the page element). This only works when the page element is a direct child of `<body>`. A sheet that rests at a peek (its smallest snap point, with the page not scaled) doesn't make `<body>` black. An unlayered `background` on `<body>` wins over that: put the page colour on `<html>` and on the page element instead. The page element gets `Canvas` as its background (set `--mobile-drawer-ios-page-background`, or a `background` of your own). Give `<body>` no margin or padding, so the black only shows around the scaled page.
-- **Leave a gap at the top**: the theme doesn't add it, your app's CSS does. A sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px); }`, as the demo does.
+- **Leave a gap at the top**: the theme doesn't add it, your app's CSS does. A sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px + var(--mobile-drawer-overhang, 0px)); }`, as the demo does. The max height includes the tray's [overhang](#the-trays-overhang).
 - **Performance**: the page's `transform` (a `translate3d` and a `scale`) changes every frame, and the `translate3d` puts the page on a compositing layer of its own while it is scaled, so the browser doesn't paint the page again on every frame. The rounded corners are a `clip-path` with a fixed radius, which only changes when a sheet opens.
 - **Reduced motion**: with `prefers-reduced-motion: reduce` the page doesn't scale or move.
 - **Inherited properties**: the theme registers `--mobile-drawer-page-progress` and `--mobile-drawer-page-viewport-top` with `@property` as not inherited (`inherits: false`), for the whole document, so the page's content isn't styled again on every frame. So when you load `ios.css`, app CSS can't read these properties on a child of the page element. Read them on the page element itself.

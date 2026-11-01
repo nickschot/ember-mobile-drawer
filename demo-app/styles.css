@@ -344,7 +344,8 @@ section > h2 {
 
 /* Bottom sheet example */
 .example-sheet .mobile-drawer__tray {
-  max-height: 90%;
+  /* With the overhang, so the visible part is 90% at most. */
+  max-height: calc(90% + var(--mobile-drawer-overhang, 0px));
 }
 
 .example-sheet-header {
@@ -428,7 +429,10 @@ section > h2 {
  * as iOS does, so the scaled page shows behind it as a card.
  */
 .example-ios-sheet--card[data-placement="bottom"] > .mobile-drawer__tray {
-  max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px);
+  max-height: calc(
+    100% - env(safe-area-inset-top, 0px) - 24px +
+      var(--mobile-drawer-overhang, 0px)
+  );
 }
 
 .example-ios-title {

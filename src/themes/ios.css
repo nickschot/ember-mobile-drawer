@@ -141,7 +141,15 @@
  *   app CSS wins over it.
  * - The theme doesn't add a gap above a full-height sheet: iOS shows the
  *   scaled page above it. Leave that gap in the app's CSS, e.g. with a
- *   `max-height` on the tray or a largest snap point below 100%.
+ *   `max-height` on the tray or a largest snap point below 100%. A
+ *   `max-height` on the tray must include the tray's overhang (see the tray
+ *   in styles.css), e.g. `max-height: calc(100% -
+ *   env(safe-area-inset-top, 0px) - 24px + var(--mobile-drawer-overhang,
+ *   0px))`.
+ *
+ * The tray's overhang (styles.css) is part of the tray, so the glass blur,
+ * the tint and the rim go on into it, and a pull past fully open shows no
+ * seam. The rim's edge-side line is off screen with the overhang.
  * - This file registers both properties with `@property` as not inherited
  *   (`inherits: false`), for the whole document. So app CSS that reads
  *   --mobile-drawer-page-progress on a child of the page works without the

@@ -97,12 +97,14 @@
  *                             left:   translate3d(-Npx, 0, 0)
  *                             right:  translate3d( Npx, 0, 0)
  *                           where trayLength is the tray's untransformed
- *                           height (bottom/top) or width (left/right). N is
- *                           negative while the user drags the drawer past
- *                           fully open (rubber-banding) and while it springs
- *                           back from there: the tray then leaves its edge
- *                           and the backdrop shows in the gap. The band is
- *                           stiff there, so the gap stays under 24px. Use a
+ *                           height (bottom/top) or width (left/right) minus
+ *                           the overhang (see below): the length of the part
+ *                           that can be in view. N is negative while the
+ *                           user drags the drawer past fully open
+ *                           (rubber-banding) and while it springs back from
+ *                           there. The band there is like iOS (the
+ *                           UIScrollView curve, see the README), and the
+ *                           overhang fills the gap at the edge. Use a
  *                           fractional size from getComputedStyle (its px
  *                           height/width), not the rounded offsetHeight/
  *                           offsetWidth, so no sliver stays visible when
@@ -111,9 +113,32 @@
  *                           its ancestors, e.g. a scaled preview). Before the
  *                           first inline transform is written the tray sits
  *                           fully off screen (closed).
- *                           The tray's length is its content size, capped at
- *                           the root; the component may set an explicit
- *                           height/width when a snap point needs more.
+ *                           Overhang: the tray's box reaches
+ *                           `--mobile-drawer-overhang` past its edge
+ *                           (0.275 x the container, e.g. 233px for a
+ *                           844px tall root),
+ *                           off screen and clipped by the root. When the
+ *                           drawer is pulled past fully open, this part comes
+ *                           into view and fills the gap at the edge with the
+ *                           tray's own background, blur and rim, so the
+ *                           backdrop doesn't show there. The base styles
+ *                           move the tray's edge-side inset out by it, add it
+ *                           to the tray's max-height (bottom/top) or
+ *                           max-width (left/right) and to its edge-side
+ *                           `scroll-padding`, and add it to the content's
+ *                           edge-side padding, so the content still ends at
+ *                           the visible edge and the scroll range doesn't
+ *                           change. So the tray box is the overhang longer
+ *                           than its visible part. App CSS that sets a size,
+ *                           a max size or an edge-side inset on the tray must
+ *                           add the overhang, e.g.
+ *                             max-height: calc(90% + var(--mobile-drawer-overhang, 0px));
+ *                             width: calc(20rem + var(--mobile-drawer-overhang, 0px));
+ *                           and code that measures the tray must subtract it.
+ *                           The tray's length is its content size (with the
+ *                           overhang), capped at the root plus the overhang;
+ *                           the component may set an explicit height/width
+ *                           (with the overhang) when a snap point needs more.
  *                           The content then sits against the tray's leading
  *                           edge, the one that comes into view first: the top
  *                           of a bottom drawer, the bottom of a top drawer,
@@ -121,7 +146,10 @@
  *                           right drawer. For top and left the tray is a flex
  *                           container and the content gets an auto start
  *                           margin; the margin drops to 0 when the content
- *                           overflows, so it still scrolls. The component
+ *                           overflows, so it still scrolls. A right tray is a
+ *                           flex row too (no auto margin), so content wider
+ *                           than the tray keeps the content's right padding
+ *                           (inset and overhang) in the scroll range. The component
  *                           keeps a bottom or top tray at its scroll start
  *                           (scrollTop 0 for bottom, the end of the scroll
  *                           range for top, whose leading edge is its bottom)
@@ -145,13 +173,15 @@
  *                           don't pad the tray's leading edge: the grabber
  *                           sticks inside that padding.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
- *                           carries the safe-area padding (see below) and,
+ *                           carries the safe-area padding (see below), the
+ *                           overhang on the edge side (see the tray) and,
  *                           for top and left, the auto start margin (see the
  *                           tray). Apps should not set padding on it; pad the
  *                           tray or their own elements instead. For a
  *                           `content` snap point, measure the tray's natural
- *                           (untransformed) size rather than this element,
- *                           so tray padding and borders are included.
+ *                           (untransformed) size minus the overhang rather
+ *                           than this element, so tray padding and borders
+ *                           are included.
  *
  * Custom properties (set them on the root, any ancestor or :root)
  * ---------------------------------------------------------------
@@ -165,6 +195,19 @@
  *   --mobile-drawer-backdrop-opacity  backdrop max opacity, a number
  *                                     from 0 to 1          (0.4)
  *   --mobile-drawer-z-index           root z-index         (1000)
+ *
+ * Read-only:
+ *
+ *   --mobile-drawer-overhang          how far the tray box reaches past its
+ *                                     edge, in px (0.275 x the space the
+ *                                     tray opens into, see the tray). The
+ *                                     component writes it as an inline style
+ *                                     on the tray, so it is defined on the
+ *                                     tray and its descendants only. Use it
+ *                                     in app CSS for the tray (with a 0px
+ *                                     fallback); don't set it: the inline
+ *                                     value wins, and the component's
+ *                                     distances depend on it.
  *
  * Defaults are given as var() fallbacks rather than declared on the root, so
  * values set on any ancestor (including :root) take effect.
@@ -217,7 +260,9 @@
  * side that touches the viewport edge, and the tray never grows under the
  * opposite inset. Because the insets live on the content element (inside the
  * scroll container), app padding on the tray adds to them instead of
- * replacing them, and the bottom inset scrolls with the content. This needs
+ * replacing them, and the bottom inset scrolls with the content. On the
+ * edge side the padding is the inset plus the overhang, and the overhang
+ * part is off screen, so the inset still ends at the visible edge. This needs
  * `viewport-fit=cover` in the viewport meta tag.
  *
  * Safari 26 bars: iOS 26 Safari clips fixed elements to the area between the
@@ -253,7 +298,11 @@
  *     is not checked) until the drawer is closed. With reduced motion
  *     (direct open to the highest snap point), reduced transparency or
  *     increased contrast the sheet is opaque from the first frame, so Safari
- *     probably takes the sheet colour (not verified in Safari).
+ *     probably takes the sheet colour (not verified in Safari). The tray's
+ *     overhang reaches past the viewport edge, under the toolbar. Safari
+ *     clips it like the rest of the fixed tray, and the sheet still touches
+ *     the bottom edge, so the colour it samples doesn't change (not verified
+ *     in Safari).
  * Content can't paint under the bars, so the safe-area padding above is
  * still correct. Other browsers don't get these rules.
  *
@@ -346,8 +395,11 @@
   /* bottom (default) */
   :where(.mobile-drawer__tray),
   :where(.mobile-drawer[data-placement="bottom"] > .mobile-drawer__tray) {
-    inset: auto 0 0;
-    max-height: calc(100% - env(safe-area-inset-top, 0px));
+    inset: auto 0 calc(-1 * var(--mobile-drawer-overhang, 0px));
+    scroll-padding: 0 0 var(--mobile-drawer-overhang, 0px);
+    max-height: calc(
+      100% - env(safe-area-inset-top, 0px) + var(--mobile-drawer-overhang, 0px)
+    );
     max-width: none;
     border-radius: var(--mobile-drawer-radius, 0) var(--mobile-drawer-radius, 0)
       0 0;
@@ -361,15 +413,22 @@
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
-    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
+    padding: 0 env(safe-area-inset-right, 0px)
+      calc(
+        env(safe-area-inset-bottom, 0px) + var(--mobile-drawer-overhang, 0px)
+      )
       env(safe-area-inset-left, 0px);
   }
 
   :where(.mobile-drawer[data-placement="top"] > .mobile-drawer__tray) {
     display: flex;
     flex-direction: column;
-    inset: 0 0 auto;
-    max-height: calc(100% - env(safe-area-inset-bottom, 0px));
+    inset: calc(-1 * var(--mobile-drawer-overhang, 0px)) 0 auto;
+    scroll-padding: var(--mobile-drawer-overhang, 0px) 0 0;
+    max-height: calc(
+      100% - env(safe-area-inset-bottom, 0px) +
+        var(--mobile-drawer-overhang, 0px)
+    );
     max-width: none;
     border-radius: 0 0 var(--mobile-drawer-radius, 0)
       var(--mobile-drawer-radius, 0);
@@ -383,8 +442,10 @@
       > .mobile-drawer__content
   ) {
     margin-top: auto;
-    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0
-      env(safe-area-inset-left, 0px);
+    padding: calc(
+        env(safe-area-inset-top, 0px) + var(--mobile-drawer-overhang, 0px)
+      )
+      env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
   }
 
   :where(.mobile-drawer[data-placement="left"] > .mobile-drawer__tray) {
@@ -393,9 +454,13 @@
     /* Not stretched, so tall content grows the content element and its
        bottom safe-area padding stays at the end of the scroll range. */
     align-items: flex-start;
-    inset: 0 auto 0 0;
+    inset: 0 auto 0 calc(-1 * var(--mobile-drawer-overhang, 0px));
+    scroll-padding: 0 0 0 var(--mobile-drawer-overhang, 0px);
     max-height: none;
-    max-width: calc(100% - env(safe-area-inset-right, 0px));
+    max-width: calc(
+      100% - env(safe-area-inset-right, 0px) +
+        var(--mobile-drawer-overhang, 0px)
+    );
     border-radius: 0 var(--mobile-drawer-radius, 0)
       var(--mobile-drawer-radius, 0) 0;
     transform: translate3d(-100%, 0, 0);
@@ -409,13 +474,22 @@
   ) {
     margin-left: auto;
     padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px)
-      env(safe-area-inset-left, 0px);
+      calc(env(safe-area-inset-left, 0px) + var(--mobile-drawer-overhang, 0px));
   }
 
   :where(.mobile-drawer[data-placement="right"] > .mobile-drawer__tray) {
-    inset: 0 0 0 auto;
+    /* A flex container like left, so content wider than the tray widens the
+       content element, and its right padding (the inset and the overhang)
+       stays at the end of the scroll range. */
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    inset: 0 calc(-1 * var(--mobile-drawer-overhang, 0px)) 0 auto;
+    scroll-padding: 0 var(--mobile-drawer-overhang, 0px) 0 0;
     max-height: none;
-    max-width: calc(100% - env(safe-area-inset-left, 0px));
+    max-width: calc(
+      100% - env(safe-area-inset-left, 0px) + var(--mobile-drawer-overhang, 0px)
+    );
     border-radius: var(--mobile-drawer-radius, 0) 0 0
       var(--mobile-drawer-radius, 0);
     transform: translate3d(100%, 0, 0);
@@ -427,7 +501,8 @@
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
-    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    padding: env(safe-area-inset-top, 0px)
+      calc(env(safe-area-inset-right, 0px) + var(--mobile-drawer-overhang, 0px))
       env(safe-area-inset-bottom, 0px) 0;
   }
 
