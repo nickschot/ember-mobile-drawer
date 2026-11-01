@@ -1,0 +1,13 @@
+/* Spike (b): the strip is position: fixed inside the transformed tray. */
+.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content > .mobile-drawer-theme-ios__grabber {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: auto !important;
+  margin: 0 !important;
+  z-index: 2 !important;
+}
+.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content {
+  padding-top: 14px !important;
+}

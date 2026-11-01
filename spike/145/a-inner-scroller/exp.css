@@ -1,0 +1,18 @@
+/* Spike (a): the tray doesn't scroll; the content does. */
+.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet > .mobile-drawer__tray {
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer-theme-ios__grabber {
+  position: relative !important;
+  flex: none;
+  margin: 0 !important;
+  width: auto !important;
+}
