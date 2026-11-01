@@ -82,6 +82,7 @@ class State {
   @tracked nestedShown = false;
   changes: number[] = [];
   opens = 0;
+  closes = 0;
   /** Whether the parent accepts changes requested by the drawer. */
   accept = true;
 
@@ -91,6 +92,8 @@ class State {
   };
 
   onOpen = () => this.opens++;
+
+  onClose = () => this.closes++;
 }
 
 const containerStyle = htmlSafe(
@@ -110,6 +113,7 @@ async function renderDrawer(state: State) {
           @activeSnapPoint={{state.active}}
           @onSnapPointChange={{state.onChange}}
           @onOpen={{state.onOpen}}
+          @onClose={{state.onClose}}
           @modal={{state.modal}}
           style="position: absolute"
           aria-label="Drawer"
@@ -139,6 +143,7 @@ async function renderDrawer(state: State) {
             </MobileDrawer>
           {{/if}}
         </MobileDrawer>
+        <button type="button" data-test-after>After</button>
       </div>
     </template>,
   );
@@ -346,11 +351,113 @@ module(
         assert.strictEqual(state.opens, 1, '@onOpen: the drawer opened');
         assert.strictEqual(document.activeElement, last, 'keeps focus');
         assert.true(isVisible(last), 'on screen');
-        if (modal) {
-          assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
-        }
+        assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
+        assert.dom('[inert]').doesNotExist('the page is not inert');
       });
     }
+
+    /**
+     * A modal drawer at its peek, opened by Tab from the trigger before it
+     * to the last button, off screen.
+     */
+    async function tabIntoPeek(assert: Assert, state: State) {
+      state.snapPoints = [120, '100%'];
+      state.active = 0;
+      await setup(state);
+      focus(el('[data-test-trigger]'), true);
+      // As Tab does from the trigger: the browser moves focus.
+      focus(el('[data-test-last]'), true);
+      await settle();
+      assert.deepEqual(state.changes, [1], 'opens');
+      assert.strictEqual(state.opens, 1, '@onOpen');
+      assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
+      assert.dom('[inert]').doesNotExist('the page is not inert');
+      assert.strictEqual(document.documentElement.style.overflow, '');
+    }
+
+    test('Tab through a drawer opened from its peek goes out to the page, and the drawer goes back to its peek', async function (assert) {
+      const state = new State();
+      await tabIntoPeek(assert, state);
+      const after = el('[data-test-after]');
+      // Tab from the last element of the drawer: no trap, so the browser
+      // moves focus on to the page.
+      focus(after, true);
+      await settle();
+      assert.strictEqual(document.activeElement, after, 'focus is on the page');
+      assert.deepEqual(state.changes, [1, 0], 'back to the peek');
+      assert.strictEqual(state.closes, 1, '@onClose');
+      assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-expanded');
+
+      // Shift+Tab back into the drawer opens it again, not modal either.
+      focus(el('[data-test-last]'), true);
+      await settle();
+      assert.deepEqual(state.changes, [1, 0, 1]);
+      assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
+      assert.dom('[inert]').doesNotExist();
+    });
+
+    test('Escape sends a drawer opened from its peek back and returns focus', async function (assert) {
+      const state = new State();
+      await tabIntoPeek(assert, state);
+      el('[data-test-last]').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+      await settle();
+      assert.deepEqual(state.changes, [1, 0], 'back to the peek');
+      assert.strictEqual(
+        document.activeElement,
+        el('[data-test-trigger]'),
+        'focus returns to where it came from',
+      );
+      assert.dom('[inert]').doesNotExist();
+    });
+
+    test('a drawer opened from its peek by the app is modal', async function (assert) {
+      const state = new State();
+      state.snapPoints = [120, '100%'];
+      state.active = 0;
+      await setup(state);
+      state.active = 1;
+      await settle();
+      assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+      assert.dom('[data-test-after]').hasAttribute('inert');
+      state.active = 0;
+      await settle();
+      assert.dom('[inert]').doesNotExist();
+    });
+
+    test('after a focus open and its close, an open by the app is modal again', async function (assert) {
+      const state = new State();
+      await tabIntoPeek(assert, state);
+      focus(el('[data-test-after]'), true);
+      await settle();
+      assert.deepEqual(state.changes, [1, 0]);
+      state.active = 1;
+      await settle();
+      assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+      state.active = 0;
+      await settle();
+      assert.dom('[inert]').doesNotExist();
+    });
+
+    test('a focus open the parent declines does not make a later open by the app non-modal', async function (assert) {
+      const state = new State();
+      state.snapPoints = [120, '100%'];
+      state.active = 0;
+      await setup(state);
+      state.accept = false;
+      focus(el('[data-test-last]'), true);
+      await settle();
+      assert.deepEqual(state.changes, [1], 'asked');
+      // The next task.
+      await new Promise((resolve) => setTimeout(resolve));
+      state.active = 1;
+      await settle();
+      assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+      state.active = 0;
+      await settle();
+      assert.dom('[inert]').doesNotExist();
+    });
 
     test('the root scrolls back when the drawer does not move', async function (assert) {
       const state = new State();
