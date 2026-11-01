@@ -885,6 +885,53 @@ module(
       assert.true(result.dragging, 'handed off');
     });
 
+    test('a pan on the Grabber with scrolled content drags as a handle, not a scroll', async function (assert) {
+      const changes: number[] = [];
+      const onChange = (index: number) => changes.push(index);
+      const snapPoints: SnapPoint[] = [0, 200, '100%'];
+      await render(
+        <template>
+          {{! template-lint-disable no-inline-styles }}
+          <div style={{containerStyle}} data-test-container>
+            <MobileDrawer
+              @snapPoints={{snapPoints}}
+              @activeSnapPoint={{2}}
+              @onSnapPointChange={{onChange}}
+              aria-label="Sheet"
+              style="position: absolute"
+              as |drawer|
+            >
+              <drawer.Grabber />
+              <div style={{sizeStyle 1000}} data-test-content></div>
+              <output data-test-dragging>{{drawer.isDragging}}</output>
+            </MobileDrawer>
+          </div>
+        </template>,
+      );
+      clock.runUntilIdle();
+      await settled();
+      scrollTo(tray(), 'bottom', 'middle');
+      const scrolled = tray().scrollTop;
+      const result = await gesture(
+        el('[data-mobile-drawer-grabber]'),
+        'down',
+        30,
+      );
+      assert.true(result.dragging, 'drags from the first decided move');
+      assert.true(
+        result.prevented.length > 0 && result.prevented.every(Boolean),
+        'every touchmove is cancelled: never a scroll, so no handoff',
+      );
+      assert.strictEqual(
+        tray().scrollTop,
+        scrolled,
+        'the scroll position is kept during the drag',
+      );
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(changes, [1]);
+    });
+
     test('with @handleOnly a scroll never hands off', async function (assert) {
       const state = new State();
       state.handleOnly = true;
