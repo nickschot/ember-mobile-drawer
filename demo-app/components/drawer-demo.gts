@@ -28,6 +28,13 @@ import {
   parsePlaygroundParams,
 } from '../lib/parse-playground-params.ts';
 
+/** The spring fields, with the rounded values of `spring` as their text. */
+const springFieldsFor = (spring: MobileDrawerSpring) =>
+  SPRING_FIELDS.map((field) => ({
+    ...field,
+    value: roundSpringValue(spring[field.name]),
+  }));
+
 /** Lines of filler for trying out scrolling inside the drawer. */
 const TALL_CONTENT = Array.from(
   { length: 40 },
@@ -66,6 +73,13 @@ export default class DrawerDemo extends Component<{
   @tracked stiffness: number;
   @tracked damping: number;
   @tracked mass: number;
+  /**
+   * The spring fields with the text they start with: the rounded values of
+   * the selected preset. Replaced (so the fields render again) only when a
+   * preset is selected, never while you type, so a field keeps its focus and
+   * its text.
+   */
+  @tracked springFields: ReturnType<typeof springFieldsFor>;
   // Not settable from the URL, so they start at the drawer's defaults.
   @tracked modal = true;
   @tracked backdrop = true;
@@ -88,6 +102,7 @@ export default class DrawerDemo extends Component<{
     this.stiffness = spring.stiffness;
     this.damping = spring.damping;
     this.mass = spring.mass;
+    this.springFields = springFieldsFor(spring);
   }
 
   get spring(): MobileDrawerSpring {
@@ -96,14 +111,6 @@ export default class DrawerDemo extends Component<{
       damping: this.damping,
       mass: this.mass,
     };
-  }
-
-  /** The spring's values, rounded for the fields and the code. */
-  get springFields() {
-    return SPRING_FIELDS.map((field) => ({
-      ...field,
-      value: roundSpringValue(this[field.name]),
-    }));
   }
 
   get snapPointButtons() {
@@ -147,9 +154,10 @@ export default class DrawerDemo extends Component<{
         ? []
         : this.springPreset === CUSTOM_SPRING
           ? [
-              `spring: MobileDrawerSpring = {\n${this.springFields
-                .map((field) => `  ${field.name}: ${field.value},`)
-                .join('\n')}\n};`,
+              `spring: MobileDrawerSpring = {\n${SPRING_FIELDS.map(
+                (field) =>
+                  `  ${field.name}: ${roundSpringValue(this[field.name])},`,
+              ).join('\n')}\n};`,
             ]
           : [`spring = springPresets.${this.springPreset};`]),
       '',
@@ -236,23 +244,38 @@ export default class DrawerDemo extends Component<{
     this.stiffness = spring.stiffness;
     this.damping = spring.damping;
     this.mass = spring.mass;
+    this.springFields = springFieldsFor(spring);
   };
 
   /**
-   * Applies a typed stiffness, damping or mass once it is a number greater
-   * than 0. While it isn't, the drawer keeps the last valid value. The Spring
-   * control shows the preset that has these values, or Custom.
+   * Applies a typed stiffness, damping or mass once it is a number from the
+   * field's `min` to its `max`. While it isn't, the drawer keeps the last
+   * valid value. The field's text is not changed. The Spring control shows
+   * the preset whose values, rounded as the fields show them, are these
+   * values (and the drawer then gets the preset's exact values), or Custom.
    */
   setSpringField = (name: SpringFieldName, event: Event) => {
+    const { min, max } = SPRING_FIELDS.find((field) => field.name === name)!;
     const value = Number((event.target as HTMLInputElement).value);
-    if (!(Number.isFinite(value) && value > 0)) return;
+    if (!(value >= min && value <= max)) return;
     this[name] = value;
-    this.springPreset =
-      SPRING_PRESETS.find(({ name: preset }) =>
-        SPRING_FIELDS.every(
-          (field) => springPresets[preset][field.name] === this[field.name],
-        ),
-      )?.name ?? CUSTOM_SPRING;
+    const preset = SPRING_PRESETS.find(({ name: candidate }) =>
+      SPRING_FIELDS.every(
+        (field) =>
+          roundSpringValue(springPresets[candidate][field.name]) ===
+          roundSpringValue(this[field.name]),
+      ),
+    )?.name;
+    if (preset === undefined) {
+      this.springPreset = CUSTOM_SPRING;
+      return;
+    }
+    // The preset's exact values, so the drawer agrees with the code.
+    this.springPreset = preset;
+    const spring = springPresets[preset];
+    this.stiffness = spring.stiffness;
+    this.damping = spring.damping;
+    this.mass = spring.mass;
   };
 
   setBackdropOpacity = (event: Event) => {
@@ -462,7 +485,8 @@ export default class DrawerDemo extends Component<{
             {{field.label}}
             <input
               type="number"
-              min="0"
+              min={{field.min}}
+              max={{field.max}}
               step={{field.step}}
               inputmode="decimal"
               value={{field.value}}
@@ -473,7 +497,8 @@ export default class DrawerDemo extends Component<{
       </div>
       <p class="demo-hint">
         Higher stiffness is faster, lower damping bounces more and a higher mass
-        is slower. Each value must be greater than 0.
+        is slower. Stiffness 1 to 10000, damping 1 to 1000, mass 0.1 to 10. A
+        change applies from the next animation.
       </p>
       <div class="demo-buttons">
         Set @activeSnapPoint:
