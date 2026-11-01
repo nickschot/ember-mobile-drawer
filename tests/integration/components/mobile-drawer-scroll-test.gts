@@ -1473,29 +1473,246 @@ module(
       assert.strictEqual(positions[positions.length - 1], end, 'at the end');
     });
 
-    test('a resize below the highest snap point keeps the scroll position while focus is in the tray', async function (assert) {
-      const state = new State();
+    /**
+     * Changes the content size and waits until the drawer saw the resize:
+     * the ResizeObserver runs after the animation frame callbacks of the
+     * frame that lays out the change, so wait for the next frame.
+     */
+    const resize = async (state: State, size: number) => {
+      state.contentSize = size;
+      await settled();
+      for (let i = 0; i < 2; i++) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    };
+
+    /** A field (or other element) in the tray, see `isEditable`. */
+    const FIELDS: [string, () => HTMLElement][] = [
+      ['a text input', () => document.createElement('input')],
+      ['a textarea', () => document.createElement('textarea')],
+      [
+        'a select',
+        () => {
+          const select = document.createElement('select');
+          select.append(new Option('One'), new Option('Two'));
+          return select;
+        },
+      ],
+      [
+        'contenteditable content',
+        () => {
+          const div = document.createElement('div');
+          div.contentEditable = 'true';
+          div.textContent = 'Edit me';
+          return div;
+        },
+      ],
+    ];
+
+    for (const [name, create] of FIELDS) {
+      test(`a resize below the highest snap point keeps the scroll position while ${name} in the tray has focus`, async function (assert) {
+        const state = new State();
+        state.active = 1;
+        await renderDrawer(state);
+        const field = create();
+        el('.mobile-drawer__content').append(field);
+        field.focus();
+        assert.strictEqual(document.activeElement, field, 'focused');
+        // As the browser does to show the focused field.
+        tray().scrollTop = 100;
+
+        await resize(state, 1100);
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, 100, 'kept while focused');
+
+        field.blur();
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, 100, 'a blur alone keeps it');
+
+        await resize(state, 1200);
+        clock.runUntilIdle();
+        assert.strictEqual(
+          tray().scrollTop,
+          0,
+          'reset on the next resize after the blur',
+        );
+        field.remove();
+      });
+    }
+
+    for (const [name, create] of [
+      ['a button', () => document.createElement('button')],
+      [
+        'a checkbox',
+        () =>
+          Object.assign(document.createElement('input'), { type: 'checkbox' }),
+      ],
+    ] as const) {
+      test(`a resize below the highest snap point resets the scroll position while ${name} in the tray has focus`, async function (assert) {
+        const state = new State();
+        state.active = 1;
+        await renderDrawer(state);
+        const element = create();
+        el('.mobile-drawer__content').prepend(element);
+        // As a tap on it does in Chrome, Firefox and Android.
+        element.focus();
+        assert.strictEqual(document.activeElement, element, 'focused');
+        tray().scrollTop = 100;
+
+        await resize(state, 1100);
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, 0, 'reset');
+        assert.strictEqual(document.activeElement, element, 'still focused');
+        element.remove();
+      });
+    }
+
+    /**
+     * Starts the reset's own spring: the drawer rests at its partial snap
+     * point, the tray is scrolled away from its start and the content
+     * resizes. Runs `frames` frames of it; returns the scroll position.
+     */
+    const startOwnSpring = async (
+      assert: Assert,
+      state: State,
+      frames: number,
+    ) => {
       state.active = 1;
       await renderDrawer(state);
-      const input = document.createElement('input');
-      el('.mobile-drawer__content').append(input);
-      input.focus();
-      // As the browser does to show the focused field.
-      tray().scrollTop = 100;
+      assert.strictEqual(
+        document.activeElement,
+        tray(),
+        'the modal drawer focused its tray, which does not hold the reset',
+      );
+      tray().scrollTop = 200;
+      await resize(state, 1100);
+      assert.true(clock.pendingFrames > 0, 'the reset runs');
+      for (let i = 0; i < frames; i++) clock.frame();
+      const position = tray().scrollTop;
+      assert.true(
+        position > 0 && position < 200,
+        `the reset is under way (${position})`,
+      );
+      return position;
+    };
 
-      state.contentSize = 1100;
-      await settled();
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      clock.runUntilIdle();
-      assert.strictEqual(tray().scrollTop, 100, 'kept while focused');
+    test("repeated resizes during the reset's own spring keep its speed", async function (assert) {
+      const state = new State();
+      await startOwnSpring(assert, state, 1);
+      const alone = 1 + clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 0, 'at the start');
 
-      input.blur();
-      state.contentSize = 1200;
+      // The same reset, with a resize after every frame.
+      tray().scrollTop = 200;
+      let size = 1200;
+      await resize(state, size);
+      let frames = 0;
+      const positions = [tray().scrollTop];
+      while (clock.pendingFrames > 0 && frames < 200) {
+        clock.frame();
+        frames++;
+        positions.push(tray().scrollTop);
+        size += 10;
+        await resize(state, size);
+      }
+      assert.strictEqual(tray().scrollTop, 0, 'at the start');
+      assert.true(
+        frames <= alone + 2,
+        `as fast as without the resizes (${frames} vs ${alone} frames)`,
+      );
+      assert.true(
+        positions.every(
+          (position, i) => i === 0 || position <= positions[i - 1]!,
+        ),
+        'only moves towards the start',
+      );
+    });
+
+    test("a retarget to the highest snap point during the reset's own spring stops it where it is", async function (assert) {
+      const state = new State();
+      const position = await startOwnSpring(assert, state, 3);
+      state.active = 2;
       await settled();
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      assert.strictEqual(tray().scrollTop, position, 'stopped');
       clock.runUntilIdle();
-      assert.strictEqual(tray().scrollTop, 0, 'reset without focus');
-      input.remove();
+      assert.strictEqual(tray().scrollTop, position, 'kept at the top');
+    });
+
+    test("destroying the drawer during the reset's own spring stops it", async function (assert) {
+      const state = new State();
+      await startOwnSpring(assert, state, 2);
+      await render(
+        <template>
+          <div data-test-empty></div>
+        </template>,
+      );
+      assert.strictEqual(clock.pendingFrames, 0, 'no frames left');
+      clock.runUntilIdle();
+      assert.dom('.mobile-drawer').doesNotExist();
+    });
+
+    /**
+     * A @handleOnly bottom drawer, scrolled at the top, released just above
+     * its partial snap point (see the "resets without a jump" tests): both
+     * springs run. Runs 3 frames; returns how far the content is from its
+     * start.
+     */
+    const releaseNearPartial = async (assert: Assert) => {
+      const state = new State();
+      state.handleOnly = true;
+      await renderDrawer(state);
+      const distance = scrollAway(assert, 'bottom');
+      const steps = Math.round(((600 - 210) * screenScale()) / STEP) + 3;
+      await gesture(el('[data-test-handle]'), 'down', steps);
+      assert.deepEqual(state.changes, [1], 'towards the partial point');
+      clock.frame();
+      clock.frame();
+      clock.frame();
+      const position = fromStart('bottom');
+      assert.true(
+        position > 0 && position < distance,
+        `the reset is under way (${position} of ${distance})`,
+      );
+      return position;
+    };
+
+    test('a touch that holds the drawer stops a running reset, and the release finishes it', async function (assert) {
+      const position = await releaseNearPartial(assert);
+      const handle = el('[data-test-handle]');
+      const rect = handle.getBoundingClientRect();
+      const finger = new TouchPointer(
+        handle,
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      );
+      finger.down();
+      await settled();
+      assert.strictEqual(clock.pendingFrames, 0, 'both springs stopped');
+      clock.frame();
+      assert.strictEqual(fromStart('bottom'), position, 'stopped where it was');
+
+      finger.up();
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(fromStart('bottom'), 0, 'at the start');
+    });
+
+    test('a drag stops a running reset, and the release finishes it', async function (assert) {
+      const position = await releaseNearPartial(assert);
+      const during: number[] = [];
+      const result = await gesture(el('[data-test-handle]'), 'down', 8, {
+        during: () => {
+          clock.frame();
+          during.push(fromStart('bottom'));
+        },
+      });
+      assert.true(result.dragging, 'dragged');
+      assert.true(
+        during.every((step) => step === position),
+        `stopped during the drag (${during.join(', ')})`,
+      );
+      clock.runUntilIdle();
+      assert.strictEqual(fromStart('bottom'), 0, 'at the start');
     });
 
     test('the reset is not slowed down by scroll-behavior: smooth', async function (assert) {

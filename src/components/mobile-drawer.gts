@@ -354,6 +354,38 @@ function measureLength(
   return Number.isFinite(length) ? { length, extra } : undefined;
 }
 
+/** `<input>` types that take no typed text, so open no on-screen keyboard. */
+const NON_TEXT_INPUTS = new Set([
+  'button',
+  'checkbox',
+  'color',
+  'file',
+  'hidden',
+  'image',
+  'radio',
+  'range',
+  'reset',
+  'submit',
+]);
+
+/**
+ * Whether `element` is a field the user edits: a text input, a textarea, a
+ * select, or contenteditable content. Focus on one of them can open an
+ * on-screen keyboard or picker, and the browser then scrolls the field into
+ * view. An iframe counts too: the element focused inside it is unknown.
+ */
+function isEditable(element: Element): boolean {
+  if (element instanceof HTMLInputElement) {
+    return !NON_TEXT_INPUTS.has(element.type);
+  }
+  return (
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLIFrameElement ||
+    (element instanceof HTMLElement && element.isContentEditable)
+  );
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
@@ -957,7 +989,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * - otherwise (the tray is near its target, e.g. released just past it,
    *   or caught while closing and released below it), on a spring of its
    *   own with the drawer's spring settings, from rest: it eases in, so no
-   *   frame moves the content far.
+   *   frame moves the content far. A new plan while that spring runs (a
+   *   resize, a new target) keeps its velocity instead of starting over.
    * With reduced motion both springs end at once, and so does the reset.
    *
    * Reads layout only here, so the render loop only writes. A drag or a
@@ -967,6 +1000,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * one with `@handleOnly` may start anywhere, and resets after its release.
    */
   #planScrollReset(target: number): void {
+    // A new plan while the reset's own spring runs (e.g. on each frame of
+    // a resize) keeps its speed, so the reset doesn't start over from rest.
+    const running = this.#scrollSpring?.isAnimating
+      ? this.#scrollSpring
+      : undefined;
+    const velocity = running?.velocity ?? 0;
     this.#stopScrollReset();
     if (this.axis !== 'vertical') return;
     if (this.#isHighest(target)) {
@@ -978,7 +1017,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const tray = this.#tray!;
     const top = this.placement === 'top';
     const start = top ? Math.max(0, tray.scrollHeight - tray.clientHeight) : 0;
-    const distance = Math.abs(tray.scrollTop - start);
+    let distance = Math.abs(tray.scrollTop - start);
+    // The browser rounds scroll positions. Where the tray is still where
+    // the running spring put it, go on from the spring's exact position:
+    // otherwise a resize on every frame could keep the reset a pixel short.
+    if (running && Math.abs(distance - running.value) < 1) {
+      distance = running.value;
+    }
     const open = this.#renderedOffset;
     const reset: ScrollReset = {
       start,
@@ -1005,7 +1050,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#writeScroll(reset, clamp(value / distance, 0, 1)),
     });
     this.#scrollSpring = scrollSpring;
-    scrollSpring.set(distance, 0);
+    scrollSpring.set(distance, velocity);
     scrollSpring.retarget(0);
     void this.#startSpring(scrollSpring).then(() => {
       if (this.#scrollSpring === scrollSpring && !scrollSpring.isAnimating) {
@@ -1116,6 +1161,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     tray.scrollTo({ top, behavior: 'instant' });
   }
 
+  /**
+   * Whether focus is on an editable element in the tray (see `isEditable`),
+   * also inside an open shadow root in it.
+   */
+  #editingInTray(): boolean {
+    let active = document.activeElement;
+    if (!active || !this.#tray!.contains(active)) return false;
+    while (active.shadowRoot?.activeElement) {
+      active = active.shadowRoot.activeElement;
+    }
+    return isEditable(active);
+  }
+
   #onResize(): void {
     const spring = this.#spring;
     if (!spring || this.#destroyed || !this.#measure()) return;
@@ -1133,12 +1191,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#markExpanded(target);
     // From where the tray and its content are now. Also keeps a top drawer's
     // content end at its leading edge below the top when the content changes.
-    // Not while focus is in the tray: the browser may have scrolled the
-    // focused element into view (e.g. above an Android keyboard that
-    // resizes the page), and the reset would move it out of view again.
-    if (!this.#tray!.contains(document.activeElement)) {
-      this.#planScrollReset(target);
-    }
+    // Not while a field in the tray has focus: the browser may have
+    // scrolled it into view (e.g. above an Android keyboard that resizes
+    // the page), and the reset would move it out of view again. Other
+    // focused elements (e.g. a tapped button) don't hold the reset.
+    if (!this.#editingInTray()) this.#planScrollReset(target);
 
     if (spring.isAnimating) {
       // Keep going from the current position to the new target.
