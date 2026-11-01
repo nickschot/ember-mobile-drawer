@@ -1,4 +1,5 @@
 import type { FrameClock } from './spring/spring.ts';
+import type { ViewportLike as KeyboardViewport } from './keyboard-fill.ts';
 
 /**
  * Overrides for the environment the drawer runs in. Every field is optional;
@@ -26,4 +27,12 @@ export const drawerEnvironment: {
    * synthetic event can't be set.
    */
   dragTime?: () => number;
+  /**
+   * The visual viewport, instead of `window.visualViewport`, for the fill
+   * below a bottom drawer while an on-screen keyboard is open (see
+   * `KeyboardFill`). Read when a drawer is inserted. Tests set it to an
+   * `EventTarget` with a `height`, as no desktop browser has an on-screen
+   * keyboard.
+   */
+  visualViewport?: () => KeyboardViewport | null;
 } = {};

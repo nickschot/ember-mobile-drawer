@@ -371,6 +371,14 @@ section > h2 {
   margin: 0;
 }
 
+/* 16px, so iOS Safari doesn't zoom in when the field gets focus. */
+.example-sheet-search {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0.5rem;
+  font-size: 16px;
+}
+
 .example-list {
   margin: 0;
   padding: 0 1rem;
@@ -454,6 +462,20 @@ section > h2 {
   color: light-dark(#007aff, #0a84ff);
   font: inherit;
   font-weight: 600;
+}
+
+/* 16px, so iOS Safari doesn't zoom in when the field gets focus. */
+.example-ios-search {
+  box-sizing: border-box;
+  width: calc(100% - 2rem);
+  margin: 0 1rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentcolor 10%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
 }
 
 .example-ios-list {

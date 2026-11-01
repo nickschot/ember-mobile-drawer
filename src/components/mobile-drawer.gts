@@ -48,6 +48,7 @@ import {
 } from '../-private/nesting.ts';
 import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
+import { KeyboardFill } from '../-private/keyboard-fill.ts';
 import type { MobileDrawerSpring } from '../springs.ts';
 
 import type {
@@ -783,6 +784,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #content?: HTMLElement;
   /** The root's `.mobile-drawer__bar-tint` child, if any. */
   #barTint?: HTMLElement;
+  /**
+   * The sheet's colour below the root while an on-screen keyboard is open
+   * in iOS Safari, see `KeyboardFill`.
+   */
+  #keyboardFill?: KeyboardFill;
   /** Whether the content is moved past fully open, see `#renderBounce`. */
   #bouncing = false;
   /**
@@ -1147,6 +1153,22 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       });
       tray.addEventListener('touchend', this.#onTrayTouchEnd);
       tray.addEventListener('touchcancel', this.#onTrayTouchEnd);
+      this.#keyboardFill = new KeyboardFill({
+        root,
+        tray,
+        viewport: drawerEnvironment.visualViewport
+          ? drawerEnvironment.visualViewport()
+          : (window.visualViewport ?? null),
+        // Only a bottom drawer (a sheet) ends at the bottom of the screen
+        // and has its background there; only while it shows.
+        active: () =>
+          !this.#destroyed &&
+          this.placement === 'bottom' &&
+          !root.hasAttribute('data-closed'),
+        keepsKeyboard: isEditable,
+        contains: logicallyContains,
+      });
+      this.#keyboardFill.sync();
 
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
@@ -1183,6 +1205,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // A new placement is a different layout: jump instead of animating
       // along the new axis from the old position.
       this.#moveToActive(!placementChanged);
+      if (placementChanged) this.#keyboardFill?.sync();
     },
 
     destroy: () => {
@@ -1198,6 +1221,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       tray?.removeEventListener('touchcancel', this.#onTrayTouchEnd);
       this.#lockedTouch = undefined;
       this.#reveal = undefined;
+      this.#keyboardFill?.destroy();
       this.#endHold();
       this.#cancelCatchUp(this.#drag);
       this.#endBackdropPointer();
@@ -1351,10 +1375,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #markExpanded(target: number): void {
     const { maxOffset } = this.#layout!;
-    this.#root!.toggleAttribute(
-      'data-expanded',
-      maxOffset > 0 && target >= maxOffset - EPSILON,
-    );
+    const root = this.#root!;
+    const expanded = maxOffset > 0 && target >= maxOffset - EPSILON;
+    if (root.hasAttribute('data-expanded') === expanded) return;
+    root.toggleAttribute('data-expanded', expanded);
+    // A theme may change the tray's colour with it, see `KeyboardFill`.
+    this.#keyboardFill?.paint();
   }
 
   /**
@@ -1719,10 +1745,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * with this drawer, like one inside it.
    */
   #setClosed(closed: boolean): void {
-    this.#root!.toggleAttribute('data-closed', closed);
+    const root = this.#root!;
+    const changed = root.hasAttribute('data-closed') !== closed;
+    root.toggleAttribute('data-closed', closed);
     for (const portal of this.#portals) {
       portal.toggleAttribute('data-closed', closed);
     }
+    // Shows or hides the sheet's colour below the root, see `KeyboardFill`.
+    if (changed) this.#keyboardFill?.sync();
   }
 
   /**
@@ -1753,6 +1783,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const value = String(progress);
     this.#sheet?.style.setProperty('--mobile-drawer-expand-progress', value);
     this.#barTint?.style.setProperty('--mobile-drawer-expand-progress', value);
+    // A theme may change the tray's colour with it (e.g. the iOS theme's
+    // glass that becomes opaque), see `KeyboardFill`.
+    this.#keyboardFill?.paint();
   }
 
   /**

@@ -21,7 +21,8 @@ const ITEMS = Array.from({ length: 30 }, (_, index) => ({
  *
  * The sticky header has the `handle` modifier, so a drag that starts on it
  * always moves the sheet, also when the list is scrolled. Its Close button
- * still works with a tap.
+ * still works with a tap. Its search field opens the on-screen keyboard,
+ * also at 50%.
  */
 export default class BottomSheetExample extends Component {
   snapPoints: SnapPoint[] = [0, '50%', 'content'];
@@ -53,6 +54,12 @@ export default class BottomSheetExample extends Component {
           <h3 id="example-sheet-title">Nearby</h3>
           <button type="button" {{on "click" drawer.close}}>Close</button>
         </div>
+        <input
+          type="search"
+          class="example-sheet-search"
+          placeholder="Search"
+          aria-label="Search places"
+        />
       </div>
       <ul class="example-list">
         {{#each ITEMS as |item|}}
