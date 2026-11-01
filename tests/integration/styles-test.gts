@@ -1017,6 +1017,9 @@ module('Integration | styles.css', function (hooks) {
       assert.strictEqual(getComputedStyle(sheet).contain, 'layout');
       root.style.contain = 'none';
       sheet.style.contain = 'none';
+      // The open sheet's `will-change: translate` (#142) is a containing
+      // block too.
+      sheet.style.willChange = 'auto';
       assert.notStrictEqual(
         tray.getBoundingClientRect().width,
         rootBox.width,
