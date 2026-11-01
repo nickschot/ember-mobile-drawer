@@ -6,6 +6,7 @@ import { htmlSafe } from '@ember/template';
 import { pan } from 'ember-gesture-modifiers/test-support';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
+import { rubberBand } from '#src/-private/snap-points/index.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 import '#src/styles.css';
 
@@ -81,11 +82,22 @@ function el(selector: string): HTMLElement {
 
 const tray = () => el('.mobile-drawer__tray');
 
+const content = () => el('.mobile-drawer__content');
+
 /**
- * How far open the tray is, in px, read from its transform. Unlike a plain
- * distance this keeps its sign past fully open (rubber-banding).
+ * How far the content is moved past fully open, in px, positive in the
+ * opening direction (its inline `translate`; the tray then stays at its
+ * edge).
  */
-function openOffset(placement: Placement, length = TRAY_LENGTH): number {
+function bounce(placement: Placement): number {
+  const [x = 0, y = 0] = content()
+    .style.translate.split(' ')
+    .map((part) => parseFloat(part) || 0);
+  return { bottom: -y, top: y, left: x, right: -x }[placement];
+}
+
+/** How far open the tray itself is, in px, read from its transform. */
+function trayOffset(placement: Placement, length = TRAY_LENGTH): number {
   const { m41, m42 } = new DOMMatrix(getComputedStyle(tray()).transform);
   return {
     bottom: length - m42,
@@ -93,6 +105,15 @@ function openOffset(placement: Placement, length = TRAY_LENGTH): number {
     left: length + m41,
     right: length - m41,
   }[placement];
+}
+
+/**
+ * How far open the drawer is, in px: the tray's offset plus the content's
+ * bounce past fully open. Unlike a plain distance this keeps going past
+ * fully open (rubber-banding).
+ */
+function openOffset(placement: Placement, length = TRAY_LENGTH): number {
+  return trayOffset(placement, length) + bounce(placement);
 }
 
 const near = (actual: number, expected: number, epsilon = 0.01) =>
@@ -350,23 +371,148 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     assert.deepEqual(state.changes, [], 'stays at 400');
   });
 
-  test('a long pull past fully open shows at most ~24px of overshoot', async function (assert) {
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: past fully open the tray stays at its edge and the content bounces like iOS`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      // The grip has to fit in the 400px tray, or the tray grows.
+      state.grip = 340;
+      state.showHandle = false;
+      await renderDrawer(state);
+      const t = tray();
+      const vertical = placement === 'bottom' || placement === 'top';
+      const range = () =>
+        vertical
+          ? t.scrollHeight - t.clientHeight
+          : t.scrollWidth - t.clientWidth;
+      const rangeBefore = range();
+
+      const trays: number[] = [];
+      let last = 0;
+      await onEveryMove(
+        () => {
+          trays.push(trayOffset(placement));
+          last = bounce(placement);
+        },
+        () => pan('[data-test-grip]', OPENING[placement]),
+      );
+      const finger = movedAtLastMove(340);
+      assert.true(finger > 250, `a long pull (${finger}px)`);
+      assert.true(
+        trays.length > 0 && trays.every((offset) => near(offset, 400)),
+        'the tray stays at its edge: no gap',
+      );
+      const expected = rubberBand(400 + finger, 0, 400, {
+        dimension: 400 * 0.55,
+      });
+      assert.true(
+        near(400 + last, expected, 0.5),
+        `the content follows the iOS curve, d = 0.55 x the 400px tray: ${last}px (expected ${expected - 400}px)`,
+      );
+      assert.strictEqual(
+        content().style.willChange,
+        'translate',
+        'the content has its own layer while it bounces',
+      );
+      assert.strictEqual(
+        t.style.getPropertyValue(vertical ? 'overflow-y' : 'overflow-x'),
+        'hidden',
+        'no scrolling during the bounce',
+      );
+
+      clock.frame();
+      const first = bounce(placement);
+      assert.true(
+        first > 0 && first <= last,
+        `the content springs back from where it was released (${first})`,
+      );
+      // The release spring past the tray's length goes to the content too:
+      // the tray stays at its edge for the whole spring-back.
+      const springTrays: number[] = [];
+      for (let i = 0; i < 30 && clock.pendingFrames > 0; i++) {
+        clock.frame();
+        springTrays.push(trayOffset(placement));
+      }
+      assert.true(
+        springTrays.every((offset) => near(offset, 400)),
+        'the tray stays at its edge while the content springs back',
+      );
+      clock.runUntilIdle();
+      await settled();
+      assert.strictEqual(bounce(placement), 0, 'back in place');
+      assert.strictEqual(content().style.translate, '', 'no inline translate');
+      assert.strictEqual(content().style.willChange, '', 'no layer hint');
+      assert.strictEqual(range(), rangeBefore, 'no scroll range added');
+      assert.strictEqual(trayOffset(placement), 400);
+      assert.deepEqual(state.changes, [], 'stays fully open');
+    });
+  }
+
+  test('the bounce keeps an app transform on the content and pinned elements at the edge', async function (assert) {
     const state = new State();
-    // The grip has to fit in the 400px tray, or the tray grows.
     state.grip = 340;
     state.showHandle = false;
     await renderDrawer(state);
+    content().style.transform = 'translateX(3px)';
+    const pinned = document.createElement('div');
+    pinned.setAttribute('data-mobile-drawer-pinned', '');
+    content().prepend(pinned);
+    const pinnedBefore = pinned.getBoundingClientRect();
 
-    let max = 0;
+    let seen = false;
     await onEveryMove(
-      () => (max = Math.max(max, openOffset('bottom'))),
+      () => {
+        if (bounce('bottom') <= 0) return;
+        seen = true;
+        assert.strictEqual(
+          getComputedStyle(content()).transform,
+          'matrix(1, 0, 0, 1, 3, 0)',
+          'the app transform still applies',
+        );
+        assert.true(
+          near(pinned.getBoundingClientRect().top, pinnedBefore.top, 0.01),
+          'the pinned element stays at the edge',
+        );
+      },
       () => pan('[data-test-grip]', 'up'),
     );
-    assert.true(moved(340) > 250, `a long pull (${moved(340)}px)`);
-    assert.true(max > 410, `still rubber-bands (${max - 400}px)`);
-    assert.true(max <= 424, `capped at about 24px (${max - 400}px)`);
+    assert.true(seen, 'the content bounced');
     clock.runUntilIdle();
-    assert.strictEqual(openOffset('bottom'), 400);
+    await settled();
+    assert.strictEqual(
+      pinned.style.translate,
+      '',
+      'pinned: no inline translate',
+    );
+    assert.strictEqual(content().style.transform, 'translateX(3px)');
+  });
+
+  test('the bounce puts back the inline translate of a pinned element', async function (assert) {
+    const state = new State();
+    state.grip = 340;
+    state.showHandle = false;
+    await renderDrawer(state);
+    const pinned = document.createElement('div');
+    pinned.setAttribute('data-mobile-drawer-pinned', '');
+    pinned.style.setProperty('translate', '5px 6px');
+    content().prepend(pinned);
+
+    let during = '';
+    await onEveryMove(
+      () => {
+        if (bounce('bottom') > 0) during = pinned.style.translate;
+      },
+      () => pan('[data-test-grip]', 'up'),
+    );
+    assert.notStrictEqual(during, '', `pinned during the bounce (${during})`);
+    assert.notStrictEqual(during, '5px 6px', 'the opposite translate applies');
+    clock.runUntilIdle();
+    await settled();
+    assert.strictEqual(
+      pinned.style.translate,
+      '5px 6px',
+      "the app's inline translate is back",
+    );
   });
 
   for (const [end, snapPoints, active, direction] of [

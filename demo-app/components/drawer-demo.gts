@@ -309,6 +309,7 @@ export default class DrawerDemo extends Component<{
         <div class="demo-drawer-content" data-placement={{this.placement}}>
           <div
             class="demo-grabber"
+            data-mobile-drawer-pinned
             data-placement={{this.placement}}
             data-active={{if this.handleOnly "true"}}
             {{drawer.handle}}

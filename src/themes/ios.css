@@ -47,7 +47,11 @@
  *                                    the 36x5px bar, in the tray's text
  *                                    colour. Don't wrap it in another
  *                                    element: a sticky element only sticks
- *                                    inside its parent. Its ::after draws
+ *                                    inside its parent. Give it
+ *                                    `data-mobile-drawer-pinned`, so it
+ *                                    (and its rim) stays at the edge while
+ *                                    the content bounces past fully open
+ *                                    (see styles.css). Its ::after draws
  *                                    the glass rim again over the opaque
  *                                    strip. It spans the tray's full width,
  *                                    also over the side safe areas. Limits

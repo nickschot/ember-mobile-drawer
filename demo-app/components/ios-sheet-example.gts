@@ -38,7 +38,8 @@ type Placement = 'bottom' | 'top';
  * sheet's page-facing edge. The list is longer than the screen, so it
  * scrolls under the grabber when the sheet is fully open. The grabber has
  * the `handle` modifier, so a drag on it always moves the sheet, also when
- * the list is scrolled. It moves with `springPresets.ios`.
+ * the list is scrolled, and `data-mobile-drawer-pinned`, so it stays at the
+ * sheet's edge while the list bounces past fully open. It moves with `springPresets.ios`.
  *
  * "Scale the page" turns on the theme's page scale effect: the application
  * template's page element gets `mobile-drawer-theme-ios__page` and
@@ -103,6 +104,7 @@ export default class IosSheetExample extends Component {
             {{#unless this.isTop}}
               <div
                 class="mobile-drawer-theme-ios__grabber"
+                data-mobile-drawer-pinned
                 {{drawer.handle}}
               ></div>
             {{/unless}}
@@ -118,6 +120,7 @@ export default class IosSheetExample extends Component {
             {{#if this.isTop}}
               <div
                 class="mobile-drawer-theme-ios__grabber"
+                data-mobile-drawer-pinned
                 {{drawer.handle}}
               ></div>
             {{/if}}
