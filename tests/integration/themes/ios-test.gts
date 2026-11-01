@@ -115,6 +115,25 @@ function isTransparent(color: string): boolean {
   return color === 'transparent' || /[,/]\s*0\)$/.test(color);
 }
 
+/** The colour of the 0.5px inset rim in a computed box-shadow, or null. */
+function insetRim(boxShadow: string): string | null {
+  const match = /((?:rgba?|color)\([^)]*\)) 0px 0px 0px 0\.5px inset/.exec(
+    boxShadow,
+  );
+  return match?.[1] ?? null;
+}
+
+/**
+ * Whether a computed box-shadow draws nothing. During a transition from
+ * `none`, it serializes as a transparent shadow of size 0.
+ */
+function noRim(boxShadow: string): boolean {
+  return (
+    boxShadow === 'none' ||
+    /^rgba\(0, 0, 0, 0\) 0px 0px 0px 0px inset$/.test(boxShadow)
+  );
+}
+
 const TALL_LINES = Array.from({ length: 60 }, (_, i) => `Line ${i + 1}`);
 
 /**
@@ -467,6 +486,248 @@ module('Integration | themes/ios.css', function (hooks) {
     });
   }
 
+  for (const placement of ['bottom', 'top'] as const) {
+    for (const scheme of SCHEMES) {
+      test(`${placement}, ${scheme}: expanded, the strip draws the glass rim again over its colour`, async function (assert) {
+        await renderDrawer({ placement, scheme, tall: true, expanded: true });
+        finishTransitions();
+
+        const trayElement = el('[data-test-tray]');
+        const grabber = el('[data-test-grabber]');
+        trayElement.style.scrollbarWidth = 'none';
+        // Scrolled, so content is under the strip.
+        trayElement.scrollTop =
+          placement === 'bottom'
+            ? 100
+            : trayElement.scrollHeight - trayElement.clientHeight - 100;
+
+        const trayRim = insetRim(getComputedStyle(trayElement).boxShadow);
+        assert.ok(trayRim, `the tray has a rim: ${trayRim}`);
+        const rim = getComputedStyle(grabber, '::after');
+        assert.strictEqual(
+          rim.boxShadow,
+          `${trayRim} 0px 0px 0px 0.5px inset`,
+          'the same rim as the tray',
+        );
+        assert.strictEqual(rim.pointerEvents, 'none', 'no hit target');
+        assert.strictEqual(
+          getComputedStyle(grabber).overflow,
+          'hidden',
+          'the strip clips the rim box',
+        );
+
+        // The rim box has the tray's leading corners and is at the tray's
+        // leading edge; its far edge is outside the strip, so it is clipped.
+        const style = rim;
+        const leading =
+          placement === 'bottom'
+            ? [style.borderTopLeftRadius, style.borderTopRightRadius]
+            : [style.borderBottomLeftRadius, style.borderBottomRightRadius];
+        const far =
+          placement === 'bottom'
+            ? [style.borderBottomLeftRadius, style.borderBottomRightRadius]
+            : [style.borderTopLeftRadius, style.borderTopRightRadius];
+        assert.deepEqual(leading, ['32px', '32px'], 'leading corners');
+        assert.deepEqual(far, ['0px', '0px'], 'far corners');
+
+        const t = trayElement.getBoundingClientRect();
+        const g = grabber.getBoundingClientRect();
+        const edge =
+          placement === 'bottom' ? g.top - t.top : t.bottom - g.bottom;
+        assert.true(Math.abs(edge) < 1, `at the leading edge (${edge}px)`);
+        assert.true(
+          Math.abs(g.left - t.left) < 1 && Math.abs(t.right - g.right) < 1,
+          'as wide as the tray',
+        );
+        // Taller than the strip by the radius, so the radius isn't scaled.
+        assert.strictEqual(
+          parseFloat(rim.height),
+          grabber.offsetHeight + 32,
+          'taller than the strip',
+        );
+      });
+    }
+  }
+
+  for (const placement of ['bottom', 'top'] as const) {
+    test(`${placement}: with side safe areas the strip and its rim span the full tray width`, async function (assert) {
+      // env(safe-area-inset-*) can't be set in a test. Simulate side safe
+      // areas: the content padding they give, and the theme's copies of them.
+      styles.push(
+        addStyles(`
+          .mobile-drawer-theme-ios {
+            --_mobile-drawer-ios-inset-left: 20px;
+            --_mobile-drawer-ios-inset-right: 30px;
+          }
+          .mobile-drawer__content { padding-left: 20px; padding-right: 30px; }
+        `),
+      );
+      await renderDrawer({ placement, tall: true, expanded: true });
+      finishTransitions();
+
+      const tray = el('[data-test-tray]');
+      tray.style.scrollbarWidth = 'none';
+      const grabber = el('[data-test-grabber]');
+      const t = tray.getBoundingClientRect();
+      const g = grabber.getBoundingClientRect();
+      assert.true(
+        Math.abs(g.left - t.left) < 1 && Math.abs(t.right - g.right) < 1,
+        `the strip is as wide as the tray (${g.left - t.left}, ${t.right - g.right})`,
+      );
+      const strip = getComputedStyle(grabber);
+      assert.strictEqual(strip.paddingLeft, '20px', 'bar clear of the left');
+      assert.strictEqual(strip.paddingRight, '30px', 'bar clear of the right');
+      assert.strictEqual(
+        parseFloat(getComputedStyle(grabber, '::after').width),
+        tray.clientWidth,
+        'the rim box is as wide as the tray',
+      );
+      assert.strictEqual(
+        tray.scrollWidth,
+        tray.clientWidth,
+        'no horizontal overflow',
+      );
+    });
+
+    test(`${placement}: with padding on the tray's leading edge, a negative offset on the grabber removes the gap`, async function (assert) {
+      const side = placement === 'bottom' ? 'top' : 'bottom';
+      // The app fix from the README "Grabber strip limits".
+      styles.push(
+        addStyles(`
+          [data-test-tray] { padding-${side}: 16px; }
+          .mobile-drawer-theme-ios__grabber { ${side}: -16px; }
+        `),
+      );
+      await renderDrawer({ placement, tall: true, expanded: true });
+      const tray = el('[data-test-tray]');
+      const grabber = el('[data-test-grabber]');
+      tray.style.scrollbarWidth = 'none';
+      const max = tray.scrollHeight - tray.clientHeight;
+      // Tests render at a scale; gaps in CSS px.
+      const scale = tray.getBoundingClientRect().height / tray.offsetHeight;
+      const gap = () => {
+        const t = tray.getBoundingClientRect();
+        const g = grabber.getBoundingClientRect();
+        return (side === 'top' ? g.top - t.top : t.bottom - g.bottom) / scale;
+      };
+
+      // At the scroll start (the top of a bottom drawer, the end of a top
+      // drawer) the grabber is below the padding, as the app wants.
+      tray.scrollTop = placement === 'bottom' ? 0 : max;
+      assert.true(Math.abs(gap() - 16) < 1, `at rest: ${gap()}px`);
+      // Scrolled: it sticks at the tray edge, no gap above it.
+      tray.scrollTop = Math.round(max / 2);
+      assert.true(Math.abs(gap()) < 1, `scrolled: ${gap()}px`);
+    });
+  }
+
+  for (const placement of ['left', 'right'] as const) {
+    test(`${placement}: with side safe areas the grabber doesn't make the tray scroll sideways`, async function (assert) {
+      // Simulated side safe areas, as above. A side drawer's content pads
+      // only its outer side (see styles.css).
+      const side = placement === 'left' ? 'left' : 'right';
+      styles.push(
+        addStyles(`
+          .mobile-drawer-theme-ios {
+            --_mobile-drawer-ios-inset-left: 20px;
+            --_mobile-drawer-ios-inset-right: 30px;
+          }
+          .mobile-drawer__content { padding-${side}: 20px; }
+        `),
+      );
+      await renderDrawer({ placement, tall: true, expanded: true });
+      const tray = el('[data-test-tray]');
+      tray.style.scrollbarWidth = 'none';
+      assert.strictEqual(
+        tray.scrollWidth,
+        tray.clientWidth,
+        'no horizontal overflow',
+      );
+      const strip = getComputedStyle(el('[data-test-grabber]'));
+      assert.deepEqual(
+        [strip.marginLeft, strip.marginRight],
+        ['0px', '0px'],
+        'no side margins',
+      );
+    });
+  }
+
+  test("bottom: with the README rule, content without side padding doesn't make the tray scroll sideways", async function (assert) {
+    styles.push(
+      addStyles(`
+        .mobile-drawer-theme-ios {
+          --_mobile-drawer-ios-inset-left: 20px;
+          --_mobile-drawer-ios-inset-right: 30px;
+        }
+        .mobile-drawer__content { padding-left: 0; padding-right: 0; }
+        .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber {
+          margin-left: 0;
+          margin-right: 0;
+          padding-left: 0;
+          padding-right: 0;
+        }
+      `),
+    );
+    await renderDrawer({ tall: true, expanded: true });
+    const tray = el('[data-test-tray]');
+    tray.style.scrollbarWidth = 'none';
+    assert.strictEqual(tray.scrollWidth, tray.clientWidth, 'no overflow');
+    const t = tray.getBoundingClientRect();
+    const g = el('[data-test-grabber]').getBoundingClientRect();
+    assert.true(
+      Math.abs(g.left - t.left) < 1 && Math.abs(t.right - g.right) < 1,
+      'the strip spans the tray',
+    );
+  });
+
+  test('the rim over the strip is only drawn where the strip is opaque', function (assert) {
+    // Without relative colours the expanded strip is translucent: the tray
+    // rim shows through it, and a second rim would make it brighter.
+    const found: { selector: string; inSupports: boolean }[] = [];
+    const visit = (rules: CSSRuleList, inSupports: boolean) => {
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSStyleRule &&
+          rule.selectorText.includes('mobile-drawer-theme-ios__grabber') &&
+          rule.selectorText.includes('::after') &&
+          rule.style.getPropertyValue('box-shadow') !== ''
+        ) {
+          found.push({ selector: rule.selectorText, inSupports });
+        }
+        if (rule instanceof CSSGroupingRule) {
+          visit(
+            rule.cssRules,
+            inSupports ||
+              (rule instanceof CSSSupportsRule &&
+                rule.conditionText.includes('rgb(from light-dark(')),
+          );
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      visit(sheet.cssRules, false);
+    }
+    assert.true(found.length > 0, 'the theme draws a rim on the strip');
+    for (const { selector, inSupports } of found) {
+      assert.true(
+        inSupports,
+        `inside the relative colour @supports: ${selector}`,
+      );
+    }
+  });
+
+  test('below the highest snap point the strip draws no second rim', async function (assert) {
+    await renderDrawer({ tall: true });
+    assert.true(
+      insetRim(getComputedStyle(el('[data-test-tray]')).boxShadow) !== null,
+      'the tray rim shows through the transparent strip',
+    );
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-grabber]'), '::after').boxShadow,
+      'none',
+    );
+  });
+
   test("expanded, the sheet and the grabber follow the app's sheet background, made opaque", async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     const style = addStyles(
@@ -510,6 +771,10 @@ module('Integration | themes/ios.css', function (hooks) {
       'fading in: the strip is still transparent, no band',
     );
     assert.true(
+      noRim(getComputedStyle(grabber, '::after').boxShadow),
+      'fading in: no second rim over the tray rim yet',
+    );
+    assert.true(
       tray.getAnimations().length > 0,
       'fading in: the sheet colour transitions',
     );
@@ -535,6 +800,11 @@ module('Integration | themes/ios.css', function (hooks) {
       isTransparent(getComputedStyle(grabber).backgroundColor),
       'fading out: the strip is transparent at once',
     );
+    assert.strictEqual(
+      getComputedStyle(grabber, '::after').boxShadow,
+      'none',
+      'fading out: the rim over the strip goes at once',
+    );
     finishTransitions();
     assert.strictEqual(
       getComputedStyle(tray).backgroundColor,
@@ -558,6 +828,8 @@ module('Integration | themes/ios.css', function (hooks) {
         fade: duration[at('background-color')],
         blurDelay: delay[at('backdrop-filter')],
         stripDelay: strip.transitionDelay,
+        rimDelay: getComputedStyle(el('[data-test-grabber]'), '::after')
+          .transitionDelay,
       };
     };
 
@@ -565,6 +837,7 @@ module('Integration | themes/ios.css', function (hooks) {
       fade: '0.25s',
       blurDelay: '0.25s',
       stripDelay: '0.25s',
+      rimDelay: '0.25s',
     });
 
     styles.push(
@@ -574,8 +847,8 @@ module('Integration | themes/ios.css', function (hooks) {
     );
     assert.deepEqual(
       timing(),
-      { fade: '0.4s', blurDelay: '0.4s', stripDelay: '0.4s' },
-      'all three follow the one property',
+      { fade: '0.4s', blurDelay: '0.4s', stripDelay: '0.4s', rimDelay: '0.4s' },
+      'all follow the one property',
     );
   });
 
