@@ -105,7 +105,6 @@ module(
       spacer.style.height = `${window.innerHeight + 2000}px`;
       fixture.append(spacer);
       const input = document.createElement('input');
-      tray.append(input);
       const scrolled = () =>
         new Promise<void>((resolve) => {
           window.addEventListener('scroll', () => setTimeout(resolve, 0), {
@@ -116,6 +115,8 @@ module(
       window.scrollTo({ top: start + 100, behavior: 'instant' });
       const y = window.scrollY;
       const release = lockBodyScroll(tray);
+      // Added after the lock: else the drawer gets the fixed <body>.
+      tray.append(input);
       // The test page has `overflow: hidden` now; scripts can still scroll.
       let event = scrolled();
       window.scrollTo({ top: y + 300, behavior: 'instant' });
@@ -140,50 +141,22 @@ module(
       window.scrollTo({ top: start, behavior: 'instant' });
     });
 
-    test('a tap on a field above the keyboard focuses it without the scroll of iOS', function (assert) {
-      tray.style.cssText = 'position: fixed; top: 0; left: 0; right: 0;';
-      const high = document.createElement('input');
-      const low = document.createElement('input');
-      low.style.cssText = `position: fixed; top: ${window.innerHeight - 30}px;`;
-      tray.prepend(high);
-      tray.append(low);
-      const tap = (target: Element, dy = 0): boolean => {
-        const start = new Touch({
-          identifier: 1,
-          target,
-          clientX: 10,
-          clientY: 10,
-        });
-        const end = new Touch({
-          identifier: 1,
-          target,
-          clientX: 10,
-          clientY: 10 + dy,
-        });
-        target.dispatchEvent(
-          new TouchEvent('touchstart', {
-            bubbles: true,
-            touches: [start],
-            changedTouches: [start],
-          }),
-        );
-        const event = new TouchEvent('touchend', {
-          bubbles: true,
-          cancelable: true,
-          changedTouches: [end],
-        });
-        target.dispatchEvent(event);
-        return event.defaultPrevented;
-      };
-      const release = lockBodyScroll(tray);
-      assert.false(tap(high, 40), 'a swipe is left alone');
-      assert.notStrictEqual(document.activeElement, high);
-      assert.true(tap(high), 'high field: the default is cancelled');
-      assert.strictEqual(document.activeElement, high, '…and it has focus');
-      high.blur();
-      assert.false(tap(low), 'low field: iOS scrolls, as with the #71 lock');
+    test('a drawer with a text field gets the fixed <body>', function (assert) {
+      const field = document.createElement('textarea');
+      tray.append(field);
+      let release = lockBodyScroll(tray);
+      assert.strictEqual(document.body.style.position, 'fixed');
       release();
-      assert.false(tap(high), 'no lock: left alone');
+      assert.strictEqual(document.body.style.position, '');
+
+      field.readOnly = true;
+      release = lockBodyScroll(tray);
+      assert.strictEqual(
+        document.body.style.position,
+        '',
+        'a readonly field opens no keyboard: overflow lock',
+      );
+      release();
     });
 
     test('the default iOS lock still fixes <body>', function (assert) {

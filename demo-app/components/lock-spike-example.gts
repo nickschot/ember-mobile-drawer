@@ -16,6 +16,7 @@ export default class LockSpikeExample extends Component {
   snapPoints: SnapPoint[] = [0, '50%', 'content'];
   nestedSnapPoints: SnapPoint[] = [0, 'content'];
   modal = lockSpike.modal;
+  field = lockSpike.field;
   @tracked active = 0;
   @tracked nested = 0;
 
@@ -49,10 +50,12 @@ export default class LockSpikeExample extends Component {
         </div>
       </div>
       <div class="lock-spike-fields">
-        <label>
-          Text
-          <input type="text" placeholder="Tap for the keyboard" />
-        </label>
+        {{#if this.field}}
+          <label>
+            Text
+            <input type="text" placeholder="Tap for the keyboard" />
+          </label>
+        {{/if}}
         <button type="button" {{on "click" (fn this.setNested 1)}}>
           Open nested
         </button>

@@ -6,6 +6,8 @@
  * - `?debug=1`: a fixed label with the scroll position, a tall page and the
  *   "Scroll lock test" example (text field, nested drawer).
  * - `?modal=0`: the "Scroll lock test" drawer isn't modal.
+ * - `?field=0`: the "Scroll lock test" drawer has no text field. A drawer
+ *   with a text field gets the fixed `<body>` also with `lock=overflow`.
  * - `?scroll=<id>` (with `debug=1`): scrolls to that element after load,
  *   e.g. `scroll=example-lock-spike`.
  * - `?log=<url>` (with `debug=1`): sends the measurements to that URL, see
@@ -21,6 +23,7 @@ export const lockSpike = {
   lock: params.get('lock') === 'overflow' ? 'overflow' : 'fixed',
   debug: params.get('debug') === '1',
   modal: params.get('modal') !== '0',
+  field: params.get('field') !== '0',
 } as const;
 
 drawerEnvironment.iosScrollLock = lockSpike.lock;
