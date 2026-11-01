@@ -6,6 +6,7 @@ import { buildWaiter } from '@ember/test-waiters';
 import {
   DEFAULT_SPRING_CONFIG,
   Spring,
+  browserClock,
   type FrameClock,
   type SpringResult,
 } from '../-private/spring/spring.ts';
@@ -29,6 +30,7 @@ import {
 } from '../-private/lifecycle-modifier.ts';
 import { noop } from '../-private/noop-modifier.ts';
 import { VelocityTracker } from '../-private/gesture/velocity.ts';
+import { catchUpLag } from '../-private/gesture/catch-up.ts';
 import { inertOutside } from '../-private/modal/inert.ts';
 import { lockBodyScroll } from '../-private/modal/scroll-lock.ts';
 import {
@@ -179,12 +181,26 @@ interface Drag {
   source: HTMLElement;
   /** Offset (px open) shown when the drag started. */
   startOffset: number;
-  /** Pointer coordinate along the drawer axis where the drag started. */
+  /** Pointer coordinate along the drawer axis where the finger went down. */
   startPosition: number;
   /** Screen px per px of drawer offset, see `#screenScale`. */
   scale: number;
-  /** Rendered offset, after rubber-banding. */
+  /**
+   * How far (drawer px, positive opens) the finger had moved from where it
+   * went down when the pan was recognised. The tray catches up with that
+   * over the first frames of the drag, see `catchUpLag`.
+   */
+  recognisedAt: number;
+  /** Time (ms, see `#now`) the drag started. */
+  startTime: number;
+  /** How far (drawer px) the finger has moved from where it went down. */
+  delta: number;
+  /** Where the finger puts the drawer: `#dragOffset` of `delta`. */
+  target: number;
+  /** Rendered offset, after rubber-banding, behind `target` while catching up. */
   offset: number;
+  /** The scheduled catch-up frame, see `#catchUpFrame`. */
+  frame?: number;
 }
 
 /** A scroll reset of the tray, see `#planScrollReset`. */
@@ -916,7 +932,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           if (this.#destroyed) return;
           this.args.onDragEnd?.({
             snapPoint: this.activeSnapPoint,
-            offset: drag.offset,
+            offset: drag.target,
             velocity: 0,
           });
         });
@@ -2611,20 +2627,39 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#stopScrollReset();
     this.#endHold();
     const offset = this.#renderedOffset;
-    // Anchored where didPan recognised the pan (past its threshold), so the
-    // drawer doesn't jump by the threshold and then follows 1:1. Anchored on
-    // the offset shown, also when that is past an end (`dragOffset`).
-    this.#drag = {
+    // didPan recognises the pan once the finger has moved past its threshold.
+    // Anchored at the touchdown the tray would jump by that distance, so the
+    // tray starts where it is and catches up with the finger over the first
+    // frames (`#follow`). Anchored on the offset shown, also when that is
+    // past an end (`dragOffset`).
+    const scale = this.#screenScale();
+    const initial = data.initial;
+    let down = this.axis === 'vertical' ? initial?.y : initial?.x;
+    let recognisedAt =
+      (OPENING_DIRECTION[this.placement] * (position - (down ?? NaN))) / scale;
+    if (!Number.isFinite(recognisedAt)) {
+      // No usable touchdown: follow from here, without a catch-up.
+      down = position;
+      recognisedAt = 0;
+    }
+    const drag: Drag = {
       source,
       startOffset: offset,
-      startPosition: position,
+      startPosition: down!,
+      scale,
+      recognisedAt,
+      startTime: this.#now(),
+      delta: recognisedAt,
+      target: offset,
       offset,
-      scale: this.#screenScale(),
     };
+    this.#drag = drag;
+    drag.target = this.#dragOffset(drag, recognisedAt);
     this.#velocity.reset();
-    this.#velocity.add(this.#timeOf(data.originalEvent), offset);
+    // The velocity of the finger (see `onPan`), not of the catch-up.
+    this.#velocity.add(this.#timeOf(data.originalEvent), drag.target);
     this.#queueState({ isDragging: true });
-    this.#render(offset);
+    this.#follow(drag, drag.startTime);
     this.args.onDragStart?.({ snapPoint: this.activeSnapPoint, offset });
   };
 
@@ -2641,17 +2676,52 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
 
-    // How far the finger moved since the drag started, in drawer px.
+    // How far the finger moved since it went down, in drawer px.
     const delta =
       (OPENING_DIRECTION[this.placement] * (position - drag.startPosition)) /
       drag.scale;
     if (!Number.isFinite(delta)) return;
 
-    drag.offset = this.#dragOffset(drag, delta);
-    // The velocity of the drawer as shown (after resistance), so a release
-    // past an end doesn't hand the spring more speed than the tray had.
-    this.#velocity.add(this.#timeOf(data.originalEvent), drag.offset);
+    drag.delta = delta;
+    drag.target = this.#dragOffset(drag, delta);
+    // The velocity of the drawer where the finger puts it (after
+    // resistance), so a release past an end doesn't hand the spring more
+    // speed than the tray had, and the catch-up adds none.
+    this.#velocity.add(this.#timeOf(data.originalEvent), drag.target);
+    this.#follow(drag, this.#now());
+  };
+
+  /** The time (ms) on the clock that runs the frames. */
+  #now(): number {
+    return (this.#clock ?? browserClock).now();
+  }
+
+  /**
+   * Renders the drag at `time`: the tray follows the finger 1:1, but at the
+   * start of the drag it is behind it by the catch-up lag (`catchUpLag`),
+   * which eases from the distance moved before the pan was recognised to
+   * `0`. While it lags it is also moved every frame, so it catches up when
+   * the finger holds still.
+   */
+  #follow(drag: Drag, time: number): void {
+    const lag = catchUpLag(drag.recognisedAt, time - drag.startTime);
+    drag.offset =
+      lag === 0 ? drag.target : this.#dragOffset(drag, drag.delta - lag);
     this.#render(drag.offset);
+    const frames = this.#clock ?? browserClock;
+    if (lag === 0) {
+      if (drag.frame !== undefined) frames.cancelFrame(drag.frame);
+      drag.frame = undefined;
+    } else if (drag.frame === undefined) {
+      drag.frame = frames.requestFrame(this.#catchUpFrame);
+    }
+  }
+
+  #catchUpFrame = (time: number): void => {
+    const drag = this.#drag;
+    if (!drag || this.#destroyed) return;
+    drag.frame = undefined;
+    this.#follow(drag, time);
   };
 
   private onPanEnd = (data: PanData, source: HTMLElement): void => {
@@ -2664,7 +2734,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const velocity = cancelled
       ? 0
       : this.#velocity.velocity(this.#timeOf(data.originalEvent));
-    this.#release(drag.offset, velocity);
+    this.#release(drag.offset, velocity, drag.target);
   };
 
   /**
@@ -2678,13 +2748,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (this.#drag?.source !== source) return;
     const drag = this.#endDrag()!;
     queueMicrotask(() => {
-      if (!this.#destroyed && !this.#drag) this.#release(drag.offset, 0);
+      if (!this.#destroyed && !this.#drag) {
+        this.#release(drag.offset, 0, drag.target);
+      }
     });
   };
 
   #endDrag(): Drag | undefined {
     const drag = this.#drag;
     this.#drag = undefined;
+    if (drag?.frame !== undefined) {
+      (this.#clock ?? browserClock).cancelFrame(drag.frame);
+      drag.frame = undefined;
+    }
     this.#queueState({ isDragging: false });
     return drag;
   }
@@ -2696,13 +2772,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * meanwhile heads for the active snap point: the parent always wins, so the
    * drawer turns towards the new one once (and only if) the parent passes it
    * in. A parent that answers synchronously does so before the next frame.
+   * The spring starts at `offset`, where the tray is; the snap point is
+   * picked for `released`, where the finger put it (ahead of `offset` while
+   * the tray still catches up, see `#follow`), which `@onDragEnd` reports.
    */
-  #release(offset: number, velocity: number): void {
+  #release(offset: number, velocity: number, released = offset): void {
     const spring = this.#spring;
     const layout = this.#layout;
     if (!spring || !layout || this.#destroyed) return;
 
-    const target = selectSnapPoint(layout.resolved, offset, velocity, {
+    const target = selectSnapPoint(layout.resolved, released, velocity, {
       flingVelocity: FLING_VELOCITY,
     });
     const index = this.#indexOf(target);
@@ -2715,7 +2794,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.uncontrolledVersion++;
     }
     this.#moveToActive(true);
-    this.args.onDragEnd?.({ snapPoint: index, offset, velocity });
+    this.args.onDragEnd?.({ snapPoint: index, offset: released, velocity });
     if (index !== previous) this.args.onSnapPointChange?.(index);
   }
 

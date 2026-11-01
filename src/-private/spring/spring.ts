@@ -115,7 +115,8 @@ export const DEFAULT_SPRING_CONFIG: Readonly<SpringConfig> = Object.freeze({
   restVelocityThreshold: 1,
 });
 
-const browserClock: FrameClock = {
+/** `performance.now` + `requestAnimationFrame`. */
+export const browserClock: FrameClock = {
   now: () => performance.now(),
   requestFrame: (callback) => requestAnimationFrame(callback),
   cancelFrame: (handle) => cancelAnimationFrame(handle),

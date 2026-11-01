@@ -99,7 +99,11 @@ export interface MobileDrawerDragEndEvent {
    * stays.
    */
   snapPoint: number;
-  /** How far open the drawer was when it was let go, in px. */
+  /**
+   * How far open the drawer was when it was let go, in px: where the finger
+   * put it. Right after a drag starts the tray is still catching up with the
+   * finger, so it can be a few px behind this.
+   */
   offset: number;
   /**
    * The release velocity in px/s along the drawer's axis: positive opens,

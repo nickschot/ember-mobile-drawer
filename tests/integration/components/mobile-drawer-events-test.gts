@@ -325,6 +325,31 @@ module('Integration | Component | mobile-drawer | events', function (hooks) {
     ]);
   });
 
+  test('dragDrawer counts the distance before the drag starts', async function (assert) {
+    const state = new State();
+    state.active = 1;
+    await renderDrawer(state);
+
+    // Shorter than the 11px it takes to start a drag, with a velocity: it
+    // starts the other way, then flicks the way of the velocity.
+    await dragDrawer('.mobile-drawer', { distance: 5, velocity: 1000 });
+    let end = state.dragEnds[0]!;
+    assert.true(Math.abs(end.offset - 205) < 0.01, `offset ${end.offset}`);
+    assert.true(Math.abs(end.velocity - 1000) < 1, `velocity ${end.velocity}`);
+    await settle();
+
+    await dragDrawer('.mobile-drawer', { distance: -5, velocity: -1000 });
+    end = state.dragEnds[1]!;
+    assert.true(Math.abs(end.offset - 395) < 0.01, `offset ${end.offset}`);
+    assert.true(Math.abs(end.velocity + 1000) < 1, `velocity ${end.velocity}`);
+    await settle();
+
+    await dragDrawer('.mobile-drawer', { distance: -30 });
+    end = state.dragEnds[2]!;
+    assert.true(Math.abs(end.offset - 170) < 0.01, `offset ${end.offset}`);
+    assert.strictEqual(end.velocity, 0);
+  });
+
   test('controlled: @onDragEnd gives the picked snap point also when the parent declines it', async function (assert) {
     const state = new State();
     state.active = 0;

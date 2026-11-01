@@ -4,6 +4,8 @@ import type { ModifierLike } from '@glint/template';
 
 /** The subset of `didPan`'s event data the drawer reads. */
 export interface PanData {
+  /** Where the pointer went down. */
+  initial?: { x: number; y: number };
   current: { x: number; y: number };
   originalEvent?: Event;
 }
