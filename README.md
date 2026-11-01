@@ -809,6 +809,20 @@ The glass rim (the light inner edge of the sheet, an inset shadow on the tray) i
   }
   ```
 
+- **Glass layer (upgrade note)**: on a bottom sheet the theme's blur is on the `.mobile-drawer__glass` layer under the tray, not on the tray (see **Blur cost** above). If your app sets or removes `backdrop-filter` on the tray of a bottom sheet, also set it on `.mobile-drawer__glass`. Otherwise the theme's blur on the glass layer stays, and your own blur on the tray shows outside the floating sheet's top corners in Chrome. For example, a stronger blur:
+
+  ```css
+  /* Before: on the tray only. Now on the glass layer of a bottom sheet. */
+  .mobile-drawer-theme-ios
+    .mobile-drawer[data-placement="bottom"]
+    > .mobile-drawer__sheet
+    > .mobile-drawer__glass {
+    -webkit-backdrop-filter: blur(40px) saturate(2);
+    backdrop-filter: blur(40px) saturate(2);
+  }
+  ```
+
+  **Markup change:** the sheet has one more child, the empty, `aria-hidden` `.mobile-drawer__glass` before the tray (see [Markup](#markup)), in every drawer, with or without the theme. The tray is now the second child of the sheet. Change app CSS or tests that expect the tray as the first or only child of `.mobile-drawer__sheet`.
 - **Spring**: the theme is CSS only, so it doesn't change how the drawer moves. For iOS-like motion, also pass `@spring={{springPresets.ios}}` (see [Spring](#spring)).
 - **Differences from iOS 27**: Maps' smallest detent is a capsule with a larger inset; the theme has one inset for every snap point. At full height the content has 8px more side padding. Safari's toolbar stays visible over the page: a web page can't hide it.
 
