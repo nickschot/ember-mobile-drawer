@@ -498,6 +498,10 @@ const clampIndex = (index: number, count: number) =>
  * closes, before `data-closed` hides the drawer. All of that is applied in a
  * microtask after rendering (`#syncOpen`), and undone right away on teardown.
  *
+ * Keyboard focus on an element in the tray that is off screen moves the
+ * drawer (modal or not, also from a peek, then without the modal
+ * behaviour) to its highest snap point, see `#onTrayFocusIn`. The root never scrolls, see `#resetRootScroll`.
+ *
  * Snap points are re-measured when the root or `.mobile-drawer__content`
  * changes size, and when an argument changes. The tray itself is not
  * observed (the component sizes it), so a change to only the tray's own
@@ -607,6 +611,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * The elements with the yielded `handle` modifier, see `#onHandle`.
    */
   #handles = new Set<HTMLElement>();
+  /**
+   * The element whose keyboard focus moves the drawer to its highest snap
+   * point, to show in the tray when it arrives, see `#onTrayFocusIn`.
+   */
+  #reveal?: Element;
   /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
   /**
@@ -641,6 +650,28 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #returnFocus?: HTMLElement | SVGElement;
   /** Its ancestors when the drawer opened, see `#returnFocusAfterClose`. */
   #returnFocusPath: Element[] = [];
+  /**
+   * Set while the drawer is open because keyboard focus moved it up from
+   * its peek (see `#onTrayFocusIn`): it is then not modal, and goes back
+   * to its peek when focus leaves it (see `#onRootFocusOut`). Set when the
+   * drawer opens while `#focusOpenPending`, cleared when it closes (to its
+   * peek or to `0`). A drag or an action that moves it between open snap
+   * points meanwhile keeps it; one that opens it from the peek doesn't set
+   * it, so the drawer is modal as before.
+   */
+  #openedByFocus = false;
+  /**
+   * Set from a focus move from the peek until the drawer opens, or until
+   * the next task when a controlled parent doesn't take the new index.
+   */
+  #focusOpenPending = false;
+  /**
+   * The last element outside the drawer that focus came from into the
+   * tray, to return focus to when a drawer opened by focus closes.
+   */
+  #enteredFrom?: HTMLElement | SVGElement;
+  /** Set while a modal drawer moves focus in, see `#activateModal`. */
+  #initialFocusing = false;
   /**
    * Set when the drawer closed and `#applyOpen` has yet to return focus:
    * whether focus was inside the drawer when it closed.
@@ -784,6 +815,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       });
       this.#placement = this.placement;
       root.addEventListener('keydown', this.#onKeyDown);
+      root.addEventListener('scroll', this.#onRootScroll, { passive: true });
+      root.addEventListener('focusout', this.#onRootFocusOut);
       mountedDrawers.add(this);
       this.#measure();
       // Appear at the initial snap point without animating in.
@@ -811,6 +844,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           type === 'wheel' ? CAPTURE_ACTIVE : CAPTURE_PASSIVE,
         );
       }
+      tray.addEventListener('focusin', this.#onTrayFocusIn);
       tray.addEventListener('touchstart', this.#onTrayTouchStart, {
         passive: true,
       });
@@ -866,11 +900,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       for (const type of TRAY_INPUT_EVENTS) {
         tray?.removeEventListener(type, this.#onTrayInput, true);
       }
+      tray?.removeEventListener('focusin', this.#onTrayFocusIn);
       tray?.removeEventListener('touchstart', this.#onTrayTouchStart);
       tray?.removeEventListener('touchmove', this.#onTrayTouchMove);
       tray?.removeEventListener('touchend', this.#onTrayTouchEnd);
       tray?.removeEventListener('touchcancel', this.#onTrayTouchEnd);
       this.#lockedTouch = undefined;
+      this.#reveal = undefined;
       this.#endHold();
       this.#endBackdropPointer();
       this.#resizeObserver?.disconnect();
@@ -878,6 +914,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#stopScrollReset();
       this.#syncScrollLock();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
+      this.#root?.removeEventListener('scroll', this.#onRootScroll);
+      this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
       mountedDrawers.delete(this);
       if (this.#root) {
         setPageProgress(this.#root, 0);
@@ -993,7 +1031,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (spring.isAnimating) return; // Retargeted; the run continues.
 
     void this.#startSpring(spring).then(() => {
-      if (!spring.isAnimating) this.#queueState({ isAnimating: false });
+      if (spring.isAnimating) return;
+      this.#queueState({ isAnimating: false });
+      this.#revealFocus();
     });
     // With reduced motion the run ends synchronously.
     this.#queueState({ isAnimating: spring.isAnimating });
@@ -1614,8 +1654,22 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#returnFocus = undefined;
         this.#returnFocusPath = [];
       }
+      this.#openedByFocus = this.#focusOpenPending;
+      this.#focusOpenPending = false;
+      // Focus is already inside: return it to where it came from into the
+      // tray, e.g. on Escape.
+      const from = this.#enteredFrom;
+      if (
+        this.#openedByFocus &&
+        from?.isConnected &&
+        !this.#root!.contains(from)
+      ) {
+        this.#returnFocus = from;
+        this.#returnFocusPath = this.#ancestorsOf(from);
+      }
     } else if (!open && this.#open) {
       this.#open = false;
+      this.#openedByFocus = false;
       // Read now: a drawer that closes without animating is hidden (and
       // loses focus) before the microtask runs.
       this.#closedWithFocusInside = this.#hasFocus();
@@ -1636,7 +1690,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #applyOpen(): void {
     if (this.#destroyed) return;
     const insideClosed = this.#insideClosedDrawer();
-    const modal = this.#open && this.isModal && !insideClosed;
+    const modal =
+      this.#open && this.isModal && !insideClosed && !this.#openedByFocus;
     const wasModal = this.#releaseModal !== undefined;
     if (modal && !wasModal) {
       this.#activateModal();
@@ -1706,7 +1761,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       );
     }
 
-    if (!this.#hasFocus()) focusWithoutScrolling(initialFocus(tray, tray));
+    if (!this.#hasFocus()) {
+      // The drawer's own focus never moves it (see `#onTrayFocusIn`): the
+      // app chose the snap point it opens at.
+      this.#initialFocusing = true;
+      try {
+        focusWithoutScrolling(initialFocus(tray, tray));
+      } finally {
+        this.#initialFocusing = false;
+      }
+    }
   }
 
   /** Undoes `#activateModal`, if it is on. Leaves focus alone. */
@@ -2101,6 +2165,243 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       }
     }
   };
+
+  /**
+   * Keyboard focus on an element in the tray that isn't fully visible at
+   * the active snap point moves a visible drawer below its highest snap
+   * point to its highest snap point, like `open`: uncontrolled it moves
+   * there, controlled it asks the parent through `@onSnapPointChange`, as
+   * after a drag. Below the highest snap point the content can't scroll
+   * along the axis, so this is the only way to show it. Modal or not: the
+   * focused element is hidden either way. Also at a peek (a smallest snap
+   * point above `0`), where Tab reaches the content from the page: the
+   * drawer then opens, so `@onOpen` is called, but it doesn't become modal
+   * (see `#openedByFocus`): Tab goes on through the drawer and out to the
+   * page, and the drawer goes back to its peek when focus leaves it (see
+   * `#onRootFocusOut`). Not while the drawer closes to `0`. When the drawer arrives, the tray scrolls the
+   * element into view if the browser didn't (see `#revealFocus`).
+   *
+   * Only keyboard focus (`:focus-visible`, also for programmatic focus after
+   * a key press, such as the Tab wrap): a tap focuses what is under the
+   * finger, which shows. Not the initial focus of a modal drawer (see
+   * `#activateModal`): the drawer moves focus in itself, and the app chose
+   * the snap point it opens (or is inserted) at, so that one is kept. Browsers give text fields `:focus-visible` for every focus,
+   * so a tap on a text field that is only partly visible moves the drawer
+   * too, which shows the field above an on-screen keyboard. Not during a
+   * drag or while a touch holds the drawer, and not for the tray itself or
+   * for the content of a drawer nested in this one, whose own tray handles
+   * it.
+   *
+   * Visibility is checked where the element will be once the drawer rests
+   * at its active snap point, not where it is now: a drawer that is still
+   * on its way there (e.g. one that opens) must not move for an element
+   * that will show. Visible means inside both the tray and the root (the space
+   * the tray opens into), along the axis.
+   */
+  #onTrayFocusIn = (event: FocusEvent): void => {
+    const tray = this.#tray;
+    const { target, relatedTarget: from } = event;
+    if (
+      (from instanceof HTMLElement || from instanceof SVGElement) &&
+      !this.#root?.contains(from)
+    ) {
+      this.#enteredFrom = from;
+    }
+    if (
+      !tray ||
+      !this.#layout ||
+      this.#destroyed ||
+      this.#drag ||
+      this.#hold ||
+      this.#hidden ||
+      this.#initialFocusing ||
+      target === tray ||
+      !(target instanceof Element) ||
+      target.closest('.mobile-drawer__tray') !== tray
+    ) {
+      return;
+    }
+    // The focused element itself, also inside an open shadow root.
+    const element = event.composedPath()[0];
+    if (!(element instanceof Element) || !this.#hasKeyboardFocus(element)) {
+      return;
+    }
+    const offset = this.#offsetOf(this.activeSnapPoint);
+    if (this.#isHighest(offset) || this.#isVisibleAt(element, offset)) return;
+    this.#reveal = element;
+    // Not during rendering (an app may focus an element as it renders).
+    queueMicrotask(() => {
+      if (
+        this.#destroyed ||
+        this.#reveal !== element ||
+        this.#drag ||
+        this.#hidden ||
+        this.#isHighest(this.#offsetOf(this.activeSnapPoint))
+      ) {
+        return;
+      }
+      this.#resetRootScroll();
+      if (!this.#open) {
+        // From the peek: the drawer opens, but not as a modal dialog. A
+        // controlled parent that doesn't take the new index in this task
+        // doesn't get a drawer that is not modal later.
+        this.#focusOpenPending = true;
+        setTimeout(() => (this.#focusOpenPending = false));
+      }
+      this.open();
+    });
+  };
+
+  /**
+   * A drawer that keyboard focus opened from its peek (see
+   * `#openedByFocus`) goes back to its peek when focus moves to an element
+   * outside it, e.g. Tab past its last element: like a peek that only shows
+   * what has focus. Not when focus goes nowhere (`relatedTarget` `null`,
+   * e.g. the window loses focus or a click on something that can't take
+   * focus), nor during a drag. Like `close`, so through
+   * `@onSnapPointChange` when controlled.
+   */
+  #onRootFocusOut = (event: FocusEvent): void => {
+    const to = event.relatedTarget;
+    if (
+      !this.#openedByFocus ||
+      !this.#open ||
+      this.#destroyed ||
+      this.#drag ||
+      !(to instanceof Node) ||
+      this.#root!.contains(to)
+    ) {
+      return;
+    }
+    queueMicrotask(() => {
+      if (
+        this.#openedByFocus &&
+        this.#open &&
+        !this.#destroyed &&
+        !this.#drag &&
+        !this.#hasFocus()
+      ) {
+        this.close();
+      }
+    });
+  };
+
+  /**
+   * Scrolls the root back to its start. The root is `overflow: hidden` and
+   * never meant to scroll, but a browser that scrolls a focused element into
+   * view scrolls it too: below the highest snap point part of the tray is
+   * outside the root, so the browser moves the whole drawer (tray and
+   * backdrop) up to show the element, and the tray leaves its edge, while
+   * the drawer stays at its snap point. Called before a move for keyboard
+   * focus (Chrome scrolls before the focus events), and on every `scroll`
+   * of the root (`#onRootScroll`), for browsers that scroll after them and
+   * for focus that doesn't move the drawer (a tap on a partly visible
+   * button, a peek of a drawer whose parent declines the move).
+   */
+  #resetRootScroll(): void {
+    const root = this.#root!;
+    if (root.scrollTop !== 0 || root.scrollLeft !== 0) {
+      root.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+  }
+
+  #onRootScroll = (): void => {
+    if (!this.#destroyed) this.#resetRootScroll();
+  };
+
+  /**
+   * Whether `element` has keyboard focus: it matches `:focus-visible`. A
+   * browser without `:focus-visible` (Safari before 15.4) throws; nothing
+   * then counts as keyboard focus.
+   */
+  #hasKeyboardFocus(element: Element): boolean {
+    try {
+      return element.matches(':focus-visible');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The part of the root that the tray covers along the axis, in screen px,
+   * with the tray moved by `shift` px from where it is rendered: where the
+   * content can show.
+   */
+  #visibleRange(shift: number): { start: number; end: number } {
+    const vertical = this.axis === 'vertical';
+    const tray = this.#tray!.getBoundingClientRect();
+    const root = this.#root!.getBoundingClientRect();
+    return {
+      start: Math.max(
+        (vertical ? tray.top : tray.left) + shift,
+        vertical ? root.top : root.left,
+      ),
+      end: Math.min(
+        (vertical ? tray.bottom : tray.right) + shift,
+        vertical ? root.bottom : root.right,
+      ),
+    };
+  }
+
+  /**
+   * Whether `element` is fully inside the visible part of the tray along
+   * the axis (see `#visibleRange`) once the drawer is at `offset` (px open).
+   * Forces layout, so only for focus changes.
+   */
+  #isVisibleAt(element: Element, offset: number): boolean {
+    const root = this.#root!;
+    const vertical = this.axis === 'vertical';
+    // Also undoes a scroll of the root (see `#resetRootScroll`), which
+    // moves the tray and the element alike, but not the root.
+    const shift =
+      (OPENING_DIRECTION[this.placement] * (offset - this.#renderedOffset) +
+        (vertical ? root.scrollTop : root.scrollLeft)) *
+      this.#screenScale();
+    const visible = this.#visibleRange(shift);
+    const rect = element.getBoundingClientRect();
+    const start = (vertical ? rect.top : rect.left) + shift;
+    const end = (vertical ? rect.bottom : rect.right) + shift;
+    return start >= visible.start - EPSILON && end <= visible.end + EPSILON;
+  }
+
+  /**
+   * Called when a run of the spring ends. If keyboard focus moved the drawer
+   * to its highest snap point (see `#onTrayFocusIn`), the drawer rests there
+   * and the element still has focus, scrolls the tray of a vertical drawer
+   * so the element shows: below the highest snap point the tray was locked,
+   * and the browser may not have scrolled it (e.g. focus that came with
+   * `preventScroll`, such as the initial focus of a modal drawer). Only the
+   * tray scrolls, not the page. Left and right drawers scroll across their
+   * axis, which isn't locked, so the browser already did.
+   */
+  #revealFocus(): void {
+    const element = this.#reveal;
+    this.#reveal = undefined;
+    const tray = this.#tray;
+    if (
+      !element ||
+      !tray ||
+      !this.#layout ||
+      this.#destroyed ||
+      this.#drag ||
+      this.axis !== 'vertical' ||
+      !this.#isHighest(this.#renderedOffset)
+    ) {
+      return;
+    }
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) {
+      active = active.shadowRoot.activeElement;
+    }
+    if (active !== element) return;
+    const visible = this.#visibleRange(0);
+    const rect = element.getBoundingClientRect();
+    // Show the element's end if it is below, but its start first of all.
+    let delta = Math.max(0, rect.bottom - visible.end);
+    delta = Math.min(delta, rect.top - visible.start);
+    if (Math.abs(delta) <= EPSILON) return;
+    tray.scrollBy({ top: delta / this.#screenScale(), behavior: 'instant' });
+  }
 
   #onTrayTouchStart = (event: TouchEvent): void => {
     const current = this.#lockedTouch;
