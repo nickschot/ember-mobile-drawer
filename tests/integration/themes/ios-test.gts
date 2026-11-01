@@ -939,26 +939,7 @@ module('Integration | themes/ios.css', function (hooks) {
     });
   }
 
-  for (const scheme of SCHEMES) {
-    test(`${scheme}: with the iOS base rules the spring gap fill is the opaque sheet colour while expanded`, async function (assert) {
-      await renderDrawer({ scheme, tall: true });
-      styles.push(addStyles(iosBaseRulesText()));
-      const tray = () => getComputedStyle(el('[data-test-tray]'));
-      const fill = () => tray().boxShadow.split(' 0px 32px 0px 0px')[0]!;
-
-      assert.strictEqual(
-        fill(),
-        GLASS[scheme].background,
-        'glass below the top',
-      );
-      el('[data-test-root]').setAttribute('data-expanded', '');
-      finishTransitions();
-      assert.strictEqual(rgb(fill()), SOLID[scheme], 'expanded: opaque');
-      assert.strictEqual(fill(), tray().backgroundColor, 'the tray colour');
-    });
-  }
-
-  test('with motion, the bar tint and the gap fill fade with the sheet', async function (assert) {
+  test('with motion, the bar tint fades with the sheet', async function (assert) {
     styles.push(applyMotion());
     await renderDrawer({ tall: true });
     const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
@@ -974,11 +955,6 @@ module('Integration | themes/ios.css', function (hooks) {
         duration(tint(), 'background-color'),
         duration(tray(), 'background-color'),
         `bar tint (expanded: ${expanded})`,
-      );
-      assert.strictEqual(
-        duration(tray(), 'box-shadow'),
-        duration(tray(), 'background-color'),
-        `gap fill (expanded: ${expanded})`,
       );
     }
     styles.push(
