@@ -6,30 +6,69 @@ A gesture-enabled drawer component for Ember, built as a v2 addon.
 - Spring physics animations
 - Configurable snap points (px, %, or content height)
 - Placements: bottom, top, left, right (`left` and `right` are physical and don't flip under `dir="rtl"`)
+- Modal dialog behaviour by default: focus trap, inert page, scroll lock, Escape to close
 - Minimal base styles, with an optional iOS theme
+- Test helpers to open, close and drag drawers in your app's tests
 
-Try it in the [playground](https://nickschot.github.io/ember-mobile-drawer/).
+Try it in the [playground](https://nickschot.github.io/ember-mobile-drawer/). It is built from `demo-app/` on every push to `main`. Open it on a phone, or with touch emulation in your browser's developer tools: the drawer drags with touch and pen input, not with a mouse.
 
 > Work in progress. Planning and progress are tracked in [GitHub issues](https://github.com/nickschot/ember-mobile-drawer/issues).
 
+## Contents
+
+- [Compatibility](#compatibility)
+- [Installation](#installation)
+- [Quick start](#quick-start): [bottom](#bottom-sheet), [top](#top-drawer), [left](#left-drawer), [right](#right-drawer)
+- [Usage](#usage): [snap points](#snap-points), [controlled and uncontrolled](#controlled-and-uncontrolled), [backdrop](#backdrop), [spring](#spring), [events](#events), [accessibility](#accessibility), [dragging](#dragging), [scrolling content](#scrolling-content), [nested drawers](#nested-drawers), [public imports](#public-imports), [TypeScript](#typescript)
+- [Styles](#styles): [state attributes](#state-attributes), [floating sheet](#floating-sheet), [iOS theme](#ios-theme)
+- [Testing](#testing)
+- [API reference](#api-reference)
+- [Development](#development)
+
 ## Compatibility
 
-- Ember.js v5.12 or above
-- Embroider or ember-auto-import v2
+- `ember-source` 5.12 or above (the `ember-source` peer dependency is `>= 5.12`). CI tests the 5.12 LTS (with a classic ember-cli build), the 6.12 LTS and the latest release; beta and alpha are tested too, but are allowed to fail.
+- Embroider, or ember-cli with ember-auto-import v2.
+- `@glimmer/component` 1.1.2 or above.
+- TypeScript and Glint are optional. The package ships its own types; see [TypeScript](#typescript).
+- `@ember/test-helpers` 3 or above, only for the [test helpers](#testing).
+- Browsers: dragging needs pointer events and works with touch and pen input. Mouse users open and close a drawer with your app's buttons, the backdrop or Escape. Some features need newer browsers; the sections that describe them give the versions.
 
 ## Installation
 
-```
+```sh
 pnpm add ember-mobile-drawer
 ```
 
 or, in an ember-cli app:
 
-```
+```sh
 ember install ember-mobile-drawer
 ```
 
-## Usage
+Then import the base styles once, for example in your `app/app.ts`:
+
+```js
+import 'ember-mobile-drawer/styles.css';
+```
+
+The drawer doesn't work without them: they position the drawer and hide it while it is closed. See [Styles](#styles) for how to customise them, and the [iOS theme](#ios-theme) for an optional look.
+
+For the safe-area insets (the notch and the home indicator), add `viewport-fit=cover` to your viewport meta tag:
+
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+```
+
+## Quick start
+
+A drawer is closed at its snap point `0` and opens to its other snap points. To open it from a button on the page, pass the index of the snap point it should be at in `@activeSnapPoint`, and store the new index that `@onSnapPointChange` gives you, so drags, the backdrop and Escape can move it too. Inside the drawer, the yielded `open`, `close` and `snapTo` actions move it.
+
+Give every modal drawer (the default) a name with `aria-labelledby` or `aria-label`.
+
+### Bottom sheet
+
+A sheet that opens to half the screen, then to full height, with a grabber that always drags it:
 
 ```gts
 import Component from '@glimmer/component';
@@ -38,48 +77,198 @@ import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { MobileDrawer, type SnapPoint } from 'ember-mobile-drawer';
 
-export default class Example extends Component {
+export default class PlacesSheet extends Component {
   snapPoints: SnapPoint[] = [0, '50%', '100%'];
   @tracked active = 0;
 
   setActive = (index: number) => (this.active = index);
 
   <template>
-    <button type="button" {{on "click" (fn this.setActive 1)}}>Open</button>
+    <button type="button" {{on "click" (fn this.setActive 1)}}>Show places</button>
 
     <MobileDrawer
       @placement="bottom"
       @snapPoints={{this.snapPoints}}
       @activeSnapPoint={{this.active}}
       @onSnapPointChange={{this.setActive}}
-      aria-labelledby="drawer-title"
+      aria-labelledby="places-title"
       as |drawer|
     >
-      <h2 id="drawer-title">Details</h2>
+      <div class="grabber" data-mobile-drawer-pinned {{drawer.handle}}></div>
+      <h2 id="places-title">Places</h2>
       <button type="button" {{on "click" drawer.open}}>Expand</button>
+      <button type="button" {{on "click" drawer.close}}>Close</button>
+      <ul>...</ul>
+    </MobileDrawer>
+  </template>
+}
+```
+
+`@placement="bottom"` is the default. The sheet scrolls its content at its highest snap point (see [Scrolling content](#scrolling-content)), and [Keep the grabber at the leading edge](#keep-the-grabber-at-the-leading-edge) has the CSS for a sticky grabber.
+
+### Top drawer
+
+A drawer that slides down from the top as far as its content needs:
+
+```gts
+import Component from '@glimmer/component';
+import { tracked } from '@glimmer/tracking';
+import { on } from '@ember/modifier';
+import { fn } from '@ember/helper';
+import { MobileDrawer, type SnapPoint } from 'ember-mobile-drawer';
+
+export default class NotificationsDrawer extends Component {
+  snapPoints: SnapPoint[] = [0, 'content'];
+  @tracked active = 0;
+
+  setActive = (index: number) => (this.active = index);
+
+  <template>
+    <button type="button" {{on "click" (fn this.setActive 1)}}>Notifications</button>
+
+    <MobileDrawer
+      @placement="top"
+      @snapPoints={{this.snapPoints}}
+      @activeSnapPoint={{this.active}}
+      @onSnapPointChange={{this.setActive}}
+      aria-labelledby="notifications-title"
+      as |drawer|
+    >
+      <h2 id="notifications-title">Notifications</h2>
+      <ul>...</ul>
       <button type="button" {{on "click" drawer.close}}>Close</button>
     </MobileDrawer>
   </template>
 }
 ```
 
-Arguments:
+`[0, 'content']` is the default for `@snapPoints`, so you can leave it out. A top drawer's leading edge is its bottom: put a grabber last, and below its highest snap point the drawer shows the end of its content.
 
-- `@placement`: `'bottom'` (default), `'top'`, `'left'` or `'right'`.
-- `@snapPoints`: where the drawer can rest, as the distance it is opened: px (`240`), a percentage of the space it can open into (`'50%'`) or `'content'` (the drawer's natural size). Include `0` to let it close. Default `[0, 'content']`.
-- `@activeSnapPoint`: the index into `@snapPoints` the drawer should be at. Changing it animates the drawer there. Leave it out to let the drawer keep track of its snap point itself (it then starts at index `0`, or stays where it was if you stop passing it). Update it together with `@snapPoints`: an index that doesn't exist is clamped to the nearest valid one, with a warning in development.
-- `@onSnapPointChange`: called with the new index when the drawer wants to move (through `snapTo`, `open`, `close` or a drag). When `@activeSnapPoint` is set, the drawer only moves once you pass the new index back in.
-- `@handleOnly`: only start a drag on elements with the yielded `handle` modifier. Default `false`: the whole tray drags, and elements with the `handle` modifier always drag (see [Dragging](#dragging)).
-- `@modal`: whether the drawer is a modal dialog while it is open. Default `true`. See [Accessibility](#accessibility).
-- `@backdrop`: whether to render the backdrop behind the tray. Defaults to the value of `@modal`: `true`, unless the drawer is non-modal. With `@backdrop={{false}}` nothing covers the page.
-- `@closeOnBackdropClick`: whether a tap or click on the backdrop closes the drawer (like `close()`, so through `@onSnapPointChange` when `@activeSnapPoint` is set). Default `true`.
-- `@transparentStatusBar`: iOS Safari 26 and later only. While this modal drawer is open, the status bar shows the dimmed page instead of one solid colour. Default `false`. See [Transparent status bar](#transparent-status-bar).
-- `@onOpen`, `@onClose`, `@onDragStart`, `@onDragEnd`: lifecycle callbacks, see [Events](#events).
-- `@spring`: the spring that moves the drawer to a snap point, for example `springPresets.ios`. See [Spring](#spring).
+### Left drawer
 
-Attributes such as `class`, `aria-label` and `aria-labelledby` go on the drawer's root element.
+A navigation drawer from the left edge. The tray of a side drawer is as wide as its content, so give the content a width:
 
-The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), the `handle` modifier, the `Nested` component (see [Nested drawers](#nested-drawers)), and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
+```gts
+import Component from '@glimmer/component';
+import { tracked } from '@glimmer/tracking';
+import { on } from '@ember/modifier';
+import { fn } from '@ember/helper';
+import { MobileDrawer } from 'ember-mobile-drawer';
+
+export default class NavDrawer extends Component {
+  @tracked active = 0;
+
+  setActive = (index: number) => (this.active = index);
+
+  <template>
+    <button type="button" {{on "click" (fn this.setActive 1)}}>Menu</button>
+
+    <MobileDrawer
+      @placement="left"
+      @activeSnapPoint={{this.active}}
+      @onSnapPointChange={{this.setActive}}
+      aria-label="Menu"
+      as |drawer|
+    >
+      <nav class="nav-drawer">
+        <a href="/inbox">Inbox</a>
+        <a href="/sent">Sent</a>
+        <button type="button" {{on "click" drawer.close}}>Close</button>
+      </nav>
+    </MobileDrawer>
+  </template>
+}
+```
+
+```css
+.nav-drawer {
+  width: min(20rem, 85vw);
+}
+```
+
+The tray never grows wider than the screen (minus the safe area on the far side). A side drawer drags sideways and scrolls its content vertically at every snap point.
+
+### Right drawer
+
+The same for the right edge, for example a filter panel. This one is non-modal: the page stays usable while it is open, and it has no backdrop:
+
+```gts
+import Component from '@glimmer/component';
+import { tracked } from '@glimmer/tracking';
+import { on } from '@ember/modifier';
+import { fn } from '@ember/helper';
+import { MobileDrawer } from 'ember-mobile-drawer';
+
+export default class FilterPanel extends Component {
+  @tracked active = 0;
+
+  setActive = (index: number) => (this.active = index);
+
+  <template>
+    <button type="button" {{on "click" (fn this.setActive 1)}}>Filters</button>
+
+    <MobileDrawer
+      @placement="right"
+      @modal={{false}}
+      @activeSnapPoint={{this.active}}
+      @onSnapPointChange={{this.setActive}}
+      as |drawer|
+    >
+      <section class="filter-panel" aria-labelledby="filters-title">
+        <h2 id="filters-title">Filters</h2>
+        ...
+        <button type="button" {{on "click" drawer.close}}>Done</button>
+      </section>
+    </MobileDrawer>
+  </template>
+}
+```
+
+```css
+.filter-panel {
+  width: min(22rem, 90vw);
+}
+```
+
+A non-modal drawer has no `role`, so name the region in it yourself, as the `<section>` above does. See [Accessibility](#accessibility).
+
+## Usage
+
+### Snap points
+
+`@snapPoints` lists where the drawer can rest, as the distance it is open along its axis:
+
+- a number of px, for example `240`;
+- a percentage of the space the tray can open into, for example `'50%'` (the type is `` `${number}%` ``);
+- `'content'`: the tray's natural size, as large as its content.
+
+Snap points are identified by their index in the array; their order doesn't matter. Include `0` to let the drawer close fully. A drawer without `0` is never fully closed: its smallest snap point is a "peek". The default is `[0, 'content']`. Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
+
+`open()` moves the drawer to the snap point with the largest offset, `close()` to the one with the smallest. Both need the drawer's measured size, so they do nothing before the drawer is in the DOM.
+
+### Controlled and uncontrolled
+
+With `@activeSnapPoint` the drawer is controlled: it moves to the snap point at that index, and animates there when the index changes. Its own actions (`snapTo`, `open`, `close`, a drag, the backdrop, Escape) don't move it; they call `@onSnapPointChange` with the new index, and the drawer moves once you pass that index back in. After a drag the drawer heads back to the current `@activeSnapPoint` until you do. `@onSnapPointChange` isn't called when you change `@activeSnapPoint` yourself.
+
+Without `@activeSnapPoint` the drawer keeps track of its snap point itself. It starts at index `0`, and when you stop passing `@activeSnapPoint` it stays where it was. `@onSnapPointChange` is still called when it moves. Use an uncontrolled drawer when only the drawer itself (its yielded actions and drags) opens and closes it, for example a peek drawer:
+
+```gts
+import { on } from '@ember/modifier';
+import { MobileDrawer, type SnapPoint } from 'ember-mobile-drawer';
+
+const SNAP_POINTS: SnapPoint[] = [120, '100%'];
+
+<template>
+  <MobileDrawer @modal={{false}} @snapPoints={{SNAP_POINTS}} as |drawer|>
+    <button type="button" {{on "click" drawer.open}}>More</button>
+    ...
+  </MobileDrawer>
+</template>
+```
+
+Update `@activeSnapPoint` together with `@snapPoints`: an index that doesn't exist is clamped to the nearest valid one, with a warning in development.
+
+Attributes such as `class`, `id`, `aria-label` and `aria-labelledby` go on the drawer's root element. All arguments, the yielded values and the markup are listed in the [API reference](#api-reference).
 
 ### Backdrop
 
@@ -176,15 +365,23 @@ With `@modal={{false}}` the drawer doesn't move focus, trap it, make the page in
 
 A modal drawer with a smallest snap point above `0` is only modal above its peek.
 
-Below its highest snap point the content of a drawer doesn't scroll along its axis, so part of it is off screen. When keyboard focus (focus after a key press, for example after Tab) moves to an element in the tray that isn't fully on screen, the drawer (modal or not) moves to its highest snap point, like `open()`: through `@onSnapPointChange` when `@activeSnapPoint` is set, the same as after a drag. When it gets there, the tray scrolls the element into view if the browser didn't. The focus that a modal drawer moves in itself when it opens doesn't move it: the drawer stays at the snap point your app opened it at, so open it at a snap point where its first focusable element (or the element with `autofocus`) shows. Keyboard focus also moves a drawer at a peek (a smallest snap point above `0`), where Tab reaches the content from the page. From a peek the drawer opens (`@onOpen` is called), but it doesn't become modal: the page isn't inert, `aria-modal` isn't set and Tab goes on through the drawer and out to the page. When focus moves to an element outside the drawer, the drawer goes back to its peek (`@onClose` is called). Escape also sends it back, and focus then returns to the element it came from. A drawer that opens from its peek in another way (a drag, `open()`, `@activeSnapPoint`) is modal as before. The drawer uses the last input to know keyboard focus: while a drawer shows, it records each key press and each pointer that goes down (mouse, touch or pen). Focus less than 1 second after a key press is keyboard focus, also when your app moves it, and focus less than 1 second after a pointer press is not. This is the same in every browser. Focus without a key or pointer event right before it (for example from a screen reader or switch access) uses `:focus-visible`, but a `readonly` or `disabled` text field then never counts as keyboard focus. Focus from a tap or a click on a button or a link doesn't move the drawer. A tap on a text field that is only partly on screen (an `<input>` or `<textarea>` that isn't `readonly` or `disabled`, or contenteditable content) does move the drawer, which also shows the field above the on-screen keyboard. A tap on a `readonly` text field doesn't: it opens no keyboard. Focus at the highest snap point doesn't move the drawer, and neither does focus inside a drawer nested in this one (that drawer handles its own content). With reduced motion the drawer jumps there. The drawer's root never scrolls: browsers scroll it to show a focused element, which would move the whole drawer away from its edge, so the drawer scrolls it back at once.
+Animations respect `prefers-reduced-motion`: with reduced motion the drawer jumps to its snap point instead of animating.
 
-Limits of modal drawers:
+#### Keyboard focus and content off screen
 
-- **Content rendered elsewhere becomes inert.** Popovers, dropdowns and menus that belong to the drawer's content must be rendered inside the drawer. Addons that render into a `<body>`-level element (a "wormhole" or portal, such as ember-basic-dropdown and ember-power-select) put their content next to the drawer, where it is inert and can't be clicked. Render them in place (`@renderInPlace={{true}}` for ember-basic-dropdown and ember-power-select). Elements added to `<body>` after the drawer opened are not made inert. Rendering in place also matters for a drawer that keyboard focus opened from its peek (see below): it isn't modal, so content rendered into `<body>` can be used, but focus that moves into it is outside the drawer, so the drawer goes back to its peek.
+Below its highest snap point the content of a drawer doesn't scroll along its axis, so part of it is off screen. When keyboard focus (focus after a key press, for example after Tab) moves to an element in the tray that isn't fully on screen, the drawer (modal or not) moves to its highest snap point, like `open()`: through `@onSnapPointChange` when `@activeSnapPoint` is set, the same as after a drag. When it gets there, the tray scrolls the element into view if the browser didn't. The focus that a modal drawer moves in itself when it opens doesn't move it: the drawer stays at the snap point your app opened it at, so open it at a snap point where its first focusable element (or the element with `autofocus`) shows.
+
+Keyboard focus also moves a drawer at a peek (a smallest snap point above `0`), where Tab reaches the content from the page. From a peek the drawer opens (`@onOpen` is called), but it doesn't become modal: the page isn't inert, `aria-modal` isn't set and Tab goes on through the drawer and out to the page. When focus moves to an element outside the drawer, the drawer goes back to its peek (`@onClose` is called). Escape also sends it back, and focus then returns to the element it came from. A drawer that opens from its peek in another way (a drag, `open()`, `@activeSnapPoint`) is modal as before.
+
+The drawer uses the last input to know keyboard focus: while a drawer shows, it records each key press and each pointer that goes down (mouse, touch or pen). Focus less than 1 second after a key press is keyboard focus, also when your app moves it, and focus less than 1 second after a pointer press is not. This is the same in every browser. Focus without a key or pointer event right before it (for example from a screen reader or switch access) uses `:focus-visible`, but a `readonly` or `disabled` text field then never counts as keyboard focus. Focus from a tap or a click on a button or a link doesn't move the drawer. A tap on a text field that is only partly on screen (an `<input>` or `<textarea>` that isn't `readonly` or `disabled`, or contenteditable content) does move the drawer, which also shows the field above the on-screen keyboard. A tap on a `readonly` text field doesn't: it opens no keyboard.
+
+Focus at the highest snap point doesn't move the drawer, and neither does focus inside a drawer nested in this one (that drawer handles its own content). With reduced motion the drawer jumps there. The drawer's root never scrolls: browsers scroll it to show a focused element, which would move the whole drawer away from its edge, so the drawer scrolls it back at once.
+
+#### Limits of modal drawers
+
+- **Content rendered elsewhere becomes inert.** Popovers, dropdowns and menus that belong to the drawer's content must be rendered inside the drawer. Addons that render into a `<body>`-level element (a "wormhole" or portal, such as ember-basic-dropdown and ember-power-select) put their content next to the drawer, where it is inert and can't be clicked. Render them in place (`@renderInPlace={{true}}` for ember-basic-dropdown and ember-power-select). Elements added to `<body>` after the drawer opened are not made inert. Rendering in place also matters for a drawer that keyboard focus opened from its peek (see [Keyboard focus and content off screen](#keyboard-focus-and-content-off-screen)): it isn't modal, so content rendered into `<body>` can be used, but focus that moves into it is outside the drawer, so the drawer goes back to its peek.
 - **The scroll lock assumes the document scrolls.** It sets `overflow: hidden` on `<html>`. If your app scrolls inside `<body>` or a wrapper element instead (common in app-like layouts), that element keeps scrolling; lock it yourself while the drawer is open. Fixed-position page elements are not adjusted for the scrollbar that disappears.
 - **Safari doesn't focus buttons on click**, so after opening a drawer with a mouse or touch there, no element gets focus back on close.
-
-Animations respect `prefers-reduced-motion`: with reduced motion the drawer jumps to its snap point instead of animating.
 
 ### Dragging
 
@@ -330,12 +527,12 @@ A drawer directly inside another drawer's block still works as before, but it on
 
 These are the package's public API:
 
-- `ember-mobile-drawer`: the components, the spring presets (`springPresets`, `springFromDuration`) and types
+- `ember-mobile-drawer`: the `MobileDrawer` component, the spring presets (`springPresets`, `springFromDuration`) and the types (see [JavaScript exports](#javascript-exports))
 - `ember-mobile-drawer/components/mobile-drawer`: the `<MobileDrawer>` component as a default export
 - `ember-mobile-drawer/template-registry`: the Glint template registry, for apps that use loose-mode (`.hbs`) templates
 - `ember-mobile-drawer/styles.css`: the base stylesheet (see [Styles](#styles))
 - `ember-mobile-drawer/themes/ios.css`: the optional iOS theme (see [iOS theme](#ios-theme))
-- `ember-mobile-drawer/test-support`: test helpers (see [Testing](#testing))
+- `ember-mobile-drawer/test-support`: test helpers (see [Testing](#testing)) and their types `DrawerTarget` and `DragDrawerOptions`
 
 The package's `exports` also lists a few entries that are for tools, not for imports in your app:
 
@@ -413,6 +610,7 @@ The drawer root (`.mobile-drawer`) carries state attributes you can style on:
   The scroll lock (see [Scrolling content](#scrolling-content)) doesn't use it: that follows where the drawer is shown, frame by frame.
 - `data-at-highest`: while the tray is shown at (or past) its highest snap point, where its content can scroll. Unlike `data-expanded` it follows where the drawer is shown, also during a drag or an animation: it comes when the expand progress (see [Floating sheet](#floating-sheet)) gets to 1, and goes when it leaves 1. The iOS theme makes the grabber strip opaque with it.
 - `data-nested`: while a modal drawer in front of this drawer is open (the modal drawer that opened last), and this drawer shows and is not inside it (a drawer in the yielded `Nested` counts as inside). The iOS theme dims the sheet with it.
+- `data-keyboard`: on a bottom drawer in iOS Safari, while the on-screen keyboard is open for a field in it (see [iOS Safari on-screen keyboard](#ios-safari-on-screen-keyboard)).
 - `data-status-bar="transparent"`: while the drawer shows the page in the iOS status bar (see [Transparent status bar](#transparent-status-bar)).
 
 ### Floating sheet
@@ -433,11 +631,7 @@ With `--mobile-drawer-inset` (a length in `px` or `rem`, `0px` by default), a bo
 
 **Markup change:** the tray is now in the `.mobile-drawer__sheet` element, not a direct child of the root. Change app CSS and tests that select `.mobile-drawer > .mobile-drawer__tray` to `.mobile-drawer > .mobile-drawer__sheet > .mobile-drawer__tray`, and code that counts the root's children. A browser that scrolls a focused element into view now scrolls the sheet (the component scrolls it back at once), not the root.
 
-Safe-area insets need `viewport-fit=cover` in your viewport meta tag:
-
-```html
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-```
+Safe-area insets need `viewport-fit=cover` in your viewport meta tag (see [Installation](#installation)).
 
 #### iOS Safari 26 bars
 
@@ -675,13 +869,186 @@ Every helper takes the drawer as a selector or an element. A selector is only lo
   - `velocity`: the velocity at the release, in px/s, positive opens. It must have the same direction as the drag. Default `0`: the finger stops before it lifts, and the drawer settles on the nearest snap point. A release faster than 400 px/s moves at least one snap point that way.
   - The finger first moves 11px to start the drag. These 11px count towards `distance`, because the drawer catches up with them. For a drag shorter than 11px, the finger then goes back to where it went down first. A moving drawer is stopped where it is. If no drag starts (for example, because the gesture scrolled the content, or `target` is not a handle of a `@handleOnly` drawer), `dragDrawer` throws.
 
+## API reference
+
+### `<MobileDrawer>` arguments
+
+All arguments are optional.
+
+| Argument                | Type                                          | Default            | Description |
+| ----------------------- | --------------------------------------------- | ------------------ | ----------- |
+| `@placement`            | `Placement`: `'bottom' \| 'top' \| 'left' \| 'right'` | `'bottom'` | The edge of the screen the drawer is attached to. `left` and `right` are physical. |
+| `@snapPoints`           | `readonly SnapPoint[]`                        | `[0, 'content']`   | Where the drawer can rest: px, `'N%'` or `'content'`. See [Snap points](#snap-points). |
+| `@activeSnapPoint`      | `number`                                      | not set (uncontrolled, starts at `0`) | Index into `@snapPoints` of the snap point the drawer should be at. Makes the drawer controlled. See [Controlled and uncontrolled](#controlled-and-uncontrolled). |
+| `@onSnapPointChange`    | `(index: number) => void`                     | none               | Called with the new index when the drawer wants to move: `snapTo`, `open`, `close`, a drag, the backdrop, Escape or keyboard focus. Not called when you change `@activeSnapPoint`. |
+| `@handleOnly`           | `boolean`                                     | `false`            | Only start a drag on elements with the yielded `handle` modifier. See [Dragging](#dragging). |
+| `@modal`                | `boolean`                                     | `true`             | Whether the drawer is a modal dialog while it is open. See [Accessibility](#accessibility). |
+| `@backdrop`             | `boolean`                                     | the value of `@modal` | Whether to render the backdrop behind the tray. See [Backdrop](#backdrop). |
+| `@closeOnBackdropClick` | `boolean`                                     | `true`             | Whether a tap or click on the backdrop closes the drawer, like `close()`. |
+| `@transparentStatusBar` | `boolean`                                     | `false`            | iOS Safari 26 and later: while this modal drawer is open, the status bar shows the dimmed page. See [Transparent status bar](#transparent-status-bar). |
+| `@spring`               | `Partial<MobileDrawerSpring>`                 | `springPresets.default` | The spring that moves the drawer to a snap point. Keys you leave out keep the default. See [Spring](#spring). |
+| `@onOpen`               | `(event: MobileDrawerToggleEvent) => void`    | none               | Called when the drawer opens. See [Events](#events). |
+| `@onClose`              | `(event: MobileDrawerToggleEvent) => void`    | none               | Called when the drawer closes. |
+| `@onDragStart`          | `(event: MobileDrawerDragStartEvent) => void` | none               | Called when a drag starts. |
+| `@onDragEnd`            | `(event: MobileDrawerDragEndEvent) => void`   | none               | Called when a drag ends, before `@onSnapPointChange`. |
+
+Attributes (`...attributes`) go on the root element, a `<div>`.
+
+### Yielded values
+
+The block gets one value, of type `MobileDrawerApi`:
+
+| Name              | Type                                          | Description |
+| ----------------- | --------------------------------------------- | ----------- |
+| `snapTo`          | `(index: number) => void`                     | Moves to the snap point at `index`. Controlled, it only calls `@onSnapPointChange`. In development, an index outside `@snapPoints` fails an assertion. |
+| `open`            | `() => void`                                  | Moves to the snap point with the largest offset. Does nothing before the drawer is measured. |
+| `close`           | `() => void`                                  | Moves to the snap point with the smallest offset. Does nothing before the drawer is measured. |
+| `activeSnapPoint` | `number`                                      | Index of the snap point the drawer rests at or is moving to. |
+| `isDragging`      | `boolean`                                     | Whether the user is dragging the drawer. |
+| `isAnimating`     | `boolean`                                     | Whether the drawer is animating towards a snap point. |
+| `progress`        | `number`                                      | How far open the drawer is, from `0` (closed) to `1` (largest snap point), for the snap point it rests at or is moving to. Not updated every frame: for styles that follow the drawer frame by frame, use `--mobile-drawer-progress` on the backdrop. |
+| `handle`          | modifier, `ModifierLike<{ Element: HTMLElement }>` | Makes an element a drag handle: a gesture on it always drags the drawer. See [Dragging](#dragging). |
+| `Nested`          | component, with an optional `@destination` argument (`Element \| null`) | Renders a nested drawer outside this drawer's tray. See [Nested drawers](#nested-drawers). |
+
+### Event objects
+
+| Type                          | Used by                 | Properties |
+| ----------------------------- | ----------------------- | ---------- |
+| `MobileDrawerToggleEvent`     | `@onOpen`, `@onClose`   | `snapPoint`: index of the snap point the drawer moves to (for `@onClose` always the smallest one). |
+| `MobileDrawerDragStartEvent`  | `@onDragStart`          | `snapPoint`: the active snap point when the drag started. `offset`: how far open the drawer was, in px. |
+| `MobileDrawerDragEndEvent`    | `@onDragEnd`            | `snapPoint`: the snap point the release picked. `offset`: how far open the drawer was at the release, in px. `velocity`: the release velocity in px/s along the axis, positive opens. |
+
+### Root element
+
+The root element `.mobile-drawer` has these attributes:
+
+| Attribute                       | When |
+| ------------------------------- | ---- |
+| `data-placement`                | Always: `bottom`, `top`, `left` or `right`. |
+| `data-closed`                   | While the drawer is fully closed and at rest. The base styles hide the drawer. |
+| `data-expanded`                 | While the drawer rests at its highest snap point or animates towards it (not during a drag), and that snap point is not `0`. |
+| `data-at-highest`               | While the tray is shown at or past its highest snap point, frame by frame. |
+| `data-nested`                   | While a modal drawer in front of this one is open. |
+| `data-keyboard`                 | iOS Safari: while an on-screen keyboard is open for a field in this bottom drawer. See [iOS Safari on-screen keyboard](#ios-safari-on-screen-keyboard). |
+| `data-status-bar="transparent"` | While the drawer shows the page in the iOS status bar. See [Transparent status bar](#transparent-status-bar). |
+| `role="dialog"`                 | Modal drawers (`@modal`, the default). |
+| `aria-modal="true"`             | While a modal drawer is open. Not when keyboard focus opened it from its peek. |
+
+See [State attributes](#state-attributes) for details.
+
+### Markup
+
+```html
+<div class="mobile-drawer" data-placement="bottom" data-closed role="dialog">
+  <div class="mobile-drawer__backdrop"></div>                        <!-- with a backdrop -->
+  <div class="mobile-drawer__backdrop-tint" aria-hidden="true"></div> <!-- with a backdrop -->
+  <div class="mobile-drawer__sheet">
+    <div class="mobile-drawer__tray" tabindex="-1">                   <!-- tabindex: modal drawers -->
+      <div class="mobile-drawer__content">...your block...</div>
+    </div>
+  </div>
+  <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>
+</div>
+```
+
+| Class                           | Description |
+| ------------------------------- | ----------- |
+| `.mobile-drawer`                | The root: a fixed overlay over the viewport that takes no pointer events itself. Set `position: absolute` on it to embed the drawer in a positioned container. |
+| `.mobile-drawer__backdrop`      | Covers the page behind the tray. The component writes `--mobile-drawer-progress` on it. |
+| `.mobile-drawer__backdrop-tint` | iOS Safari 26 only: colours the bar at the far edge. See [iOS Safari 26 bars](#ios-safari-26-bars). |
+| `.mobile-drawer__sheet`         | Clips the tray. Floats with `--mobile-drawer-inset`. The component writes `--mobile-drawer-expand-progress` on it. |
+| `.mobile-drawer__tray`          | The visible drawer and its scroll container. The component writes its `transform`, `touch-action` and, below the highest snap point, `overflow`. |
+| `.mobile-drawer__content`       | Your block. Has the safe-area padding: don't set padding on it. |
+| `.mobile-drawer__bar-tint`      | iOS Safari 26 only: colours the bar at the sheet's edge. |
+| `.mobile-drawer-nested`         | Not in the root: the `display: contents` element that the yielded `Nested` renders into. Gets `data-closed` with its drawer. |
+| `.mobile-drawer__dim`           | Not in the root: the dim layer before the root, with `@transparentStatusBar` only. |
+| `.mobile-drawer-keyboard-fill`  | Not in the root: a child of `<html>` below an open bottom drawer while the iOS Safari keyboard is open. |
+
+Select the tray with `.mobile-drawer > .mobile-drawer__sheet > .mobile-drawer__tray`, so the selector doesn't match the tray of a drawer inside it.
+
+### Data attributes for your elements
+
+| Attribute                     | Put it on | Effect |
+| ----------------------------- | --------- | ------ |
+| `data-mobile-drawer-scroll`   | A scrolling element in the tray | It takes part in the scroll-or-drag decision. See [Scrolling content](#scrolling-content). |
+| `data-mobile-drawer-pinned`   | An element in the content, such as a sticky grabber | It stays at the tray's edge while the content bounces past fully open. See [Dragging](#dragging). |
+| `data-mobile-drawer-page`     | The element that holds your page, outside the drawers | Open modal bottom drawers write `--mobile-drawer-page-progress`, `--mobile-drawer-page-viewport-top` and `data-mobile-drawer-page-active` on it. Used by the iOS theme's [page scale](#page-scale). |
+
+### CSS custom properties
+
+Base styles (`ember-mobile-drawer/styles.css`). Set them on `:root`, an ancestor of the drawer or the drawer's root:
+
+| Property                           | Default                     | Description |
+| ---------------------------------- | --------------------------- | ----------- |
+| `--mobile-drawer-background`       | `Canvas`                    | Tray background. Must be a colour for the iOS bar tints and the iOS theme. |
+| `--mobile-drawer-color`            | `CanvasText`                | Tray text colour. |
+| `--mobile-drawer-radius`           | `0`                         | Radius of the tray corners away from its edge. |
+| `--mobile-drawer-shadow`           | `0 0 12px rgb(0 0 0 / 0.2)` | Tray `box-shadow`. |
+| `--mobile-drawer-backdrop-color`   | `rgb(0 0 0)`                | Backdrop colour. |
+| `--mobile-drawer-backdrop-opacity` | `0.4`                       | Backdrop opacity at the largest snap point, from `0` to `1`. |
+| `--mobile-drawer-z-index`          | `1000`                      | `z-index` of the root. |
+| `--mobile-drawer-inset`            | `0px`                       | Inset of a floating bottom sheet below its highest snap point, in `px` or `rem`. See [Floating sheet](#floating-sheet). |
+
+Written by the component; read them, but don't set them:
+
+| Property                             | On | Value |
+| ------------------------------------ | -- | ----- |
+| `--mobile-drawer-progress`           | `.mobile-drawer__backdrop`, the tints, `.mobile-drawer__dim` | `0` (closed) to `1` (largest snap point), every frame. |
+| `--mobile-drawer-expand-progress`    | `.mobile-drawer__sheet` (the tray inherits it), the tints | `0` at and below the second-highest snap point to `1` at the highest, every frame. Not inherited by the content. |
+| `--mobile-drawer-page-progress`      | the `data-mobile-drawer-page` element | The progress of the open modal bottom drawers, while one is open. |
+| `--mobile-drawer-page-viewport-top`  | the `data-mobile-drawer-page` element | The top of the viewport in that element, in px. |
+
+iOS theme (`ember-mobile-drawer/themes/ios.css`), under the `mobile-drawer-theme-ios` class. The theme sets these base properties on the element with the class: `--mobile-drawer-background` (translucent glass, opaque at the highest snap point), `--mobile-drawer-color`, `--mobile-drawer-radius: 36px`, `--mobile-drawer-inset: 8px`, `--mobile-drawer-shadow` (a rim and a soft shadow), `--mobile-drawer-backdrop-color: rgb(0 0 0)` and `--mobile-drawer-backdrop-opacity: 0.35`. Override them on that element or closer to the drawer. Its own settings:
+
+| Property                              | Default                                 | Description |
+| ------------------------------------- | --------------------------------------- | ----------- |
+| `--mobile-drawer-ios-bottom-radius`   | `--mobile-drawer-radius` (36px)         | Bottom corner radius of the floating sheet. |
+| `--mobile-drawer-ios-partial-dim`     | `0`                                     | `1` dims the page at every snap point; `0` dims only towards the highest. |
+| `--mobile-drawer-ios-nested-dim`      | `rgb(0 0 0 / 0.12)`                     | Dim over a sheet while a modal drawer in front of it is open. |
+| `--mobile-drawer-ios-page-scale`      | `0.92`                                  | [Page scale](#page-scale): scale of the page when fully open. |
+| `--mobile-drawer-ios-page-offset`     | `calc(env(safe-area-inset-top) + 10px)` | Page scale: how far the page moves down. |
+| `--mobile-drawer-ios-page-radius`     | `12px`                                  | Page scale: radius of the page's top corners. |
+| `--mobile-drawer-ios-page-background` | `Canvas`                                | Page scale: background of the page element. |
+
+Theme classes: `mobile-drawer-theme-ios` (on an ancestor of the drawers), `mobile-drawer-theme-ios__grabber` (the grabber, directly in the drawer's block) and `mobile-drawer-theme-ios__page` (with `data-mobile-drawer-page`, for the page scale). See [iOS theme](#ios-theme).
+
+### JavaScript exports
+
+From `ember-mobile-drawer`:
+
+| Export                | Kind      | Description |
+| --------------------- | --------- | ----------- |
+| `MobileDrawer`        | component | The drawer. Also the default export of `ember-mobile-drawer/components/mobile-drawer`, and `<MobileDrawer>` in loose-mode templates. |
+| `springPresets`       | object    | Frozen spring presets: `default`, `ios`, `iosSnappy`, `iosBouncy`. See [Spring](#spring). |
+| `springFromDuration`  | function  | `({ duration, bounce? }: SpringDuration) => Readonly<MobileDrawerSpring>`. Throws a `RangeError` for a `duration` that isn't a finite number above `0`, or a `bounce` outside `0` (included) to `1` (not included). |
+| `MobileDrawerSignature` | type    | The component's Glint signature. |
+| `MobileDrawerApi`     | type      | The yielded value. |
+| `MobileDrawerToggleEvent`, `MobileDrawerDragStartEvent`, `MobileDrawerDragEndEvent` | types | The event objects. |
+| `MobileDrawerSpring`  | type      | `{ stiffness: number; damping: number; mass: number }`. |
+| `SpringDuration`      | type      | `{ duration: number; bounce?: number }`. |
+| `Placement`           | type      | `'bottom' \| 'top' \| 'left' \| 'right'`. |
+| `SnapPoint`           | type      | `` number \| `${number}%` \| 'content' ``. |
+
+### Test helpers
+
+From `ember-mobile-drawer/test-support`. All of them return a `Promise<void>` that resolves after `settled()`. See [Testing](#testing).
+
+| Export          | Signature | Description |
+| --------------- | --------- | ----------- |
+| `openDrawer`    | `(target?: DrawerTarget) => Promise<void>` | Like the yielded `open()`. `target` defaults to `'.mobile-drawer'`. |
+| `closeDrawer`   | `(target?: DrawerTarget) => Promise<void>` | Like the yielded `close()`. `target` defaults to `'.mobile-drawer'`. |
+| `dragDrawer`    | `(target: DrawerTarget, options: DragDrawerOptions) => Promise<void>` | Drags with one finger and lets go. `options` is `{ to, velocity? }` or `{ distance, velocity? }`. |
+| `DrawerTarget`  | type | `string \| Element`: a selector inside the test's root element, or an element in the drawer. |
+| `DragDrawerOptions` | type | The options of `dragDrawer`. |
+
 ## Development
 
 The toolchain is managed with [proto](https://moonrepo.dev/proto). Run `proto install` in the repository to get the pinned node and pnpm versions from `.prototools`.
 
 - `pnpm install` installs dependencies
-- `pnpm start` runs the demo app (`demo-app/`) at http://localhost:4200
+- `pnpm start` runs the demo app (`demo-app/`) with the Vite dev server, at the URL it prints (http://localhost:5173 by default); the tests run in the browser at `/tests/`
 - `pnpm test` builds and runs the test suite in headless Chrome
+- `pnpm build:demo` builds the demo app (the [playground](https://nickschot.github.io/ember-mobile-drawer/)) into `dist-demo/`
 - `pnpm lint` / `pnpm lint:fix` lint the project
 - `pnpm build` builds the addon into `dist/`
 
