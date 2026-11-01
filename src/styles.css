@@ -62,6 +62,19 @@
  *                           progress (see the sheet) gets to 1 or leaves
  *                           it. Not used by these base styles; for themes
  *                           (e.g. the iOS theme's opaque grabber strip).
+ * [data-scroll-reset]       On the root of a bottom or top drawer while
+ *                           the tray is below its highest snap point and
+ *                           the component is still to bring its content
+ *                           back to its scroll start: from the start of a
+ *                           run down from a scrolled tray (also a close)
+ *                           until the content is back (for a close, once
+ *                           closed), or until the tray gets to its highest
+ *                           snap point again. A touch that holds the drawer
+ *                           keeps it; a drag from a scrolled tray (on a
+ *                           handle) sets it too. Not used by these base
+ *                           styles; for themes (e.g. the iOS theme keeps
+ *                           the grabber strip opaque, so the scrolled
+ *                           content doesn't show under it).
  * [data-nested]             On the root while a modal drawer in front of
  *                           this one is open: the last modal drawer that
  *                           opened, when this drawer shows (is not closed

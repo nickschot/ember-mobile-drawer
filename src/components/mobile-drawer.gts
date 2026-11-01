@@ -689,7 +689,8 @@ const clampIndex = (index: number, count: number) =>
  * When a bottom or top drawer leaves its highest snap point, its tray
  * scrolls back to its scroll start, the content start at the leading edge;
  * at the highest snap point it opens at `scrollTop` 0 (see
- * `#planScrollReset`).
+ * `#planScrollReset`). Until it is back there, the root has
+ * `data-scroll-reset` (see `#markScrollReset`).
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
@@ -1446,6 +1447,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * plans a new one. A drag down from the top of a bottom drawer only
    * starts when the tray is at its scroll start anyway (see `shouldDrag`);
    * one with `@handleOnly` may start anywhere, and resets after its release.
+   *
+   * While the reset is to come (the content is away from its scroll start
+   * below the highest snap point), the root has `data-scroll-reset`, see
+   * `#markScrollReset`.
    */
   #planScrollReset(target: number): void {
     // A new plan while the reset's own spring runs (e.g. on each frame of
@@ -1460,6 +1465,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // Opening from closed: start at the content start. A move up from a
       // lower snap point keeps the position, so nothing jumps.
       if (this.#renderedOffset <= EPSILON) this.#scrollToStart(target);
+      // Already there (e.g. a handle drag released at the top): the content
+      // can scroll, `data-at-highest` covers it. On the way up the mark
+      // stays until the tray gets there (see `#render`).
+      else if (this.#atTop) this.#markScrollReset(false);
       return;
     }
     const tray = this.#tray!;
@@ -1486,6 +1495,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#writeScroll(reset, 0);
       return;
     }
+    // The content is away from its start while the tray shows: until the
+    // reset gets there (`#writeScroll` with 0).
+    this.#markScrollReset(true);
     if (target <= EPSILON || Math.abs(open - target) >= distance) {
       this.#scrollReset = reset;
       return;
@@ -1536,6 +1548,39 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     reset.fraction = fraction;
     const top = reset.start + reset.sign * reset.distance * fraction;
     this.#tray!.scrollTo({ top, behavior: 'instant' });
+    if (fraction === 0) this.#markScrollReset(false);
+  }
+
+  /**
+   * Sets or removes `data-scroll-reset` on the root. It is on from the plan
+   * of a reset that can't happen at once (see `#planScrollReset`: a run
+   * down from a scrolled tray, also a close) until the content is back at
+   * its scroll start, or until the tray gets to the highest snap point
+   * (where `data-at-highest` takes over). A touch that stops the reset
+   * keeps it: the content is still away from its start. A drag sets it
+   * from where the content is when it starts (see `onPanStart`), as a
+   * drag on a handle from a scrolled tray keeps the content in place until
+   * its release. Themes use
+   * it to cover the content under an element at the leading edge, such as
+   * the iOS theme's grabber strip, which is transparent below the highest
+   * snap point.
+   */
+  #markScrollReset(on: boolean): void {
+    this.#root?.toggleAttribute('data-scroll-reset', on);
+  }
+
+  /**
+   * Whether the tray of a vertical drawer is away from its scroll start
+   * below the highest snap point (see `#planScrollReset`). Reads layout.
+   */
+  #awayFromScrollStart(): boolean {
+    if (this.axis !== 'vertical') return false;
+    const tray = this.#tray!;
+    const start =
+      this.placement === 'top'
+        ? Math.max(0, tray.scrollHeight - tray.clientHeight)
+        : 0;
+    return Math.abs(tray.scrollTop - start) > EPSILON;
   }
 
   /**
@@ -1607,6 +1652,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         ? Math.max(0, tray.scrollHeight - tray.clientHeight)
         : 0;
     tray.scrollTo({ top, behavior: 'instant' });
+    this.#markScrollReset(false);
   }
 
   /**
@@ -1740,6 +1786,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     root.toggleAttribute('data-at-highest', atTop && layout.maxOffset > 0);
     if (atTop !== this.#atTop) {
       this.#atTop = atTop;
+      // The content can scroll here; `data-at-highest` takes over.
+      if (atTop) this.#markScrollReset(false);
       // Only while the tray is a drag source (not with @handleOnly).
       if (this.#tray!.style.touchAction) {
         this.#tray!.style.touchAction = this.trayTouchAction();
@@ -3279,6 +3327,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // not the spring's value, which may be past an edge the render clamps.
     spring.stop();
     this.#stopScrollReset();
+    // A drag keeps the content where it is until its release. A drag from
+    // a scrolled tray (on a handle, or with `@handleOnly`) can take it
+    // below the highest snap point with the content away from its start.
+    this.#markScrollReset(this.#awayFromScrollStart());
     this.#endHold();
     const offset = this.#renderedOffset;
     // didPan recognises the pan once the finger has moved past its threshold.

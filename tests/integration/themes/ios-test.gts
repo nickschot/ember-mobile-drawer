@@ -6,6 +6,7 @@ import { tracked } from '@glimmer/tracking';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { nextFrames } from '../../helpers/frames.ts';
+import { FakeClock } from '../../helpers/fake-clock.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
 
@@ -826,6 +827,84 @@ module('Integration | themes/ios.css', function (hooks) {
     );
   });
 
+  // #78 item 4: a run down from a scrolled sheet (the component sets
+  // data-scroll-reset until the content is back at its start).
+  for (const placement of ['bottom', 'top'] as const) {
+    for (const scheme of SCHEMES) {
+      test(`${placement}, ${scheme}: with data-scroll-reset the strip keeps the opaque colour and the rim on the glass sheet`, async function (assert) {
+        await renderDrawer({ placement, scheme, tall: true });
+        const grabber = el('[data-test-grabber]');
+        assert.strictEqual(
+          getComputedStyle(grabber).backgroundColor,
+          'rgba(0, 0, 0, 0)',
+          'transparent without it',
+        );
+
+        el('[data-test-root]').setAttribute('data-scroll-reset', '');
+        finishTransitions();
+        assert.strictEqual(
+          rgb(getComputedStyle(grabber).backgroundColor),
+          SOLID[scheme],
+          'opaque: the scrolled rows do not show through',
+        );
+        assert.notStrictEqual(
+          insetRim(getComputedStyle(grabber, '::after').boxShadow),
+          null,
+          'the rim over the strip',
+        );
+        const tray = getComputedStyle(el('[data-test-tray]'));
+        assert.strictEqual(
+          rgb(tray.backgroundColor),
+          GLASS[scheme].background,
+          'the sheet stays glass',
+        );
+        assert.strictEqual(tray.backdropFilter, 'blur(30px) saturate(1.8)');
+      });
+    }
+
+    // #78 item 5: while the tray moves, its edge is at a fraction of a
+    // pixel, and the content showed as a thin line of glyph tops above the
+    // strip. A 1px shadow in the strip colour out of the edge covers it.
+    test(`${placement}: the opaque strip has a 1px edge shadow in its colour out of the tray's leading edge`, async function (assert) {
+      await renderDrawer({ placement, tall: true });
+      const root = el('[data-test-root]');
+      const grabber = el('[data-test-grabber]');
+      const offset = placement === 'bottom' ? '-1px' : '1px';
+      const edge = new RegExp(
+        `^(?:rgb\\(255, 255, 255\\)|color\\(srgb 1 1 1\\)) 0px ${offset} 0px 0px$`,
+      );
+      const shadow = () => {
+        finishTransitions();
+        return getComputedStyle(grabber).boxShadow;
+      };
+      assert.strictEqual(shadow(), 'none', 'none on the transparent strip');
+
+      for (const attribute of ['data-at-highest', 'data-scroll-reset']) {
+        root.setAttribute(attribute, '');
+        assert.true(edge.test(shadow()), `${attribute}: ${shadow()}`);
+        root.removeAttribute(attribute);
+      }
+
+      root.setAttribute('data-scroll-reset', '');
+      root.setAttribute('data-nested', '');
+      const nested = shadow();
+      const layers = nested.split(/,\s*(?![^()]*\))/);
+      assert.strictEqual(layers.length, 3, nested);
+      assert.strictEqual(
+        layers[0],
+        `rgba(0, 0, 0, 0.12) 0px ${offset} 0px 0px`,
+        'the dim over the edge shadow',
+      );
+      assert.true(edge.test(layers[1]!), `the edge shadow: ${layers[1]}`);
+      assert.true(
+        /^rgba\(0, 0, 0, 0\.12\) 0px 0px 0px \d+(\.\d+)?px inset$/.test(
+          layers[2]!,
+        ),
+        `the dim over the strip: ${layers[2]}`,
+      );
+    });
+  }
+
   test("expanded, the sheet and the grabber follow the app's sheet background, made opaque", async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     const style = addStyles(
@@ -1513,3 +1592,129 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
     });
   }
 });
+
+// #78 items 4 and 5, with the real component and its spring: a close and a
+// run to a partial snap point from a scrolled sheet.
+module(
+  'Integration | themes/ios.css | with the component, animated',
+  function (hooks) {
+    setupRenderingTest(hooks);
+
+    let clock: FakeClock;
+
+    hooks.beforeEach(function () {
+      clock = new FakeClock();
+      drawerEnvironment.clock = clock;
+      drawerEnvironment.prefersReducedMotion = () => false;
+    });
+
+    hooks.afterEach(function () {
+      delete drawerEnvironment.clock;
+      delete drawerEnvironment.prefersReducedMotion;
+    });
+
+    async function renderSheet(state: SheetState) {
+      const isTop = state.placement === 'top';
+      const lines = TALL_LINES;
+      await render(
+        <template>
+          <div class="mobile-drawer-theme-ios">
+            <MobileDrawer
+              @placement={{state.placement}}
+              @snapPoints={{SHEET_SNAP_POINTS}}
+              @activeSnapPoint={{state.active}}
+              @onSnapPointChange={{state.setActive}}
+            >
+              {{#unless isTop}}
+                <div class="mobile-drawer-theme-ios__grabber"></div>
+              {{/unless}}
+              {{#each lines as |line|}}
+                <p>{{line}}</p>
+              {{/each}}
+              {{#if isTop}}
+                <div class="mobile-drawer-theme-ios__grabber"></div>
+              {{/if}}
+            </MobileDrawer>
+          </div>
+        </template>,
+      );
+      clock.runUntilIdle();
+      await settled();
+      return find('.mobile-drawer')!;
+    }
+
+    /** Scrolls the tray to the middle of its range. */
+    function scrollMiddle(root: Element): void {
+      const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+      tray.scrollTop = Math.round((tray.scrollHeight - tray.clientHeight) / 2);
+    }
+
+    for (const placement of ['bottom', 'top'] as const) {
+      for (const [name, to] of [
+        ['a close', 0],
+        ['a run to the partial snap point', 1],
+      ] as const) {
+        test(`${placement}: during ${name} from a scrolled sheet, no content shows under a transparent strip`, async function (assert) {
+          const state = new SheetState(placement);
+          state.active = 2;
+          const root = await renderSheet(state);
+          const strip = root.querySelector(
+            '.mobile-drawer-theme-ios__grabber',
+          )!;
+          scrollMiddle(root);
+          assert.true(contentOverlap(root) > 0, 'content under the strip');
+
+          state.active = to;
+          await settled();
+          let covered = 0;
+          const shown: string[] = [];
+          while (clock.pendingFrames > 0) {
+            clock.frame();
+            if (root.hasAttribute('data-closed')) continue;
+            if (contentOverlap(root) <= 0) continue;
+            const color = getComputedStyle(strip).backgroundColor;
+            if (rgb(color) === SOLID.light) covered++;
+            else shown.push(color);
+          }
+          assert.true(covered > 3, `the opaque strip covers it (${covered})`);
+          assert.deepEqual(shown, [], 'no frame with a see-through strip');
+          assert.dom(root).doesNotHaveAttribute('data-scroll-reset');
+          if (to === 1) {
+            assert.strictEqual(
+              getComputedStyle(strip).backgroundColor,
+              'rgba(0, 0, 0, 0)',
+              'transparent again at the partial snap point',
+            );
+            const overlap = contentOverlap(root);
+            assert.true(overlap <= 0, `no content under it (${overlap}px)`);
+          }
+        });
+      }
+
+      test(`${placement}: during a close from a scrolled sheet, the strip has its edge shadow`, async function (assert) {
+        const state = new SheetState(placement);
+        state.active = 2;
+        const root = await renderSheet(state);
+        const strip = root.querySelector('.mobile-drawer-theme-ios__grabber')!;
+        scrollMiddle(root);
+
+        state.active = 0;
+        await settled();
+        clock.frame();
+        clock.frame();
+        clock.frame();
+        assert.dom(root).doesNotHaveAttribute('data-at-highest');
+        finishTransitions();
+        const offset = placement === 'bottom' ? '-1px' : '1px';
+        const shadow = getComputedStyle(strip).boxShadow;
+        assert.true(
+          new RegExp(
+            `^(?:rgb\\(255, 255, 255\\)|color\\(srgb 1 1 1\\)) 0px ${offset} 0px 0px$`,
+          ).test(shadow),
+          `covers the edge pixel row: ${shadow}`,
+        );
+        clock.runUntilIdle();
+      });
+    }
+  },
+);

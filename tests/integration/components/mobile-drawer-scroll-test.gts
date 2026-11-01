@@ -2232,5 +2232,170 @@ module(
         assert.strictEqual(scrollPosition(tray(), placement), scrolled);
       });
     }
+
+    /**
+     * Runs the animation. In every frame where the content is away from its
+     * scroll start and the drawer shows, the root must have
+     * `data-at-highest` or `data-scroll-reset`, so a theme can cover the
+     * content at the leading edge. Returns the number of such frames
+     * below the highest snap point.
+     */
+    const assertMarkedWhileAway = (assert: Assert, placement: Placement) => {
+      const root = el('.mobile-drawer');
+      let marked = 0;
+      const unmarked: number[] = [];
+      while (clock.pendingFrames > 0) {
+        clock.frame();
+        if (root.hasAttribute('data-closed')) continue;
+        if (fromStart(placement) === 0) continue;
+        if (root.hasAttribute('data-at-highest')) continue;
+        if (root.hasAttribute('data-scroll-reset')) marked++;
+        else unmarked.push(fromStart(placement));
+      }
+      assert.deepEqual(unmarked, [], 'no frame away from the start unmarked');
+      return marked;
+    };
+
+    for (const placement of ['bottom', 'top'] as const) {
+      test(`${placement}: data-scroll-reset marks a close from a scrolled tray until it is closed`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        const root = el('.mobile-drawer');
+        scrollAway(assert, placement);
+        assert.false(root.hasAttribute('data-scroll-reset'), 'not at the top');
+
+        state.active = 0;
+        await settled();
+        assert.true(
+          root.hasAttribute('data-scroll-reset'),
+          'from the start of the run',
+        );
+        const marked = assertMarkedWhileAway(assert, placement);
+        assert.true(marked > 5, `marked below the top (${marked} frames)`);
+        assert.true(root.hasAttribute('data-closed'), 'closed');
+        assert.strictEqual(fromStart(placement), 0, 'reset once closed');
+        assert.false(root.hasAttribute('data-scroll-reset'), 'gone');
+      });
+
+      test(`${placement}: data-scroll-reset marks a lower snap point until the content is back at its start`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        const root = el('.mobile-drawer');
+        scrollAway(assert, placement);
+
+        state.active = 1;
+        await settled();
+        const marked = assertMarkedWhileAway(assert, placement);
+        assert.true(marked > 0, `marked during the run (${marked} frames)`);
+        assert.strictEqual(fromStart(placement), 0, 'at the start');
+        assert.false(root.hasAttribute('data-scroll-reset'), 'gone');
+      });
+
+      test(`${placement}: no data-scroll-reset for a run from a tray at its scroll start`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        // A bottom drawer from the top (scrollTop 0 is its start at every
+        // snap point). A top drawer's start is the end of the scroll
+        // range, which changes with the tray size, so from the partial
+        // snap point, where it rests at its start.
+        state.active = placement === 'bottom' ? 2 : 1;
+        await renderDrawer(state);
+        const root = el('.mobile-drawer');
+        assert.strictEqual(fromStart(placement), 0, 'at the start');
+
+        const seen: boolean[] = [];
+        for (const active of placement === 'bottom' ? [1, 0] : [0]) {
+          state.active = active;
+          await settled();
+          while (clock.pendingFrames > 0) {
+            clock.frame();
+            seen.push(root.hasAttribute('data-scroll-reset'));
+          }
+        }
+        assert.true(seen.length > 5, 'ran');
+        assert.false(seen.includes(true), 'never set');
+      });
+
+      test(`${placement}: data-scroll-reset goes when a closing tray gets back to the highest snap point`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        const root = el('.mobile-drawer');
+        const distance = scrollAway(assert, placement);
+
+        state.active = 0;
+        await settled();
+        clock.frame();
+        clock.frame();
+        clock.frame();
+        assert.false(root.hasAttribute('data-at-highest'), 'left the top');
+        assert.true(root.hasAttribute('data-scroll-reset'), 'set');
+
+        state.active = 2;
+        await settled();
+        assert.true(root.hasAttribute('data-scroll-reset'), 'on the way up');
+        clock.runUntilIdle();
+        assert.true(root.hasAttribute('data-at-highest'), 'back at the top');
+        assert.false(root.hasAttribute('data-scroll-reset'), 'gone');
+        assert.strictEqual(fromStart(placement), distance, 'scroll kept');
+      });
+
+      test(`${placement}: with reduced motion, data-scroll-reset is gone after a close`, async function (assert) {
+        drawerEnvironment.prefersReducedMotion = () => true;
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        const root = el('.mobile-drawer');
+        scrollAway(assert, placement);
+
+        state.active = 0;
+        await settled();
+        clock.runUntilIdle();
+        assert.true(root.hasAttribute('data-closed'), 'closed');
+        assert.strictEqual(fromStart(placement), 0, 'reset');
+        assert.false(root.hasAttribute('data-scroll-reset'));
+      });
+
+      test(`${placement}: a handle drag from a scrolled tray sets data-scroll-reset, and the reset after its release removes it`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.handleOnly = true;
+        await renderDrawer(state);
+        const root = el('.mobile-drawer');
+        scrollAway(assert, placement);
+
+        const during: boolean[] = [];
+        await gesture(el('[data-test-handle]'), CLOSING[placement], 40, {
+          during: () => during.push(root.hasAttribute('data-scroll-reset')),
+        });
+        // The first steps are below didPan's threshold: no drag yet.
+        const from = during.indexOf(true);
+        assert.true(from >= 0, `set once the drag starts (${from})`);
+        assert.true(during.slice(from).every(Boolean), 'kept during the drag');
+        assert.deepEqual(state.changes, [1], 'released towards half open');
+        assertMarkedWhileAway(assert, placement);
+        assert.strictEqual(fromStart(placement), 0, 'at the start');
+        assert.false(root.hasAttribute('data-scroll-reset'), 'gone');
+      });
+    }
+
+    test('left and right drawers never get data-scroll-reset', async function (assert) {
+      for (const placement of ['left', 'right'] as const) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        scrollTo(tray(), placement, 'middle');
+        state.active = 0;
+        await settled();
+        clock.frame();
+        assert.false(
+          el('.mobile-drawer').hasAttribute('data-scroll-reset'),
+          placement,
+        );
+        clock.runUntilIdle();
+      }
+    });
   },
 );

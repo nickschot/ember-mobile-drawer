@@ -45,7 +45,9 @@
  *                                    ([data-at-highest]) it has the opaque
  *                                    sheet's colour, so scrolled content
  *                                    doesn't show through and no band
- *                                    shows; otherwise it is transparent.
+ *                                    shows; otherwise it is transparent,
+ *                                    except during a run down from a
+ *                                    scrolled sheet ([data-scroll-reset]).
  *                                    Its ::before draws
  *                                    the 58x4px bar, in the tray's text
  *                                    colour. Don't wrap it in another
@@ -315,13 +317,20 @@
    * content can't scroll below the highest snap point, and the component
    * keeps the tray at its scroll start there (the content start at the top
    * of a bottom drawer, the content end at the bottom of a top drawer; see
-   * "Scrolling content" in the README). The exception is a run down from a
-   * scrolled sheet: [data-at-highest] goes away on the first frame below
-   * the highest snap point, but the tray only gets back to its scroll start
-   * in step with the run (or, for a close, once closed), so for that moment
-   * the scrolled content shows under the bar. At the highest snap point
+   * "Scrolling content" in the README). At the highest snap point
    * ([data-at-highest]) the content scrolls under the strip, so the strip
    * gets the opaque sheet's colour (see "Full height" below).
+   *
+   * A run down from a scrolled sheet: [data-at-highest] goes away on the
+   * first frame below the highest snap point, but the tray only gets back
+   * to its scroll start in step with the run (or, for a close, once closed).
+   * For that time the component sets [data-scroll-reset], and the strip
+   * keeps the opaque colour, so the scrolled rows don't show under the bar
+   * and no row shows cut at the tray's top edge. The cost: during such a
+   * run the opaque strip shows as a band on the glass sheet. It ends when
+   * the content is back at its start, not after a guessed time, and a run
+   * from an unscrolled sheet (e.g. a drag down from the top, which only
+   * starts at the scroll start) has no band.
    */
   :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
     display: block;
@@ -333,6 +342,9 @@
     /* Clips the rim in ::after to the strip. */
     overflow: hidden;
     background: transparent;
+    /* Private: which way the strip's edge shadow goes (see "Full height"):
+       up, out of the tray's leading edge. */
+    --_mobile-drawer-ios-strip-edge: -1px;
   }
 
   /*
@@ -459,6 +471,7 @@
   ) {
     top: auto;
     bottom: 0;
+    --_mobile-drawer-ios-strip-edge: 1px;
   }
 
   :where(
@@ -743,7 +756,12 @@
    *   scrolls under it doesn't show through, and the rim over it. Below the
    *   highest snap point the strip is transparent: the content can't scroll
    *   there, so nothing is under it, and an opaque strip would show as a
-   *   band on the glass.
+   *   band on the glass. The exception is a run down from a scrolled sheet
+   *   ([data-scroll-reset], see the grabber above): the strip keeps the
+   *   opaque colour and the rim until the content is back at its start.
+   *   The opaque strip also has a 1px shadow in its colour out of the
+   *   tray's leading edge (see the rule), so no thin line of content shows
+   *   above it while the tray moves.
    *
    * This needs relative colours with a light-dark() origin and color-mix()
    * (Safari 18+, Chrome 123+, Firefox 128+); elsewhere the sheet stays
@@ -761,7 +779,7 @@
    */
   :where(
     .mobile-drawer-theme-ios
-      .mobile-drawer[data-at-highest]
+      .mobile-drawer:is([data-at-highest], [data-scroll-reset])
       > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
@@ -785,13 +803,24 @@
 
     :where(
       .mobile-drawer-theme-ios
-        .mobile-drawer[data-at-highest]
+        .mobile-drawer:is([data-at-highest], [data-scroll-reset])
         > .mobile-drawer__sheet
         > .mobile-drawer__tray
         > .mobile-drawer__content
         > .mobile-drawer-theme-ios__grabber
     ) {
+      --_mobile-drawer-ios-strip: rgb(
+        from var(--mobile-drawer-background, Canvas) r g b / 1
+      );
       background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
+      /* The edge shadow: 1px of the strip colour out of the tray's leading
+         edge, where the tray clips it. While the tray moves, its edge is at
+         a fraction of a pixel; the content and the strip both get only part
+         of that pixel row, and the content would show there as a thin
+         line above the strip (the tops of the rows' glyphs). The shadow
+         covers that row. */
+      box-shadow: 0 var(--_mobile-drawer-ios-strip-edge, -1px) 0
+        var(--_mobile-drawer-ios-strip);
     }
 
     /* The rim over the opaque strip. Only here: without relative colours
@@ -799,7 +828,7 @@
        second rim would make it brighter. */
     :where(
       .mobile-drawer-theme-ios
-        .mobile-drawer[data-at-highest]
+        .mobile-drawer:is([data-at-highest], [data-scroll-reset])
         > .mobile-drawer__sheet
         > .mobile-drawer__tray
         > .mobile-drawer__content
@@ -854,14 +883,20 @@
 
   :where(
     .mobile-drawer-theme-ios
-      .mobile-drawer[data-nested][data-at-highest]
+      .mobile-drawer[data-nested]:is([data-at-highest], [data-scroll-reset])
       > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
       > .mobile-drawer-theme-ios__grabber
   ) {
-    box-shadow: inset 0 0 0 100vmax
-      var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
+    /* The dim over the edge shadow too. The strip colour is only set with
+       relative colours (above); elsewhere that layer is transparent. */
+    box-shadow:
+      0 var(--_mobile-drawer-ios-strip-edge, -1px) 0
+        var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12)),
+      0 var(--_mobile-drawer-ios-strip-edge, -1px) 0
+        var(--_mobile-drawer-ios-strip, transparent),
+      inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
   }
 
   @media (prefers-reduced-motion: no-preference) {
