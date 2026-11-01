@@ -17,6 +17,8 @@ interface DragSourceNamedArgs {
   onPanStart: PanCallback;
   onPan: PanCallback;
   onPanEnd: PanCallback;
+  /** Called once the modifier is on an element (again, if it moved). */
+  onInstall?: (element: HTMLElement) => void;
   /** Called when the modifier is torn down, e.g. in the middle of a drag. */
   onTeardown: (element: HTMLElement) => void;
   /**
@@ -318,7 +320,8 @@ class DragSourceModifier extends DidPan {
     if (args.touchAction) element.style.touchAction = args.touchAction();
 
     const arbitrating = args.shouldDrag !== undefined;
-    if (this.#element !== element || this.#arbitrating !== arbitrating) {
+    const installed = this.#element !== element;
+    if (installed || this.#arbitrating !== arbitrating) {
       this.#endGesture();
       this.#listen(this.#element, false);
       this.#element = element;
@@ -326,6 +329,7 @@ class DragSourceModifier extends DidPan {
       this.#listen(element, true);
     }
     this.#named = args;
+    if (installed) args.onInstall?.(element);
   }
 }
 

@@ -18,6 +18,10 @@ const ITEMS = Array.from({ length: 30 }, (_, index) => ({
  * at the last snap point the list scrolls, and with the list at its top
  * dragging down closes the sheet. The tray is the scroll container, so the
  * list needs no `data-mobile-drawer-scroll`.
+ *
+ * The sticky header has the `handle` modifier, so a drag that starts on it
+ * always moves the sheet, also when the list is scrolled. Its Close button
+ * still works with a tap.
  */
 export default class BottomSheetExample extends Component {
   snapPoints: SnapPoint[] = [0, '50%', 'content'];
@@ -39,7 +43,7 @@ export default class BottomSheetExample extends Component {
       aria-labelledby="example-sheet-title"
       as |drawer|
     >
-      <div class="example-sheet-header">
+      <div class="example-sheet-header" {{drawer.handle}}>
         <div class="demo-grabber"></div>
         <div class="example-sheet-title">
           <h3 id="example-sheet-title">Nearby</h3>
