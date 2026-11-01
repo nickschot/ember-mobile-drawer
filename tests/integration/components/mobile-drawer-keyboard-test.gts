@@ -211,6 +211,22 @@ module('Integration | Component | mobile-drawer | keyboard', function (hooks) {
         '0px',
       );
       assert.strictEqual(getComputedStyle(tray()).clipPath, 'none');
+      // The theme's blur is on the glass layer (#135): the fill takes it
+      // from there, and the layer meets the fill too.
+      const glass = el(
+        '[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__glass',
+      );
+      assert.strictEqual(getComputedStyle(tray()).backdropFilter, 'none');
+      assert.strictEqual(
+        getComputedStyle(fill()).backdropFilter,
+        'blur(30px) saturate(1.8)',
+        "the glass layer's blur",
+      );
+      assert.strictEqual(
+        glass.getBoundingClientRect().bottom,
+        tray().getBoundingClientRect().bottom,
+        'the glass layer ends with the tray',
+      );
 
       // Safari scrolls the visual viewport again (e.g. a lower field).
       state.shift = 200;

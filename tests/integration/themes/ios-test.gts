@@ -214,6 +214,11 @@ async function renderDrawer({
             data-test-backdrop-tint
           ></div>
           <div class="mobile-drawer__sheet" data-test-sheet>
+            <div
+              class="mobile-drawer__glass"
+              aria-hidden="true"
+              data-test-glass
+            ></div>
             <div class="mobile-drawer__tray" style={{trayStyle}} data-test-tray>
               <div class="mobile-drawer__content">
                 {{#unless isTop}}
@@ -383,7 +388,13 @@ module('Integration | themes/ios.css', function (hooks) {
       const tray = getComputedStyle(el('[data-test-tray]'));
       assert.strictEqual(rgb(tray.backgroundColor), GLASS[scheme].background);
       assert.strictEqual(tray.color, GLASS[scheme].color);
-      assert.strictEqual(tray.backdropFilter, 'blur(30px) saturate(1.8)');
+      // A bottom sheet: the blur is on the glass layer under the tray (#135).
+      assert.strictEqual(tray.backdropFilter, 'none', 'no blur on the tray');
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-glass]')).backdropFilter,
+        'blur(30px) saturate(1.8)',
+        'the glass layer has the blur',
+      );
       assert.true(tray.boxShadow.includes('inset'), 'inner rim');
       assert.notStrictEqual(tray.boxShadow, BASE_SHADOW);
 
@@ -409,6 +420,11 @@ module('Integration | themes/ios.css', function (hooks) {
         const tray = getComputedStyle(el('[data-test-tray]'));
         assert.strictEqual(rgb(tray.backgroundColor), SOLID[scheme]);
         assert.strictEqual(tray.backdropFilter, 'none');
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-glass]')).backdropFilter,
+          'none',
+          'no blur on the glass layer',
+        );
       } finally {
         style.remove();
       }
@@ -508,6 +524,11 @@ module('Integration | themes/ios.css', function (hooks) {
       // The glass tint without its transparency: the solid sheet colour.
       assert.strictEqual(rgb(tray.backgroundColor), SOLID[scheme], 'opaque');
       assert.strictEqual(tray.backdropFilter, 'none', 'no blur');
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-glass]')).backdropFilter,
+        'none',
+        'no blur on the glass layer',
+      );
       assert.strictEqual(tray.color, GLASS[scheme].color);
       for (const [corner, value] of Object.entries(corners(trayElement))) {
         assert.strictEqual(
@@ -848,19 +869,19 @@ module('Integration | themes/ios.css', function (hooks) {
     const tray = el('[data-test-tray]');
     const grabber = el('[data-test-grabber]');
     const background = () => rgb(getComputedStyle(tray).backgroundColor);
+    // A bottom sheet: the blur is on the glass layer (#135).
+    const blur = () => getComputedStyle(el('[data-test-glass]')).backdropFilter;
 
     assert.strictEqual(background(), GLASS.light.background, '0: glass');
-    assert.strictEqual(
-      getComputedStyle(tray).backdropFilter,
-      'blur(30px) saturate(1.8)',
-    );
+    assert.strictEqual(blur(), 'blur(30px) saturate(1.8)');
+    assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
 
     // Half way: the alpha half way from 0.72 to 1, no timed transition.
     setProgress(0.5);
     assert.strictEqual(background(), 'rgba(255, 255, 255, 0.86)', '0.5');
     assert.strictEqual(tray.getAnimations().length, 0, 'no transition');
     assert.strictEqual(
-      getComputedStyle(tray).backdropFilter,
+      blur(),
       'blur(30px) saturate(1.8)',
       '0.5: still blurred',
     );
@@ -879,6 +900,7 @@ module('Integration | themes/ios.css', function (hooks) {
     // At the highest snap point: opaque, no blur, an opaque strip.
     setProgress(1);
     assert.strictEqual(background(), SOLID.light, '1: opaque');
+    assert.strictEqual(blur(), 'none');
     assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
     assert.strictEqual(
       rgb(getComputedStyle(grabber).backgroundColor),
@@ -888,10 +910,7 @@ module('Integration | themes/ios.css', function (hooks) {
 
     // Back down: blurred and a transparent strip at once.
     setProgress(0.99);
-    assert.strictEqual(
-      getComputedStyle(tray).backdropFilter,
-      'blur(30px) saturate(1.8)',
-    );
+    assert.strictEqual(blur(), 'blur(30px) saturate(1.8)');
     assert.true(isTransparent(getComputedStyle(grabber).backgroundColor));
   });
 
@@ -1144,6 +1163,102 @@ module('Integration | themes/ios.css', function (hooks) {
 
     styles.push(addStyles('[data-test-theme] { --mobile-drawer-inset: 0px; }'));
     assert.strictEqual(radius(), '0px 0px', 'no inset: square corners');
+  });
+
+  // #135: Chrome doesn't clip a backdrop-filter with the element's
+  // clip-path, so the blur moves to a layer whose own box has the sheet's
+  // shape.
+  test("bottom: the blur is on the glass layer, whose box has the floating sheet's shape", async function (assert) {
+    await renderDrawer();
+    const sheet = el('[data-test-sheet]');
+    const tray = el('[data-test-tray]');
+    const glass = el('[data-test-glass]');
+    // As the component does: the tray's length and transform.
+    glass.style.height = `${tray.offsetHeight}px`;
+    for (const element of [tray, glass]) {
+      element.style.transform = 'translate3d(0px, 40px, 0px)';
+    }
+    const close = (a: number, b: number) => Math.abs(a - b) < 0.01;
+
+    const style = getComputedStyle(glass);
+    assert.strictEqual(style.display, 'block');
+    assert.strictEqual(style.position, 'absolute');
+    assert.strictEqual(style.pointerEvents, 'none');
+    assert.strictEqual(style.backdropFilter, 'blur(30px) saturate(1.8)');
+    assert.strictEqual(style.clipPath, 'none', 'no clip-path on the blur');
+    assert.deepEqual(
+      [
+        style.borderTopLeftRadius,
+        style.borderTopRightRadius,
+        style.borderBottomRightRadius,
+        style.borderBottomLeftRadius,
+      ],
+      ['36px', '36px', '0px', '0px'],
+      'the top radius; the sheet clips the bottom',
+    );
+    assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
+    assert.true(
+      getComputedStyle(tray).clipPath.startsWith('polygon('),
+      'the tray keeps its clip for its tint and content',
+    );
+    assert.strictEqual(
+      getComputedStyle(sheet).overflow,
+      'hidden',
+      'the sheet clips the glass layer without a clip-path',
+    );
+    assert.strictEqual(getComputedStyle(sheet).clipPath, 'none');
+
+    for (const progress of [0, 0.5, 1]) {
+      setProgress(progress);
+      const s = sheet.getBoundingClientRect();
+      const t = tray.getBoundingClientRect();
+      const g = glass.getBoundingClientRect();
+      assert.true(
+        close(g.left, s.left) && close(g.right, s.right),
+        `${progress}: the sheet's sides (${g.left}-${g.right} / ${s.left}-${s.right})`,
+      );
+      assert.true(
+        close(g.top, t.top) && close(g.bottom, t.bottom),
+        `${progress}: the tray's top and bottom (${g.top}-${g.bottom} / ${t.top}-${t.bottom})`,
+      );
+    }
+  });
+
+  test('bottom: the glass layer meets the keyboard fill as the tray does', async function (assert) {
+    await renderDrawer();
+    el('[data-test-root]').setAttribute('data-keyboard', '');
+    const tray = el('[data-test-tray]');
+    const glass = el('[data-test-glass]');
+    glass.style.height = `${tray.offsetHeight}px`;
+    assert.strictEqual(getComputedStyle(glass).bottom, '0px');
+    assert.true(
+      Math.abs(
+        glass.getBoundingClientRect().bottom -
+          tray.getBoundingClientRect().bottom,
+      ) < 0.01,
+    );
+  });
+
+  for (const placement of ['top', 'left', 'right'] as const) {
+    test(`${placement}: the tray keeps the blur; no glass layer`, async function (assert) {
+      await renderDrawer({ placement });
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-tray]')).backdropFilter,
+        'blur(30px) saturate(1.8)',
+      );
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-glass]')).display,
+        'none',
+      );
+    });
+  }
+
+  test('without the theme class the glass layer is not shown', async function (assert) {
+    await renderDrawer({ themed: false });
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-glass]')).display,
+      'none',
+    );
   });
 
   test('with motion, the nested dim fades; with reduced motion it does not', async function (assert) {
@@ -1547,10 +1662,17 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
         GLASS.light.background,
         'partial: glass',
       );
+      // A bottom sheet has the blur on the glass layer (#135).
+      const glass = root.querySelector<HTMLElement>('.mobile-drawer__glass')!;
       assert.strictEqual(
-        getComputedStyle(tray).backdropFilter,
+        getComputedStyle(placement === 'bottom' ? glass : tray).backdropFilter,
         'blur(30px) saturate(1.8)',
       );
+      if (placement === 'bottom') {
+        assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
+      } else {
+        assert.strictEqual(getComputedStyle(glass).display, 'none');
+      }
       assert.strictEqual(
         inset(),
         placement === 'bottom' ? 8 : 0,
@@ -1569,6 +1691,7 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
         'highest: opaque',
       );
       assert.strictEqual(trayStyle.backdropFilter, 'none');
+      assert.strictEqual(getComputedStyle(glass).backdropFilter, 'none');
       assert.strictEqual(
         getComputedStyle(strip).backgroundColor,
         trayStyle.backgroundColor,
@@ -1735,6 +1858,33 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
       `${root.querySelector<HTMLElement>('.mobile-drawer__tray')!.offsetHeight}px`,
       "the layer has the tray's length",
     );
+  });
+
+  test('bottom: the glass layer moves with the tray and has its length (#135)', async function (assert) {
+    const state = new SheetState('bottom');
+    const root = (await renderSheet(state)) as HTMLElement;
+    const tray = root.querySelector<HTMLElement>('.mobile-drawer__tray')!;
+    const glass = root.querySelector<HTMLElement>('.mobile-drawer__glass')!;
+    for (const active of [1, 2, 0, 1]) {
+      state.active = active;
+      await frames();
+      assert.strictEqual(
+        glass.style.transform,
+        tray.style.transform,
+        `${active}: the tray's transform`,
+      );
+      assert.strictEqual(
+        glass.style.height,
+        `${tray.offsetHeight}px`,
+        `${active}: the tray's length`,
+      );
+      const t = tray.getBoundingClientRect();
+      const g = glass.getBoundingClientRect();
+      assert.true(
+        Math.abs(g.top - t.top) < 0.01,
+        `${active}: the tray's top (${g.top} / ${t.top})`,
+      );
+    }
   });
 
   test('--mobile-drawer-ios-shadow: none removes the shadow', async function (assert) {
