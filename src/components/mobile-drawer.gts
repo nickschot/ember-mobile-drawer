@@ -544,6 +544,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #open = false;
   /**
+   * Whether the active snap point is at 0, i.e. the drawer is closed or
+   * closing and `data-closed` hides it (or soon will). Unlike `!#open`, not
+   * set while the drawer rests at a peek: a smallest snap point above 0 keeps
+   * the drawer, and the drawers inside it, visible. Also set until the
+   * drawer is first measured. Updated with `#open` by `#syncOpen`, see
+   * `#insideClosedDrawer`.
+   */
+  #hidden = true;
+  /**
    * `#open` as last reported through `@onOpen`/`@onClose`. The first value
    * `#syncOpen` computes (on insertion, or at the first successful measure
    * of a drawer inserted while hidden) counts as reported. See `#applyOpen`.
@@ -1466,8 +1475,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #syncOpen(): void {
     const layout = this.#layout;
     if (!layout || this.#destroyed) return;
-    const open =
-      this.#offsetOf(this.activeSnapPoint) > layout.resolved[0]!.offset;
+    const target = this.#offsetOf(this.activeSnapPoint);
+    const open = target > layout.resolved[0]!.offset;
+    this.#hidden = target <= 0;
     if (!this.#hasReportBaseline) {
       // The first open state the drawer knows (on insertion, or once a
       // drawer inserted while hidden is measured) is not a change.
@@ -1646,13 +1656,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * Whether the drawer is inside another drawer that is closed or closing,
    * whose `data-closed` hides it (or soon will): its modal behaviour is then
    * off, so it never keeps the page inert and locked from inside a hidden
-   * drawer. It comes back when that drawer opens again.
+   * drawer. It comes back when that drawer opens again. A drawer that rests
+   * at a peek (a smallest snap point above 0) is visible, so it does not
+   * count, see `#hidden`.
    */
   #insideClosedDrawer(): boolean {
     const root = this.#root;
     if (!root) return false;
     for (const other of mountedDrawers as Set<MobileDrawer>) {
-      if (other !== this && !other.#open && other.#root?.contains(root)) {
+      if (other !== this && other.#hidden && other.#root?.contains(root)) {
         return true;
       }
     }
