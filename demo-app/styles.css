@@ -478,9 +478,16 @@ section > h2 {
   font-size: 16px;
 }
 
+/*
+ * The separators start at the text's leading edge and end 1rem before the
+ * content's trailing edge, the same 1rem as the title and the search field.
+ * While the sheet floats, the content's trailing edge is the sheet's visible
+ * edge (the theme pads the content by the inset that the clip hides), so
+ * without the right padding the separators touch the sheet's edge.
+ */
 .example-ios-list {
   margin: 0;
-  padding: 0 0 0 1rem;
+  padding: 0 1rem;
   list-style: none;
 }
 
@@ -492,7 +499,7 @@ section > h2 {
 .example-ios-item {
   display: block;
   width: 100%;
-  padding: 0.75rem 1rem 0.75rem 0;
+  padding: 0.75rem 0;
   border: 0;
   background: none;
   color: inherit;
