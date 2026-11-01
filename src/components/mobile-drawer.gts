@@ -649,11 +649,19 @@ const clampIndex = (index: number, count: number) =>
  *
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
- * `@backdrop={{false}}`) and a `.mobile-drawer__tray`, with the block inside
+ * `@backdrop={{false}}`) and a `.mobile-drawer__sheet` with the
+ * `.mobile-drawer__tray` in it, with the block inside
  * `.mobile-drawer__content`, and an empty `.mobile-drawer__bar-tint` after
- * the tray and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
- * after the backdrop (for the iOS Safari 26 bars, see styles.css). Attributes are
- * applied to the root element.
+ * the sheet and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
+ * after the backdrop (for the iOS Safari 26 bars, see styles.css).
+ * Attributes are applied to the root element.
+ *
+ * Sheet: the sheet clips the tray. Every frame the component writes the
+ * expand progress on it (see `#paintExpand`), from the second-highest to
+ * the highest snap point, for themes such as a floating sheet that goes
+ * edge-to-edge (`--mobile-drawer-inset`). The root gets `data-at-highest`
+ * while the tray is at its highest snap point, and `data-nested` while a
+ * modal drawer in front of it is open (see `#syncNested`).
  *
  * Backdrop: its opacity follows the drawer frame by frame through
  * `--mobile-drawer-progress`, written in `#render` like the transform. A tap
@@ -712,8 +720,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #lastWarning?: string;
 
   #root?: HTMLElement;
+  /** The `.mobile-drawer__sheet` around the tray, see `#paintExpand`. */
+  #sheet?: HTMLElement;
   #tray?: HTMLElement;
   #content?: HTMLElement;
+  /** The root's `.mobile-drawer__bar-tint` child, if any. */
+  #barTint?: HTMLElement;
   /** Whether the content is moved past fully open, see `#renderBounce`. */
   #bouncing = false;
   /**
@@ -802,6 +814,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #reveal?: Element;
   /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
+  /** Expand progress written by the last `#render`, see `#paintExpand`. */
+  #expandProgress = NaN;
   /**
    * Whether the last `#render` was above the smallest snap point, where the
    * backdrop catches pointers, see `#paintBackdrop`.
@@ -999,9 +1013,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   hooks: LifecycleHooks = {
     install: (root) => {
       this.#root = root;
-      this.#tray = root.querySelector<HTMLElement>(
+      this.#sheet = root.querySelector<HTMLElement>(
+        ':scope > .mobile-drawer__sheet',
+      )!;
+      this.#tray = this.#sheet.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__tray',
       )!;
+      this.#barTint =
+        root.querySelector<HTMLElement>(':scope > .mobile-drawer__bar-tint') ??
+        undefined;
       this.#content = this.#tray.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__content',
       )!;
@@ -1017,7 +1037,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       root.addEventListener('keydown', this.#onKeyDown);
       root.addEventListener('scroll', this.#onRootScroll, { passive: true });
       root.addEventListener('focusout', this.#onRootFocusOut);
+      this.#sheet.addEventListener('scroll', this.#onRootScroll, {
+        passive: true,
+      });
       mountedDrawers.add(this);
+      MobileDrawer.#syncNested();
       this.#measure();
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
@@ -1058,9 +1082,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (typeof ResizeObserver !== 'undefined') {
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
         this.#resizeObserver.observe(root);
-        this.#resizeObserver.observe(
-          root.querySelector(':scope > * > .mobile-drawer__content')!,
-        );
+        this.#resizeObserver.observe(this.#content);
       }
     },
 
@@ -1117,7 +1139,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
       this.#root?.removeEventListener('scroll', this.#onRootScroll);
       this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
+      this.#sheet?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
+      MobileDrawer.#syncNested();
       trackInput(this, false);
       this.#focused = undefined;
       if (this.#root) {
@@ -1584,6 +1608,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#tray!.style.transform = transform;
     this.#renderBounce(Math.max(0, open - layout.trayLength));
     const atTop = open >= layout.maxOffset - EPSILON;
+    this.#paintExpand(open, atTop);
+    // A no-op while it keeps its value.
+    root.toggleAttribute('data-at-highest', atTop && layout.maxOffset > 0);
     if (atTop !== this.#atTop) {
       this.#atTop = atTop;
       // Only while the tray is a drag source (not with @handleOnly).
@@ -1597,6 +1624,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const smallest = layout.resolved[0]!.offset;
     this.#backdropBlocks = open > smallest;
     this.#paintBackdrop();
+    // For themes whose bar colour follows the dim, see `#paintExpand`.
+    this.#barTint?.style.setProperty(
+      '--mobile-drawer-progress',
+      String(this.#backdropProgress),
+    );
     // For the page behind (`data-mobile-drawer-page`, see
     // `setPageProgress`): from the smallest snap point (0) to the largest
     // (1), for modal bottom drawers only. A non-modal drawer leaves the page
@@ -1612,6 +1644,36 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       'data-closed',
       open <= 0 && !this.#spring!.isAnimating && !this.#drag,
     );
+  }
+
+  /**
+   * Writes the expand progress for `open` (px open) as
+   * `--mobile-drawer-expand-progress` on the sheet: `0` at or below the
+   * second-highest snap point (or closed, for a drawer with one open snap
+   * point), `1` at the highest snap point and past it, linear in between.
+   * Themes move the sheet from its floating look to its full-height look
+   * with it (see `--mobile-drawer-inset` in styles.css). Only the sheet gets
+   * it, not the root: the property is registered as not inherited, and only
+   * the tray takes it from the sheet, so the content isn't styled again on
+   * every frame. The bar tint and, in `#paintBackdrop`, the backdrop and its
+   * tint (all three empty elements) get it too, for a dim and bar colours
+   * that follow it. Only written when it changes.
+   */
+  #paintExpand(open: number, atTop: boolean): void {
+    const { resolved, maxOffset } = this.#layout!;
+    const below =
+      resolved.length > 1 ? resolved[resolved.length - 2]!.offset : 0;
+    let progress = 0;
+    if (atTop) {
+      progress = maxOffset > 0 ? 1 : 0;
+    } else if (maxOffset > below) {
+      progress = clamp((open - below) / (maxOffset - below), 0, 1);
+    }
+    if (progress === this.#expandProgress) return;
+    this.#expandProgress = progress;
+    const value = String(progress);
+    this.#sheet?.style.setProperty('--mobile-drawer-expand-progress', value);
+    this.#barTint?.style.setProperty('--mobile-drawer-expand-progress', value);
   }
 
   /**
@@ -1775,8 +1837,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const backdrop = this.#backdrop;
     if (!backdrop) return;
     const progress = String(this.#backdropProgress);
-    backdrop.style.setProperty('--mobile-drawer-progress', progress);
-    this.#backdropTint?.style.setProperty('--mobile-drawer-progress', progress);
+    const expand = String(
+      Number.isNaN(this.#expandProgress) ? 0 : this.#expandProgress,
+    );
+    for (const element of [backdrop, this.#backdropTint]) {
+      element?.style.setProperty('--mobile-drawer-progress', progress);
+      element?.style.setProperty('--mobile-drawer-expand-progress', expand);
+    }
     const pointerEvents = this.#backdropBlocks ? '' : 'none';
     if (backdrop.style.pointerEvents !== pointerEvents) {
       backdrop.style.pointerEvents = pointerEvents;
@@ -1928,7 +1995,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!layout || this.#destroyed) return;
     const target = this.#offsetOf(this.activeSnapPoint);
     const open = target > layout.resolved[0]!.offset;
-    this.#hidden = target <= 0;
+    const hidden = target <= 0;
+    if (hidden !== this.#hidden) {
+      this.#hidden = hidden;
+      MobileDrawer.#syncNested();
+    }
     trackInput(this, !this.#hidden);
     if (!this.#hasReportBaseline) {
       // The first open state the drawer knows (on insertion, or once a
@@ -2038,10 +2109,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       root.contains((other as MobileDrawer).#root ?? null),
     );
     modalStack.splice(nested === -1 ? modalStack.length : nested, 0, this);
+    MobileDrawer.#syncNested();
     document.addEventListener('keydown', this.#onDocumentKeyDown);
     this.#releaseModal = () => {
       document.removeEventListener('keydown', this.#onDocumentKeyDown);
       modalStack.splice(modalStack.indexOf(this), 1);
+      MobileDrawer.#syncNested();
       releaseScroll();
       releaseInert();
     };
@@ -2183,6 +2256,31 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (!this.#hasFocus()) return;
     }
     (document.activeElement as HTMLElement | SVGElement | null)?.blur();
+  }
+
+  /**
+   * Sets `data-nested` on the root of every drawer that the front modal
+   * drawer (the last one in `modalStack`) covers, and removes it from the
+   * others: every drawer that shows (not closed or closing, see `#hidden`)
+   * except the front one and the drawers inside it, which are in front of
+   * it. Themes dim a covered sheet with it. Runs when the modal stack
+   * changes, when a drawer starts to show or hide, and when a drawer is
+   * inserted or removed.
+   */
+  static #syncNested(): void {
+    const front = modalStack[modalStack.length - 1] as MobileDrawer | undefined;
+    const frontRoot = front ? front.#root : undefined;
+    for (const drawer of mountedDrawers as Set<MobileDrawer>) {
+      const root = drawer.#root;
+      if (!root) continue;
+      root.toggleAttribute(
+        'data-nested',
+        !!frontRoot &&
+          drawer !== front &&
+          !drawer.#hidden &&
+          !frontRoot.contains(root),
+      );
+    }
   }
 
   /** Re-applies the open state of the drawers inside this one. */
@@ -2604,21 +2702,25 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Scrolls the root back to its start. The root is `overflow: hidden` and
-   * never meant to scroll, but a browser that scrolls a focused element into
-   * view scrolls it too: below the highest snap point part of the tray is
-   * outside the root, so the browser moves the whole drawer (tray and
-   * backdrop) up to show the element, and the tray leaves its edge, while
-   * the drawer stays at its snap point. Called before a move for keyboard
+   * Scrolls the sheet and the root back to their start. Both are
+   * `overflow: hidden` and never meant to scroll, but a browser that scrolls
+   * a focused element into view scrolls them too: below the highest snap
+   * point part of the tray is outside the sheet, so the browser moves the
+   * tray up in the sheet to show the element, and the tray leaves its
+   * edge, while the drawer stays at its snap point. The sheet takes that
+   * scroll, so it doesn't go on to the page behind. (The root only scrolls
+   * if something else in it overflows.) Called before a move for keyboard
    * focus (Chrome scrolls before the focus events), and on every `scroll`
-   * of the root (`#onRootScroll`), for browsers that scroll after them and
-   * for focus that doesn't move the drawer (a tap on a partly visible
-   * button, a peek of a drawer whose parent declines the move).
+   * of the sheet or the root (`#onRootScroll`), for browsers that scroll
+   * after them and for focus that doesn't move the drawer (a tap on a
+   * partly visible button, a peek of a drawer whose parent declines the
+   * move).
    */
   #resetRootScroll(): void {
-    const root = this.#root!;
-    if (root.scrollTop !== 0 || root.scrollLeft !== 0) {
-      root.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    for (const element of [this.#sheet!, this.#root!]) {
+      if (element.scrollTop !== 0 || element.scrollLeft !== 0) {
+        element.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      }
     }
   }
 
@@ -2629,20 +2731,29 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * The part of the root that the tray covers along the axis, in screen px,
    * with the tray moved by `shift` px from where it is rendered: where the
-   * content can show.
+   * content can show. The sheet clips the tray too: a floating sheet (see
+   * `--mobile-drawer-inset`) ends above the root's bottom edge. A scroll of
+   * the root moves the sheet; that is undone, like `shift` undoes it for
+   * the tray (see `#isVisibleAt`).
    */
   #visibleRange(shift: number): { start: number; end: number } {
     const vertical = this.axis === 'vertical';
     const tray = this.#tray!.getBoundingClientRect();
-    const root = this.#root!.getBoundingClientRect();
+    const root = this.#root!;
+    const rootRect = root.getBoundingClientRect();
+    const sheet = this.#sheet!.getBoundingClientRect();
+    const scroll = vertical ? root.scrollTop : root.scrollLeft;
+    const unscroll = scroll ? scroll * this.#screenScale() : 0;
     return {
       start: Math.max(
         (vertical ? tray.top : tray.left) + shift,
-        vertical ? root.top : root.left,
+        vertical ? rootRect.top : rootRect.left,
+        (vertical ? sheet.top : sheet.left) + unscroll,
       ),
       end: Math.min(
         (vertical ? tray.bottom : tray.right) + shift,
-        vertical ? root.bottom : root.right,
+        vertical ? rootRect.bottom : rootRect.right,
+        (vertical ? sheet.bottom : sheet.right) + unscroll,
       ),
     };
   }
@@ -2654,12 +2765,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #isVisibleAt(element: Element, offset: number): boolean {
     const root = this.#root!;
+    const sheet = this.#sheet!;
     const vertical = this.axis === 'vertical';
-    // Also undoes a scroll of the root (see `#resetRootScroll`), which
-    // moves the tray and the element alike, but not the root.
+    // Also undoes a scroll of the sheet or the root (see
+    // `#resetRootScroll`), which moves the tray and the element alike, but
+    // not the root.
     const shift =
       (OPENING_DIRECTION[this.placement] * (offset - this.#renderedOffset) +
-        (vertical ? root.scrollTop : root.scrollLeft)) *
+        (vertical
+          ? root.scrollTop + sheet.scrollTop
+          : root.scrollLeft + sheet.scrollLeft)) *
       this.#screenScale();
     const visible = this.#visibleRange(shift);
     const rect = element.getBoundingClientRect();
@@ -3096,50 +3211,52 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         ></div>
         <div class="mobile-drawer__backdrop-tint" aria-hidden="true"></div>
       {{/if}}
-      <div
-        class="mobile-drawer__tray"
-        tabindex={{if this.isModal "-1"}}
-        {{(if
-          this.handleOnly
-          noop
-          (modifier
-            dragSource
-            axis=this.axis
-            pointerTypes=POINTER_TYPES
-            onPointerDown=this.onPointerDown
-            onPanStart=this.onPanStart
-            onPan=this.onPan
-            onPanEnd=this.onPanEnd
-            onTeardown=this.onDragSourceTeardown
-            shouldDrag=this.shouldDrag
-            touchAction=this.trayTouchAction
-          )
-        )}}
-      >
-        <div class="mobile-drawer__content">
-          {{yield
-            (hash
-              snapTo=this.snapTo
-              open=this.open
-              close=this.close
-              activeSnapPoint=this.activeSnapPoint
-              handle=(modifier
-                dragSource
-                axis=this.axis
-                pointerTypes=POINTER_TYPES
-                onPointerDown=this.onPointerDown
-                onPanStart=this.onPanStart
-                onPan=this.onPan
-                onPanEnd=this.onPanEnd
-                onInstall=this.onHandleInstall
-                shouldDrag=this.shouldHandleDrag
-                onTeardown=this.onHandleTeardown
-              )
-              isDragging=this.isDragging
-              isAnimating=this.isAnimating
-              progress=this.progress
+      <div class="mobile-drawer__sheet">
+        <div
+          class="mobile-drawer__tray"
+          tabindex={{if this.isModal "-1"}}
+          {{(if
+            this.handleOnly
+            noop
+            (modifier
+              dragSource
+              axis=this.axis
+              pointerTypes=POINTER_TYPES
+              onPointerDown=this.onPointerDown
+              onPanStart=this.onPanStart
+              onPan=this.onPan
+              onPanEnd=this.onPanEnd
+              onTeardown=this.onDragSourceTeardown
+              shouldDrag=this.shouldDrag
+              touchAction=this.trayTouchAction
             )
-          }}
+          )}}
+        >
+          <div class="mobile-drawer__content">
+            {{yield
+              (hash
+                snapTo=this.snapTo
+                open=this.open
+                close=this.close
+                activeSnapPoint=this.activeSnapPoint
+                handle=(modifier
+                  dragSource
+                  axis=this.axis
+                  pointerTypes=POINTER_TYPES
+                  onPointerDown=this.onPointerDown
+                  onPanStart=this.onPanStart
+                  onPan=this.onPan
+                  onPanEnd=this.onPanEnd
+                  onInstall=this.onHandleInstall
+                  shouldDrag=this.shouldHandleDrag
+                  onTeardown=this.onHandleTeardown
+                )
+                isDragging=this.isDragging
+                isAnimating=this.isAnimating
+                progress=this.progress
+              )
+            }}
+          </div>
         </div>
       </div>
       <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>

@@ -100,7 +100,9 @@ function el(selector: string): HTMLElement {
 
 /** How far open the outer drawer's tray is, in px, from its transform. */
 function openOffset(placement: Placement): number {
-  const tray = el('[data-test-outer] > .mobile-drawer__tray');
+  const tray = el(
+    '[data-test-outer] > .mobile-drawer__sheet > .mobile-drawer__tray',
+  );
   const { m41, m42 } = new DOMMatrix(getComputedStyle(tray).transform);
   return {
     bottom: 400 - m42,

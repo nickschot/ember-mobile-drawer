@@ -228,7 +228,9 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
         'closed: content is not rendered visible',
       );
       assert
-        .dom('[data-test-drawer] > .mobile-drawer__tray')
+        .dom(
+          '[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__tray',
+        )
         .hasAttribute('tabindex', '-1');
 
       await openFromTrigger(state);
@@ -289,14 +291,14 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
       await openFromTrigger(state);
       assert.strictEqual(
         active(),
-        el('[data-test-drawer] > .mobile-drawer__tray'),
+        el('[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__tray'),
         'the tray, without anything focusable',
       );
 
       await triggerKeyEvent(active()!, 'keydown', 'Tab');
       assert.strictEqual(
         active(),
-        el('[data-test-drawer] > .mobile-drawer__tray'),
+        el('[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__tray'),
         'Tab keeps it there',
       );
       state.active = 0;
@@ -922,7 +924,9 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
         .doesNotHaveAttribute('role')
         .doesNotHaveAttribute('aria-modal');
       assert
-        .dom('[data-test-drawer] > .mobile-drawer__tray')
+        .dom(
+          '[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__tray',
+        )
         .doesNotHaveAttribute('tabindex');
       assert.dom('.mobile-drawer__backdrop').doesNotExist('no backdrop');
 

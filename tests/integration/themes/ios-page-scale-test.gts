@@ -533,6 +533,48 @@ module('Integration | themes/ios.css | page scale', function (hooks) {
     assert.notStrictEqual(tint(), 'rgb(0, 0, 0)', 'closed: not black');
   });
 
+  test('the iOS 17/18 look: with the page scale the sheet is edge-to-edge and dims at every snap point', async function (assert) {
+    const state = new State();
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        <div style={{containerStyle}} class="mobile-drawer-theme-ios">
+          <MobileDrawer
+            @snapPoints={{state.snapPoints}}
+            @activeSnapPoint={{state.active}}
+            aria-label="Sheet"
+            style="position: absolute"
+            data-test-drawer
+          >
+            <p>Sheet</p>
+          </MobileDrawer>
+        </div>
+      </template>,
+    );
+    state.active = 1;
+    await settled();
+    const sheet = document.querySelector<HTMLElement>(
+      '[data-test-drawer] > .mobile-drawer__sheet',
+    )!;
+    const backdrop = document.querySelector<HTMLElement>(
+      '[data-test-drawer] > .mobile-drawer__backdrop',
+    )!;
+    const inset = () =>
+      sheet.getBoundingClientRect().left -
+      sheet.parentElement!.getBoundingClientRect().left;
+    assert.true(inset() > 0, 'without the page scale the sheet floats');
+    assert.strictEqual(Number(getComputedStyle(backdrop).opacity), 0);
+
+    added.push(applyMotion());
+    const page = addPage();
+    added.push(page);
+    assert.strictEqual(inset(), 0, 'with it the sheet is edge-to-edge');
+    assert.true(
+      Math.abs(Number(getComputedStyle(backdrop).opacity) - 0.175) < 1e-6,
+      'and the backdrop dims at the partial snap point',
+    );
+  });
+
   test('reduced motion: every page rule is in a prefers-reduced-motion: no-preference block', function (assert) {
     const rules = pageRules();
     assert.true(rules.length >= 2, 'the page rule and the <body> rule');

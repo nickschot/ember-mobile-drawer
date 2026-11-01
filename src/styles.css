@@ -14,15 +14,19 @@
  *   <div class="mobile-drawer" data-placement="bottom" data-closed>
  *     <div class="mobile-drawer__backdrop"></div>
  *     <div class="mobile-drawer__backdrop-tint" aria-hidden="true"></div>
- *     <div class="mobile-drawer__tray">
- *       <div class="mobile-drawer__content">...yielded content...</div>
+ *     <div class="mobile-drawer__sheet">
+ *       <div class="mobile-drawer__tray">
+ *         <div class="mobile-drawer__content">...yielded content...</div>
+ *       </div>
  *     </div>
  *     <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>
  *   </div>
  *
- * The backdrop, the tints and the tray must be direct children of the root,
- * and the content a direct child of the tray; the placement rules use the child
- * combinator so nested drawers don't affect each other.
+ * The backdrop, the tints and the sheet must be direct children of the
+ * root, the tray a direct child of the sheet, and the content a direct child
+ * of the tray; the placement rules use the child combinator so nested
+ * drawers don't affect each other. Select the tray with
+ * `.mobile-drawer > .mobile-drawer__sheet > .mobile-drawer__tray`.
  *
  * .mobile-drawer            Root. A fixed overlay covering the viewport that
  *                           does not capture pointer events itself, so a
@@ -49,6 +53,21 @@
  *                           Not used by these base styles; for themes and
  *                           apps (e.g. an opaque, edge-to-edge sheet when
  *                           fully open).
+ * [data-at-highest]         On the root while the tray is rendered at (or
+ *                           past) its highest snap point, and that snap
+ *                           point is open (not 0): where the content can
+ *                           scroll. Unlike [data-expanded] it follows the
+ *                           rendered position, also during a drag and an
+ *                           animation, so it changes when the expand
+ *                           progress (see the sheet) gets to 1 or leaves
+ *                           it. Not used by these base styles; for themes
+ *                           (e.g. the iOS theme's opaque grabber strip).
+ * [data-nested]             On the root while a modal drawer in front of
+ *                           this one is open: the last modal drawer that
+ *                           opened, when this drawer shows (is not closed
+ *                           or closing) and is not inside it. Not used by
+ *                           these base styles; for themes (e.g. the iOS
+ *                           theme dims the sheet).
  * [role] [aria-modal]       On the root: `role="dialog"` for modal drawers
  *                           (the default), and `aria-modal="true"` while a
  *                           modal drawer is open. A modal drawer's tray has
@@ -80,6 +99,28 @@
  *                           `background` on the backdrop shows there at full
  *                           strength (times the progress), without the max
  *                           opacity.
+ * .mobile-drawer__sheet     Wraps the tray and clips it to its box
+ *                           (`overflow: hidden`, which the component scrolls
+ *                           back at once when a browser scrolls it to show
+ *                           a focused element). It takes no pointer events,
+ *                           so where it doesn't show the tray, the page (or
+ *                           the backdrop) gets them. It fills the root,
+ *                           except for a floating sheet (see
+ *                           `--mobile-drawer-inset` below). The component
+ *                           writes `--mobile-drawer-expand-progress` on it
+ *                           every frame, as an inline style: `0` at and
+ *                           below the second-highest snap point (for a
+ *                           drawer with one open snap point: closed), `1`
+ *                           at the highest snap point and past it, linear in
+ *                           the tray's position between them. Themes use it
+ *                           to go from a partial-height look to a
+ *                           full-height look with the finger. The property
+ *                           is registered (`@property`) as a number that is
+ *                           not inherited, so the content isn't styled
+ *                           again on every frame; the tray takes it from
+ *                           the sheet (`inherit`), and so can a theme rule
+ *                           on the sheet or the tray. Don't set it from app
+ *                           CSS.
  * .mobile-drawer__tray      The sheet and scroll container. The component
  *                           writes an inline `touch-action` on it to decide
  *                           between scrolling and dragging (see the README);
@@ -144,17 +185,22 @@
  *                           apps can pad it freely. With a sticky grabber,
  *                           don't pad the tray's leading edge: the grabber
  *                           sticks inside that padding.
- * .mobile-drawer__bar-tint  Empty, after the tray. Only used on iOS (see
+ * .mobile-drawer__bar-tint  Empty, after the sheet. Only used on iOS (see
  *                           "Safari 26 bars" below); elsewhere it is
  *                           `display: none`. Its colour is
- *                           `--mobile-drawer-background`.
+ *                           `--mobile-drawer-background`. The component
+ *                           writes `--mobile-drawer-progress` and
+ *                           `--mobile-drawer-expand-progress` on it, for
+ *                           themes whose bar colour follows them (it has no
+ *                           children).
  * .mobile-drawer__backdrop-tint
  *                           Empty, after the backdrop (only with the
  *                           backdrop). Only used on iOS (see "Safari 26
  *                           bars" below); elsewhere it is `display: none`.
  *                           Its colour is the backdrop as it shows. The
- *                           component writes `--mobile-drawer-progress` on
- *                           it too.
+ *                           component writes `--mobile-drawer-progress` and
+ *                           `--mobile-drawer-expand-progress` on it, as on
+ *                           the backdrop.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
  *                           carries the safe-area padding (see below) and,
  *                           for top and left, the auto start margin (see the
@@ -199,11 +245,36 @@
  *   --mobile-drawer-backdrop-opacity  backdrop max opacity, a number
  *                                     from 0 to 1          (0.4)
  *   --mobile-drawer-z-index           root z-index         (1000)
+ *   --mobile-drawer-inset             the floating sheet's inset, a length
+ *                                     (0px). Bottom drawers only.
+ *
+ * The floating sheet (`--mobile-drawer-inset`): below the second-highest
+ * snap point the sheet is inset by this length from the left, right and
+ * bottom edges of the root; between the two highest snap points by the
+ * inset times (1 - the expand progress); at the highest snap point it is
+ * edge-to-edge. The sheet moves up by as much, so its height stays the
+ * root's height. The tray stays as wide as the root and at the root's
+ * bottom edge: its width, its length, its transform, its snap points and
+ * its closed position don't change, so its content is not laid out again
+ * and a `content` snap point doesn't move. The sheet clips the tray's
+ * sides and bottom, and the tray's own `clip-path` cuts its sides at the
+ * inset with its top radius there. So at a snap point the tray's top is
+ * where it is without the inset, and the sheet shows the tray from there
+ * to the inset above the bottom edge. When the drawer is closed, no part
+ * of the tray is in the sheet. The inset area takes no pointer events. The
+ * clipped sides of the tray hide `inset` px of the content on each side
+ * below the highest snap point: pad the content by the inset (the iOS
+ * theme does). While an inset is set, the clips hide the tray's outer
+ * shadow on its sides and bottom; the shadow above its top edge stays.
+ * Without an inset the tray's clip clips nothing (also not a large app
+ * shadow). Themes round the sheet's bottom corners with `border-radius` on
+ * the sheet.
  *
  * Defaults are given as var() fallbacks rather than declared on the root, so
  * values set on any ancestor (including :root) take effect.
- * `--mobile-drawer-progress` is internal: the component writes it on the
- * backdrop element. Don't set it from app CSS.
+ * `--mobile-drawer-progress` and `--mobile-drawer-expand-progress` are
+ * internal: the component writes them on the backdrop, the tints and the
+ * sheet. Don't set them from app CSS.
  *
  * The page behind (optional, for effects such as the iOS theme's page scale)
  * --------------------------------------------------------------------------
@@ -286,9 +357,9 @@
  *     The base `background` holds the max opacity as its alpha and `opacity`
  *     is 1, so an app's own `background` on the backdrop shows at full
  *     strength.
- *   - the tray is `position: fixed` (inside the root, which gets
- *     `contain: layout`), so it stays in the root also in an embedded
- *     drawer.
+ *   - the tray is `position: fixed` (inside the sheet and the root, which
+ *     get `contain: layout`), so it stays in the root also in an embedded
+ *     drawer, and the sheet clips it.
  *   - the bar tint gives the bar at the sheet's edge the sheet colour:
  *     the toolbar for a bottom drawer, the status bar for a top drawer
  *     (none for left and right). It is a 16px fixed strip at that edge of
@@ -349,6 +420,18 @@
  *     inherit, so the app's `:root` values would stop working.
  */
 
+/*
+ * The expand progress, which the component writes on the sheet every frame
+ * (see `--mobile-drawer-expand-progress` above). Not inherited, so the
+ * content isn't styled again when it changes; the tray takes it from the
+ * sheet with `inherit`. Before the first frame it is 0.
+ */
+@property --mobile-drawer-expand-progress {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 @layer ember-mobile-drawer {
   :where(.mobile-drawer) {
     position: fixed;
@@ -379,7 +462,24 @@
     display: none;
   }
 
+  /*
+   * The sheet: the tray's clip. It doesn't take pointer events, so the
+   * page (or the backdrop) gets them where the sheet doesn't show the tray,
+   * e.g. in the gaps around a floating sheet. `overflow: hidden`, not
+   * `clip`: a browser that scrolls a focused element into view then
+   * scrolls the sheet (which the component scrolls back at once), not the
+   * page behind the drawer.
+   */
+  :where(.mobile-drawer__sheet) {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
   :where(.mobile-drawer__tray) {
+    /* From the sheet, see the @property rule above. */
+    --mobile-drawer-expand-progress: inherit;
     position: absolute;
     box-sizing: border-box;
     overflow: auto;
@@ -394,7 +494,11 @@
    * Promote the tray to its own layer only while the drawer can move, instead
    * of keeping a layer around for every closed drawer on the page.
    */
-  :where(.mobile-drawer:not([data-closed]) > .mobile-drawer__tray) {
+  :where(
+    .mobile-drawer:not([data-closed])
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
     will-change: transform;
   }
 
@@ -403,10 +507,66 @@
    * placement rules rely on coming after the bottom default.
    */
 
-  /* bottom (default) */
+  /*
+   * bottom (default)
+   *
+   * The floating sheet (`--mobile-drawer-inset`, 0 by default): the sheet
+   * is inset by the inset times (1 - the expand progress) from the left,
+   * right and bottom edges, and moves up by as much, so its height stays
+   * the root's height. The sheet clips the tray (`overflow: hidden`, with
+   * the theme's bottom radius). The tray doesn't follow the sheet's box:
+   * it stays as wide as the root and at the root's bottom edge, so it
+   * keeps its width, its length, its transform and its closed position,
+   * and its content is never laid out again for the inset. Its own
+   * `clip-path` cuts its sides at the inset, with its top radius there.
+   * Not a `clip-path` on the sheet: an ancestor with a clip-path is a
+   * backdrop root, and the tray's `backdrop-filter` (a theme's glass) then
+   * shows nothing behind it (verified in iOS Safari 27).
+   */
+  :where(.mobile-drawer__sheet),
+  :where(.mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet) {
+    /* Not through a custom property of its own: that would be inherited,
+       and change on the content every frame. */
+    inset: calc(
+        -1 * var(--mobile-drawer-inset, 0px) *
+          (1 - var(--mobile-drawer-expand-progress))
+      )
+      calc(
+        var(--mobile-drawer-inset, 0px) *
+          (1 - var(--mobile-drawer-expand-progress))
+      )
+      calc(
+        var(--mobile-drawer-inset, 0px) *
+          (1 - var(--mobile-drawer-expand-progress))
+      );
+  }
+
+  :where(
+    .mobile-drawer:is(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+  ) {
+    inset: 0;
+  }
+
   :where(.mobile-drawer__tray),
-  :where(.mobile-drawer[data-placement="bottom"] > .mobile-drawer__tray) {
-    inset: auto 0 0;
+  :where(
+    .mobile-drawer[data-placement="bottom"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
+    inset: auto
+      calc(
+        -1 * var(--mobile-drawer-inset, 0px) *
+          (1 - var(--mobile-drawer-expand-progress))
+      )
+      calc(
+        -1 * var(--mobile-drawer-inset, 0px) *
+          (1 - var(--mobile-drawer-expand-progress))
+      );
     max-height: calc(100% - env(safe-area-inset-top, 0px));
     max-width: none;
     border-radius: var(--mobile-drawer-radius, 0) var(--mobile-drawer-radius, 0)
@@ -415,9 +575,206 @@
     transform-origin: 50% 100%;
   }
 
+  /*
+   * The tray's top corners at the inset. The sheet's box already clips the
+   * tray's sides at the inset, but the tray's own top corners are at the
+   * root's edges: the sheet would cut them with a kink. This polygon gives
+   * the tray its top radius at the inset (each corner as 6 straight
+   * segments, which don't show at these radii), and it goes 1000px above
+   * the tray's top edge, across the sheet's width, so the tray's top shadow
+   * stays (the sheet cuts it at its sides, as the side shadow). The
+   * private `--_mobile-drawer-clip-out` moves every point 10000px out when
+   * `--mobile-drawer-inset` is 0: `10000px - min(inset * 100000, 10000px)`
+   * is 10000px for an inset of 0 and 0 for an inset of 0.1px or more. So
+   * without an inset the polygon clips nothing (also not a large app
+   * shadow).
+   */
+  :where(
+    .mobile-drawer:not(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
+    --_mobile-drawer-clip-out: calc(
+      10000px - min(var(--mobile-drawer-inset, 0px) * 100000, 10000px)
+    );
+    clip-path: polygon(
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(100% + 1000px),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 1 - var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.03407 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.74118 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.13397 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.5 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.29289 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.29289 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.5 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.13397 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 0.74118 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.03407 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--mobile-drawer-radius, 0px) * 1 -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1000px - var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1000px - var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 1 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(-1 * var(--_mobile-drawer-clip-out)),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.74118 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.03407 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.5 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.13397 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.29289 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.29289 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.13397 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.5 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) -
+            var(--mobile-drawer-radius, 0px) * 0.03407 +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 0.74118 -
+            var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(
+          var(--mobile-drawer-radius, 0px) * 1 - var(--_mobile-drawer-clip-out)
+        ),
+      calc(
+          100% - var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) +
+            var(--_mobile-drawer-clip-out)
+        )
+        calc(100% + 1000px)
+    );
+  }
+
   :where(.mobile-drawer__content),
   :where(
     .mobile-drawer[data-placement="bottom"]
+      > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
@@ -425,7 +782,11 @@
       env(safe-area-inset-left, 0px);
   }
 
-  :where(.mobile-drawer[data-placement="top"] > .mobile-drawer__tray) {
+  :where(
+    .mobile-drawer[data-placement="top"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
     display: flex;
     flex-direction: column;
     inset: 0 0 auto;
@@ -439,6 +800,7 @@
 
   :where(
     .mobile-drawer[data-placement="top"]
+      > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
@@ -447,7 +809,11 @@
       env(safe-area-inset-left, 0px);
   }
 
-  :where(.mobile-drawer[data-placement="left"] > .mobile-drawer__tray) {
+  :where(
+    .mobile-drawer[data-placement="left"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
     display: flex;
     flex-direction: row;
     /* Not stretched, so tall content grows the content element and its
@@ -464,6 +830,7 @@
 
   :where(
     .mobile-drawer[data-placement="left"]
+      > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
@@ -472,7 +839,11 @@
       env(safe-area-inset-left, 0px);
   }
 
-  :where(.mobile-drawer[data-placement="right"] > .mobile-drawer__tray) {
+  :where(
+    .mobile-drawer[data-placement="right"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
     inset: 0 0 0 auto;
     max-height: none;
     max-width: calc(100% - env(safe-area-inset-left, 0px));
@@ -484,6 +855,7 @@
 
   :where(
     .mobile-drawer[data-placement="right"]
+      > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
   ) {
@@ -504,9 +876,10 @@
    *   Safari ignores elements with an opacity below 0.1 and keeps the first
    *   colour it finds for a viewport-sized layer, so with `opacity` it locks
    *   the page colour on the first frame of an opening drawer.
-   * - The tray is `position: fixed`. `contain: layout` on the root keeps the
-   *   fixed tray positioned in the root, also when an app embeds the drawer
-   *   with `position: absolute`.
+   * - The tray is `position: fixed`. `contain: layout` on the root and the
+   *   sheet keeps the fixed tray positioned in the sheet (in the root), also
+   *   when an app embeds the drawer with `position: absolute`, and lets the
+   *   sheet clip it.
    * - The bar tint is a fixed strip at the sheet's edge (bottom or top) that
    *   paints nothing, with the sheet colour as its background. It is the
    *   first fixed element at that edge, so Safari fills the bar with the
@@ -539,6 +912,11 @@
 
     :where(.mobile-drawer__tray) {
       position: fixed;
+    }
+
+    /* The fixed tray's containing block, so the sheet clips it. */
+    :where(.mobile-drawer__sheet) {
+      contain: layout;
     }
 
     :where(
