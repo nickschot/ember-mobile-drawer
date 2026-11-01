@@ -670,6 +670,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * tray, to return focus to when a drawer opened by focus closes.
    */
   #enteredFrom?: HTMLElement | SVGElement;
+  /** Set while a modal drawer moves focus in, see `#activateModal`. */
+  #initialFocusing = false;
   /**
    * Set when the drawer closed and `#applyOpen` has yet to return focus:
    * whether focus was inside the drawer when it closed.
@@ -1759,7 +1761,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       );
     }
 
-    if (!this.#hasFocus()) focusWithoutScrolling(initialFocus(tray, tray));
+    if (!this.#hasFocus()) {
+      // The drawer's own focus never moves it (see `#onTrayFocusIn`): the
+      // app chose the snap point it opens at.
+      this.#initialFocusing = true;
+      try {
+        focusWithoutScrolling(initialFocus(tray, tray));
+      } finally {
+        this.#initialFocusing = false;
+      }
+    }
   }
 
   /** Undoes `#activateModal`, if it is on. Leaves focus alone. */
@@ -2171,9 +2182,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * element into view if the browser didn't (see `#revealFocus`).
    *
    * Only keyboard focus (`:focus-visible`, also for programmatic focus after
-   * a key press, such as the Tab wrap and the initial focus of a drawer
-   * opened with the keyboard): a tap focuses what is under the finger,
-   * which shows. Browsers give text fields `:focus-visible` for every focus,
+   * a key press, such as the Tab wrap): a tap focuses what is under the
+   * finger, which shows. Not the initial focus of a modal drawer (see
+   * `#activateModal`): the drawer moves focus in itself, and the app chose
+   * the snap point it opens (or is inserted) at, so that one is kept. Browsers give text fields `:focus-visible` for every focus,
    * so a tap on a text field that is only partly visible moves the drawer
    * too, which shows the field above an on-screen keyboard. Not during a
    * drag or while a touch holds the drawer, and not for the tray itself or
@@ -2181,9 +2193,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * it.
    *
    * Visibility is checked where the element will be once the drawer rests
-   * at its active snap point, not where it is now: a drawer that opens moves
-   * focus in before it has moved, and a visible first element must not move
-   * it further. Visible means inside both the tray and the root (the space
+   * at its active snap point, not where it is now: a drawer that is still
+   * on its way there (e.g. one that opens) must not move for an element
+   * that will show. Visible means inside both the tray and the root (the space
    * the tray opens into), along the axis.
    */
   #onTrayFocusIn = (event: FocusEvent): void => {
@@ -2202,6 +2214,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#drag ||
       this.#hold ||
       this.#hidden ||
+      this.#initialFocusing ||
       target === tray ||
       !(target instanceof Element) ||
       target.closest('.mobile-drawer__tray') !== tray

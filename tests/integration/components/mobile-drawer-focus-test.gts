@@ -96,6 +96,20 @@ class State {
   onClose = () => this.closes++;
 }
 
+class SideState {
+  @tracked shown = false;
+  @tracked active = 2;
+  changes: number[] = [];
+
+  onChange = (index: number) => {
+    this.changes.push(index);
+    this.active = index;
+  };
+}
+
+/** Content wider than half of the 400px container. */
+const wideStyle = htmlSafe('width: 300px');
+
 const containerStyle = htmlSafe(
   'position: relative; width: 400px; height: 600px',
 );
@@ -228,20 +242,71 @@ module(
       assert.true(tray().scrollTop > 0, 'the tray scrolled to it');
     });
 
-    test('a drawer that opens moves to its highest snap point when its initial focus is off screen', async function (assert) {
+    test('the initial focus of a drawer that opens does not move it, also off screen', async function (assert) {
       const state = new State();
       state.active = 0;
       state.autofocus = true;
       await renderDrawer(state);
       await settle();
+      focus(el('[data-test-trigger]'), true);
       state.active = 1;
       await settle();
 
       const field = el('[data-test-field]');
       assert.strictEqual(document.activeElement, field, 'initial focus');
+      assert.true(field.matches(':focus-visible'), 'keyboard focus');
+      assert.false(isVisible(field), 'off screen');
+      assert.deepEqual(state.changes, [], 'the app chose the snap point');
+      assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-expanded');
+
+      // The next Tab (here Shift+Tab) is the user's: it moves the drawer.
+      focus(el('[data-test-last]'), true);
+      await settle();
       assert.deepEqual(state.changes, [2]);
-      assert.dom('[data-test-drawer]').hasAttribute('data-expanded');
-      assert.true(isVisible(field), 'on screen');
+    });
+
+    test('a drawer inserted open keeps its snap point when its initial focus is off screen', async function (assert) {
+      // As the demo's left drawer at `'90%'` with content wider than that
+      // (`'content'` is its highest snap point): the first button, at the
+      // start of the content, is off screen. Seen in CI, where fonts are
+      // wider.
+      const state = new SideState();
+      await render(
+        <template>
+          {{! template-lint-disable no-inline-styles }}
+          <div style={{containerStyle}} data-test-container>
+            <button type="button" data-test-trigger>Trigger</button>
+            {{#if state.shown}}
+              <MobileDrawer
+                @placement="left"
+                @snapPoints={{array 0 "content" "50%"}}
+                @activeSnapPoint={{state.active}}
+                @onSnapPointChange={{state.onChange}}
+                style="position: absolute"
+                aria-label="Side"
+                data-test-drawer
+              >
+                <div style={{wideStyle}}>
+                  <button type="button" data-test-first>First</button>
+                </div>
+              </MobileDrawer>
+            {{/if}}
+          </div>
+        </template>,
+      );
+      focus(el('[data-test-trigger]'), true);
+      state.shown = true;
+      await settle();
+      const first = el('[data-test-first]');
+      assert.strictEqual(document.activeElement, first, 'initial focus');
+      assert.true(first.matches(':focus-visible'), 'keyboard focus');
+      assert.true(
+        first.getBoundingClientRect().left <
+          root().getBoundingClientRect().left,
+        'off screen',
+      );
+      assert.deepEqual(state.changes, [], 'keeps the snap point');
+      assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-expanded');
     });
 
     test('a drawer that opens with keyboard focus on a visible first element stays at its snap point', async function (assert) {
