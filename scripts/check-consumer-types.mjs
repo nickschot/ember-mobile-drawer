@@ -77,7 +77,12 @@ export const args: MobileDrawerSignature['Args'] = {
 };
 
 const duration: SpringDuration = { duration: 0.5, bounce: 0.15 };
-export const snappy: MobileDrawerSpring = springFromDuration(duration);
+export const snappy: Readonly<MobileDrawerSpring> = springFromDuration(duration);
+export const withSnappy: MobileDrawerSignature['Args'] = { spring: snappy };
+// @ts-expect-error the result of springFromDuration is read-only
+snappy.stiffness = 1;
+// @ts-expect-error the preset springs are read-only
+springPresets.iosBouncy.damping = 1;
 export const stiffer: MobileDrawerSignature['Args'] = {
   spring: { stiffness: 600 },
 };

@@ -109,7 +109,7 @@ import { MobileDrawer, springPresets } from 'ember-mobile-drawer';
 | `iosSnappy` | 157.9     | 21.4    | 1    | SwiftUI `.snappy`: 0.5s, bounce 0.15     |
 | `iosBouncy` | 157.9     | 17.6    | 1    | SwiftUI `.bouncy`: 0.5s, bounce 0.3      |
 
-`default` and `ios` are critically damped: they don't oscillate, but a fast flick can still carry the drawer past a snap point once. `iosSnappy` and `iosBouncy` overshoot a snap point and come back. A bounce never pulls the tray off its edge: at fully open (the tray's full size) it stops, so the overshoot shows at snap points below that.
+`default` and `ios` are critically damped: they don't oscillate, but a fast flick can still carry the drawer past a snap point once. `iosSnappy` and `iosBouncy` overshoot a snap point and come back. The rendered tray never leaves its edge: at fully open (the tray's full size) the render stops at the edge, so the overshoot shows at snap points below that. When a bouncing spring arrives at the highest snap point, the tray stays there for the rest of the animation, also while the spring itself swings back a little below it. So the content can scroll from the moment the tray arrives.
 
 Apple doesn't document the spring of the system sheet. `ios` is SwiftUI's `.smooth` spring (iOS 17 and later), the same as `Spring(duration: 0.5, bounce: 0)` and SwiftUI's `.spring` without arguments. To use other values from Apple's frameworks, convert a duration and bounce with `springFromDuration`, which uses the formulas from Apple's [Animate with springs](https://developer.apple.com/videos/play/wwdc2023/10158/) (WWDC23): `stiffness = (2π / duration)²`, `damping = 4π × (1 − bounce) / duration` and `mass = 1`.
 
@@ -120,7 +120,7 @@ import { springFromDuration } from 'ember-mobile-drawer';
 const spring = springFromDuration({ duration: 0.4, bounce: 0.2 });
 ```
 
-`duration` is in seconds and must be greater than `0`. `bounce` goes from `0` (the default, no bounce) up to, but not including, `1`. Negative values (over-damped springs in SwiftUI) are not supported. The types `MobileDrawerSpring` and `SpringDuration` are exported too.
+`duration` is in seconds and must be greater than `0`. `bounce` goes from `0` (the default, no bounce) up to, but not including, `1`. Negative values (over-damped springs in SwiftUI) are not supported. The presets and the result of `springFromDuration` are frozen, and typed `Readonly<MobileDrawerSpring>`. The types `MobileDrawerSpring` and `SpringDuration` are exported too.
 
 ### Events
 
@@ -400,7 +400,7 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 
 #### Page scale
 
-Optional, and off by default: while a modal sheet is open, the page behind it scales down, moves down and gets rounded top corners, like the page behind an iOS sheet. It follows the sheet frame by frame, and the area around the page is black. To turn it on, put the `mobile-drawer-theme-ios__page` class and the `data-mobile-drawer-page` attribute on the element that holds your page, for example a wrapper around your application template:
+Optional, and off by default: while a modal bottom sheet is open, the page behind it scales down, moves down and gets rounded top corners, like the page behind an iOS sheet. It follows the sheet frame by frame, and the area around the page is black. To turn it on, put the `mobile-drawer-theme-ios__page` class and the `data-mobile-drawer-page` attribute on the element that holds your page, for example a wrapper around your application template:
 
 ```hbs
 {{! app/templates/application.hbs }}
@@ -412,12 +412,15 @@ Optional, and off by default: while a modal sheet is open, the page behind it sc
 `data-mobile-drawer-page` tells the drawers to write their progress on the element (see "The page behind" in `styles.css`). The class makes the iOS theme use it. The element doesn't need to be inside the `mobile-drawer-theme-ios` class.
 
 - **The drawer must not be inside the page element.** A drawer inside it doesn't scale the page (the page can't move without moving the drawer). Render the drawer outside it, for example at the end of `<body>` with `{{#in-element}}`, and put the `mobile-drawer-theme-ios` class around the drawer there. Drawers that stay inside the page still work; they just don't scale it.
-- Only modal drawers (the default) scale the page. A non-modal drawer leaves the page usable, so the page stays as it is. The page follows the drawer from its smallest snap point (no scale) to its largest (full scale), so a sheet at `'40%'` of `[0, '40%', 'content']` scales the page part of the way. With several open drawers it follows the one that is open furthest.
+- Only modal drawers (the default) with `@placement="bottom"` (the default) scale the page. As on iOS, top, left and right drawers never move the page. A non-modal drawer leaves the page usable, so the page stays as it is. With several open drawers it follows the one that is open furthest.
+- The page follows the drawer linearly, from its smallest snap point (no scale) to its largest (full scale), so a sheet at `'40%'` of `[0, '40%', 'content']` scales the page part of the way. iOS scales the page only when a sheet is at its large detent. For that look, give the sheet only a closed and a full-height snap point.
+- A page element that is rendered while a sheet is open (for example after a route change) follows the sheet from its next frame.
 - **`position: fixed`**: while the page is scaled it has a `transform`, so `position: fixed` content in it is positioned against the page element instead of the viewport. That is only right when the page element fills the viewport (for example an app shell whose content scrolls inside it); otherwise such content can move while a sheet is open. While no modal sheet is open the page has no `transform` at all, so fixed content works as usual.
-- **Black around the page**: the theme makes `<body>` black while a modal drawer outside the page is open, when the page element is a direct child of `<body>`. An unlayered `background` on `<body>` wins over that: put the page colour on `<html>` and on the page element instead. The page element gets `Canvas` as its background (set `--mobile-drawer-ios-page-background`, or a `background` of your own). Give `<body>` no margin or padding, so the black only shows around the scaled page.
-- **Leave a gap at the top**: a sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px); }`, as the demo does.
+- **Black around the page**: the theme makes `<body>` black while a drawer moves the page (the component then puts `data-mobile-drawer-page-active` on the page element). This only works when the page element is a direct child of `<body>`. A sheet that rests at a peek (its smallest snap point, with the page not scaled) doesn't make `<body>` black. An unlayered `background` on `<body>` wins over that: put the page colour on `<html>` and on the page element instead. The page element gets `Canvas` as its background (set `--mobile-drawer-ios-page-background`, or a `background` of your own). Give `<body>` no margin or padding, so the black only shows around the scaled page.
+- **Leave a gap at the top**: the theme doesn't add it, your app's CSS does. A sheet that covers the whole screen hides the scaled page. On iOS the full-height sheet stops a little below the top, so the page shows behind it as a card. Do the same with a `max-height` on the tray, for example `.my-sheet > .mobile-drawer__tray { max-height: calc(100% - env(safe-area-inset-top, 0px) - 24px); }`, as the demo does.
 - **Performance**: the page's `transform` (a `translate3d` and a `scale`) changes every frame, and the `translate3d` puts the page on a compositing layer of its own while it is scaled, so the browser doesn't paint the page again on every frame. The rounded corners are a `clip-path` with a fixed radius, which only changes when a sheet opens.
 - **Reduced motion**: with `prefers-reduced-motion: reduce` the page doesn't scale or move.
+- **Inherited properties**: the theme registers `--mobile-drawer-page-progress` and `--mobile-drawer-page-viewport-top` with `@property` as not inherited (`inherits: false`), for the whole document, so the page's content isn't styled again on every frame. So when you load `ios.css`, app CSS can't read these properties on a child of the page element. Read them on the page element itself.
 
 Settings, as custom properties on the page element or an ancestor of it:
 

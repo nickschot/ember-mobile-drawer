@@ -48,8 +48,12 @@ export default class IosSheetExample extends Component {
   snapPoints: SnapPoint[] = [0, '40%', 'content'];
   spring = springPresets.ios;
   pageScale = pageScale;
-  /** Outside the page element, see the class docs. */
-  destination = document.body;
+  /**
+   * Outside the page element, see the class docs. There is no `document`
+   * during server-side rendering (FastBoot), so the sheet then renders only
+   * in the browser.
+   */
+  destination = typeof document === 'undefined' ? undefined : document.body;
   @tracked active = 0;
   @tracked placement: Placement = 'bottom';
 
@@ -81,36 +85,38 @@ export default class IosSheetExample extends Component {
       Scale the page
     </label>
 
-    {{#in-element this.destination insertBefore=null}}
-      <div class="mobile-drawer-theme-ios">
-        <MobileDrawer
-          @placement={{this.placement}}
-          @snapPoints={{this.snapPoints}}
-          @activeSnapPoint={{this.active}}
-          @onSnapPointChange={{this.setActive}}
-          @spring={{this.spring}}
-          class="example-ios-sheet
-            {{if this.pageScale.enabled 'example-ios-sheet--card'}}"
-          aria-labelledby="example-ios-title"
-          as |drawer|
-        >
-          {{#unless this.isTop}}
-            <div class="mobile-drawer-theme-ios__grabber"></div>
-          {{/unless}}
-          <div class="example-ios-title">
-            <h3 id="example-ios-title">Find nearby</h3>
-            <button type="button" {{on "click" drawer.close}}>Done</button>
-          </div>
-          <ul class="example-ios-list">
-            {{#each ITEMS as |item|}}
-              <li>{{item}}</li>
-            {{/each}}
-          </ul>
-          {{#if this.isTop}}
-            <div class="mobile-drawer-theme-ios__grabber"></div>
-          {{/if}}
-        </MobileDrawer>
-      </div>
-    {{/in-element}}
+    {{#if this.destination}}
+      {{#in-element this.destination insertBefore=null}}
+        <div class="mobile-drawer-theme-ios">
+          <MobileDrawer
+            @placement={{this.placement}}
+            @snapPoints={{this.snapPoints}}
+            @activeSnapPoint={{this.active}}
+            @onSnapPointChange={{this.setActive}}
+            @spring={{this.spring}}
+            class="example-ios-sheet
+              {{if this.pageScale.enabled 'example-ios-sheet--card'}}"
+            aria-labelledby="example-ios-title"
+            as |drawer|
+          >
+            {{#unless this.isTop}}
+              <div class="mobile-drawer-theme-ios__grabber"></div>
+            {{/unless}}
+            <div class="example-ios-title">
+              <h3 id="example-ios-title">Find nearby</h3>
+              <button type="button" {{on "click" drawer.close}}>Done</button>
+            </div>
+            <ul class="example-ios-list">
+              {{#each ITEMS as |item|}}
+                <li>{{item}}</li>
+              {{/each}}
+            </ul>
+            {{#if this.isTop}}
+              <div class="mobile-drawer-theme-ios__grabber"></div>
+            {{/if}}
+          </MobileDrawer>
+        </div>
+      {{/in-element}}
+    {{/if}}
   </template>
 }

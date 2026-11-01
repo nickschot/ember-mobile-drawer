@@ -56,13 +56,15 @@ export interface SpringDuration {
  * and a damping of 17.6, the values in the documentation of SwiftUI's
  * `Spring`.
  *
+ * The result is frozen.
+ *
  * @throws RangeError when `duration` is not a finite number greater than 0,
  *   or `bounce` is not a number from 0 up to (not including) 1.
  */
 export function springFromDuration({
   duration,
   bounce = 0,
-}: SpringDuration): MobileDrawerSpring {
+}: SpringDuration): Readonly<MobileDrawerSpring> {
   if (!(Number.isFinite(duration) && duration > 0)) {
     throw new RangeError(
       `springFromDuration: duration must be a finite number greater than 0, got ${duration}`,
@@ -102,10 +104,10 @@ export function springFromDuration({
  * ```
  */
 export const springPresets: Readonly<{
-  default: MobileDrawerSpring;
-  ios: MobileDrawerSpring;
-  iosSnappy: MobileDrawerSpring;
-  iosBouncy: MobileDrawerSpring;
+  default: Readonly<MobileDrawerSpring>;
+  ios: Readonly<MobileDrawerSpring>;
+  iosSnappy: Readonly<MobileDrawerSpring>;
+  iosBouncy: Readonly<MobileDrawerSpring>;
 }> = Object.freeze({
   default: Object.freeze({
     stiffness: DEFAULT_SPRING_CONFIG.stiffness,
