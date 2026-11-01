@@ -715,7 +715,9 @@
    * shadow shows at every snap point and while the sheet moves, and it
    * doesn't come in suddenly at the highest snap point (#114, N1).
    *
-   * The sheet's top edge moves with the tray, its bottom edge stays. The
+   * The sheet's top edge moves with the tray. Its bottom edge stays at
+   * and above the lowest open snap point; below it the bottom edge moves
+   * down with the tray (#142), so the body moves too. The
    * layer has two parts, so that each one only moves with a transform and
    * its shadow isn't painted again while the drawer moves:
    * - The edge (`.mobile-drawer__shadow-edge::before`): a box with the top

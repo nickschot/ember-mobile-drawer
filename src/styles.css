@@ -252,7 +252,9 @@
  *                           tray's inline `transform`, and writes
  *                           `--mobile-drawer-expand-progress` on it. Its
  *                           `.mobile-drawer__shadow-body` gets the opposite
- *                           transform, so it stays where it is. The theme
+ *                           transform, so it stays at the sheet's bottom
+ *                           edge (which moves down below the lowest open
+ *                           snap point, see `--mobile-drawer-inset`). The theme
  *                           draws the shadow on these elements (see
  *                           themes/ios.css). Other drawers don't use it.
  * .mobile-drawer__glass     Empty layer in the sheet, before (under) the
@@ -334,8 +336,13 @@
  * sides and bottom, and the tray's own `clip-path` cuts its sides at the
  * inset with its top radius there. So at a snap point the tray's top is
  * where it is without the inset, and the sheet shows the tray from there
- * to the inset above the bottom edge. When the drawer is closed, no part
- * of the tray is in the sheet. The inset area takes no pointer events. The
+ * to the inset above the bottom edge. Below the lowest open snap point
+ * (closing, opening, or a drag below it) the sheet moves down as one
+ * piece: the component writes an inline `translate` on the sheet (the
+ * distance below that snap point) and the opposite one on the tray and the
+ * glass layer, so the sheet keeps its shape (the inset and the bottom
+ * radius) and goes off the bottom edge with the tray, as a native iOS
+ * sheet does (#142). The inset area takes no pointer events. The
  * clipped sides of the tray hide `inset` px of the content on each side
  * below the highest snap point: pad the content by the inset (the iOS
  * theme does). While the sheet floats, the clips hide the tray's outer
@@ -665,6 +672,23 @@
       > :is(.mobile-drawer__tray, .mobile-drawer__glass)
   ) {
     will-change: transform;
+  }
+
+  /*
+   * A bottom sheet moves down as one piece below its lowest open snap point
+   * (an inline `translate` from the component, #142), so its clip moves
+   * with the tray. Its own layer while the drawer can move, as above.
+   */
+  :where(
+    .mobile-drawer:not(
+        [data-closed],
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+  ) {
+    will-change: translate;
   }
 
   /*

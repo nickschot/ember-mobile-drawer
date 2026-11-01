@@ -6,6 +6,7 @@ import { tracked } from '@glimmer/tracking';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { nextFrames } from '../../helpers/frames.ts';
+import { FakeClock } from '../../helpers/fake-clock.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
 
@@ -1845,11 +1846,16 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
           .transform,
       );
       assert.ok(match, 'the tray has a transform');
+      // Below the lowest open snap point the sheet moves down (#142), and
+      // the body with it.
+      const sheet = root.querySelector<HTMLElement>('.mobile-drawer__sheet')!;
+      const sink = Number(/^0px ([\d.]+)px$/.exec(sheet.style.translate)?.[1]);
       assert.strictEqual(
         body.style.transform,
-        `translate3d(0px, ${-Number(match![1])}px, 0px)`,
-        `${active}: the body gets the opposite transform`,
+        `translate3d(0px, ${(sink || 0) - Number(match![1])}px, 0px)`,
+        `${active}: the body gets the opposite transform, plus the sheet's move`,
       );
+      assert.strictEqual(sink > 0, active === 0, 'the sheet moves when closed');
     }
     assert.strictEqual(shadowGeometry(root).body.bottom, 8);
     const shadow = root.querySelector<HTMLElement>('.mobile-drawer__shadow')!;
@@ -1938,5 +1944,146 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
       'none',
     );
     assert.dom('.mobile-drawer__shadow').hasAttribute('aria-hidden', 'true');
+  });
+
+  /**
+   * The floating sheet's shape, in px relative to the root (the test
+   * container may be scaled): the visible sheet (from the tray's top to the
+   * sheet's bottom edge), the sheet's sides and bottom edge, and the glass
+   * layer and the shadow body against them.
+   */
+  function sheetShape(root: HTMLElement) {
+    const r = root.getBoundingClientRect();
+    const scale = r.width / root.offsetWidth;
+    const rect = (selector: string) =>
+      root.querySelector(selector)!.getBoundingClientRect();
+    const px = (value: number) => Math.round((value / scale) * 10) / 10;
+    const sheet = rect('.mobile-drawer__sheet');
+    const tray = rect('.mobile-drawer__tray');
+    const glass = rect('.mobile-drawer__glass');
+    const body = rect('.mobile-drawer__shadow-body');
+    return {
+      height: px(sheet.bottom - tray.top),
+      left: px(sheet.left - r.left),
+      right: px(r.right - sheet.right),
+      bottom: px(r.bottom - sheet.bottom),
+      glassTop: px(glass.top - tray.top),
+      glassSides: [px(glass.left - sheet.left), px(sheet.right - glass.right)],
+      bodyBottom: px(body.bottom - sheet.bottom),
+      bodySides: [px(body.left - sheet.left), px(sheet.right - body.right)],
+    };
+  }
+
+  // #142: a native iOS sheet that closes moves down as one piece, with its
+  // inset and its rounded bottom edge. The sheet's clip must not stay at
+  // the bottom while the tray moves down in it.
+  test('bottom: below the lowest open snap point the floating sheet moves down as one piece', async function (assert) {
+    const clock = new FakeClock();
+    drawerEnvironment.clock = clock;
+    drawerEnvironment.prefersReducedMotion = () => false;
+    try {
+      const state = new SheetState('bottom');
+      const root = (await renderSheet(state)) as HTMLElement;
+      const sheet = root.querySelector<HTMLElement>('.mobile-drawer__sheet')!;
+      const settle = async () => {
+        await settled();
+        clock.runUntilIdle();
+        await settled();
+      };
+
+      state.active = 1;
+      await settle();
+      const open = sheetShape(root);
+      assert.deepEqual(
+        [open.left, open.right, open.bottom],
+        [8, 8, 8],
+        'at the lowest open snap point: the floating sheet',
+      );
+      assert.strictEqual(sheet.style.translate, '', 'it does not move there');
+      assert.true(open.height > 100, `visible: ${open.height}px`);
+
+      const followFrames = (label: string) => {
+        let frames = 0;
+        let lowest = 0;
+        while (clock.pendingFrames > 0 && frames < 500) {
+          clock.frame();
+          frames++;
+          const shape = sheetShape(root);
+          // How far the sheet's bottom edge is below the root's.
+          lowest = Math.max(lowest, -shape.bottom);
+          // Past the snap point (a spring overshoot) the sheet expands.
+          if (shape.height > open.height + 0.05) continue;
+          assert.true(
+            Math.abs(shape.height - open.height) < 0.2,
+            `${label}, frame ${frames}: the sheet keeps its height (${shape.height}, ${open.height})`,
+          );
+          assert.deepEqual(
+            [shape.left, shape.right],
+            [8, 8],
+            `${label}, frame ${frames}: and its sides`,
+          );
+          assert.strictEqual(
+            shape.glassTop,
+            0,
+            `${label}, frame ${frames}: the glass layer is at the tray's top`,
+          );
+          assert.deepEqual(shape.glassSides, [0, 0]);
+          assert.strictEqual(
+            shape.bodyBottom,
+            0,
+            `${label}, frame ${frames}: the shadow body ends at the sheet's bottom edge`,
+          );
+          assert.deepEqual(shape.bodySides, [0, 0]);
+          assert.strictEqual(
+            getComputedStyle(sheet).borderBottomLeftRadius,
+            '36px',
+            `${label}, frame ${frames}: the bottom radius stays`,
+          );
+        }
+        return { frames, lowest };
+      };
+
+      state.active = 0;
+      await settled();
+      const close = followFrames('close');
+      assert.true(close.frames > 5, `the close animates (${close.frames})`);
+      assert.true(
+        close.lowest >= open.height - 1,
+        `closed, the whole sheet is below the root (its bottom edge ${close.lowest}px below)`,
+      );
+      await settled();
+      assert.dom(root).hasAttribute('data-closed');
+
+      state.active = 1;
+      await settled();
+      const reopen = followFrames('reopen');
+      assert.true(reopen.frames > 5, `the reopen animates (${reopen.frames})`);
+      await settled();
+      assert.deepEqual(sheetShape(root), open, 'back at the snap point');
+      assert.strictEqual(sheet.style.translate, '');
+
+      // No change above the lowest open snap point: the sheet's box stays
+      // while it expands to full width.
+      state.active = 2;
+      await settled();
+      let frames = 0;
+      while (clock.pendingFrames > 0 && frames < 500) {
+        clock.frame();
+        frames++;
+        assert.strictEqual(
+          sheet.style.translate,
+          '',
+          `expand, frame ${frames}: the sheet does not move`,
+        );
+      }
+      await settled();
+      assert.deepEqual(
+        [sheetShape(root).left, sheetShape(root).bottom],
+        [0, 0],
+        'highest: edge-to-edge',
+      );
+    } finally {
+      delete drawerEnvironment.clock;
+    }
   });
 });

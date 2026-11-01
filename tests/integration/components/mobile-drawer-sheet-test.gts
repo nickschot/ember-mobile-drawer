@@ -369,18 +369,84 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     while (clock.pendingFrames > 0) {
       clock.frame();
       const t = tray().getBoundingClientRect();
-      const s = sheet().getBoundingClientRect();
       if (openDistance() <= 0) {
-        assert.true(
-          t.top >= s.bottom - 0.01,
-          `closed: no part of the tray in the sheet (${t.top}, ${s.bottom})`,
-        );
         const r = root().getBoundingClientRect();
-        assert.true(t.top >= r.bottom - 0.01, 'and none in the root');
+        assert.true(
+          t.top >= r.bottom - 0.01,
+          `closed: no part of the tray in the root (${t.top}, ${r.bottom})`,
+        );
       }
     }
     await settled();
     assert.dom(root()).hasAttribute('data-closed');
+  });
+
+  // #142: below the lowest open snap point the sheet (its clip, with the
+  // inset at the bottom) moves down with the tray, so the visible sheet
+  // keeps its shape, as a native iOS sheet that closes.
+  test('with --mobile-drawer-inset the sheet moves down as one piece below the lowest open snap point', async function (assert) {
+    const state = new State();
+    state.inset = '8px';
+    await renderDrawer(state);
+    state.active = 1;
+    await settle();
+    // Container px: the visible sheet from the tray's top to the sheet's
+    // bottom edge.
+    const visible = () =>
+      (sheet().getBoundingClientRect().bottom -
+        tray().getBoundingClientRect().top) /
+      scale();
+    const sides = () => {
+      const s = sheet().getBoundingClientRect();
+      const r = root().getBoundingClientRect();
+      return [
+        Math.round((s.left - r.left) / scale()),
+        Math.round((r.right - s.right) / scale()),
+      ];
+    };
+    assert.strictEqual(Math.round(visible()), 192, '200px open, 8px inset');
+    assert.strictEqual(sheet().style.translate, '', 'no move at a snap point');
+    assert.strictEqual(tray().style.translate, '');
+
+    for (const [target, label] of [
+      [0, 'close'],
+      [1, 'reopen'],
+    ] as const) {
+      state.active = target;
+      await settled();
+      let frames = 0;
+      while (clock.pendingFrames > 0) {
+        clock.frame();
+        frames++;
+        const open = openDistance();
+        // Past the snap point (a spring overshoot) the sheet expands.
+        if (open > 200) continue;
+        assert.true(
+          Math.abs(visible() - 192) < 0.2,
+          `${label} ${frames} (${open}px open): the sheet keeps its height (${visible()})`,
+        );
+        assert.deepEqual(sides(), [8, 8], 'and its sides');
+        const moved = /^0px ([\d.e-]+)px$/.exec(sheet().style.translate);
+        assert.true(
+          Math.abs((moved ? Number(moved[1]) : 0) - Math.max(0, 200 - open)) <
+            0.01,
+          `the sheet moves down by the distance below the snap point (${sheet().style.translate})`,
+        );
+      }
+      assert.true(frames > 5, `the ${label} animates (${frames} frames)`);
+      await settled();
+    }
+    assert.strictEqual(sheet().style.translate, '');
+    assert.strictEqual(tray().style.translate, '');
+
+    // Above the lowest open snap point nothing moves the sheet.
+    state.active = 2;
+    await settled();
+    while (clock.pendingFrames > 0) {
+      clock.frame();
+      assert.strictEqual(sheet().style.translate, '', 'expand: no move');
+    }
+    await settled();
   });
 
   for (const snapPoints of [
