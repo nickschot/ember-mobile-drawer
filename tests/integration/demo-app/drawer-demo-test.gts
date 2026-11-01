@@ -202,6 +202,43 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
     assert.true(code().includes('spring = springPresets.ios;'));
   });
 
+  test('the spring fields show the preset and set a custom spring', async function (assert) {
+    await render(<template><DrawerDemo @search="?spring=ios" /></template>);
+    const select = findAll('.demo-controls label')
+      .find((element) => element.textContent?.includes('(@spring)'))!
+      .querySelector('select')!;
+    const field = (label: string) =>
+      findAll('.demo-spring-fields label')
+        .find((element) => element.textContent?.includes(label))!
+        .querySelector('input')!;
+    const code = () => find('.demo-code code')!.textContent!;
+
+    assert.strictEqual(field('Stiffness').value, '157.91');
+    assert.strictEqual(field('Damping').value, '25.13');
+    assert.strictEqual(field('Mass').value, '1');
+
+    await fillIn(field('Damping'), '10');
+    assert.strictEqual(select.value, 'custom');
+    assert.true(code().includes('@spring={{this.spring}}'));
+    assert.true(
+      code().includes(
+        'spring: MobileDrawerSpring = {\n  stiffness: 157.91,\n  damping: 10,\n  mass: 1,\n};',
+      ),
+    );
+
+    await fillIn(field('Mass'), '0');
+    assert.true(code().includes('mass: 1,'), 'an invalid value is ignored');
+
+    await fillIn(select, 'default');
+    assert.strictEqual(field('Stiffness').value, '400');
+    assert.strictEqual(field('Damping').value, '40');
+    assert.notOk(code().includes('spring'), 'the default is not in the code');
+
+    await fillIn(field('Stiffness'), '300');
+    await fillIn(field('Stiffness'), '400');
+    assert.strictEqual(select.value, 'default', 'preset values match again');
+  });
+
   test('the modal control toggles @modal, and the backdrop follows it', async function (assert) {
     await render(<template><DrawerDemo @search="" /></template>);
     const checkbox = (label: string) => {

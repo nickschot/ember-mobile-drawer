@@ -1,4 +1,9 @@
-import { springPresets, type Placement, type SnapPoint } from '#src/index.ts';
+import {
+  springPresets,
+  type MobileDrawerSpring,
+  type Placement,
+  type SnapPoint,
+} from '#src/index.ts';
 import { formatSnapPoints, parseSnapPoints } from './parse-snap-points.ts';
 
 export const PLACEMENTS: Placement[] = ['bottom', 'top', 'left', 'right'];
@@ -22,6 +27,26 @@ export const SPRING_PRESETS: { name: SpringPresetName; label: string }[] = [
   { name: 'iosSnappy', label: 'iOS snappy' },
   { name: 'iosBouncy', label: 'iOS bouncy' },
 ];
+
+/** The Spring control's value once a spring field no longer matches a preset. */
+export const CUSTOM_SPRING = 'custom';
+
+export type SpringFieldName = keyof MobileDrawerSpring;
+
+/** The fields for the values of `@spring`. */
+export const SPRING_FIELDS: {
+  name: SpringFieldName;
+  label: string;
+  step: number;
+}[] = [
+  { name: 'stiffness', label: 'Stiffness', step: 10 },
+  { name: 'damping', label: 'Damping', step: 1 },
+  { name: 'mass', label: 'Mass', step: 0.1 },
+];
+
+/** Rounds a spring value to 2 decimals, e.g. the iOS stiffness 157.91…. */
+export const roundSpringValue = (value: number) =>
+  Math.round(value * 100) / 100;
 
 export const isSpringPresetName = (value: unknown): value is SpringPresetName =>
   SPRING_PRESETS.some((preset) => preset.name === value);

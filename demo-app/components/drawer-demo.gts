@@ -7,16 +7,21 @@ import type Owner from '@ember/owner';
 import {
   MobileDrawer,
   springPresets,
+  type MobileDrawerSpring,
   type Placement,
   type SnapPoint,
 } from '#src/index.ts';
 import { formatSnapPoints, parseSnapPoints } from '../lib/parse-snap-points.ts';
 import {
   CUSTOM,
+  CUSTOM_SPRING,
   DEFAULT_BACKDROP_OPACITY,
   PLACEMENTS,
   SNAP_POINT_PRESETS,
+  SPRING_FIELDS,
   SPRING_PRESETS,
+  roundSpringValue,
+  type SpringFieldName,
   isPlacement,
   isSpringPresetName,
   type SpringPresetName,
@@ -56,7 +61,11 @@ export default class DrawerDemo extends Component<{
   @tracked handleOnly: boolean;
   @tracked tall: boolean;
   @tracked backdropOpacity: number;
-  @tracked springPreset: SpringPresetName;
+  /** A preset's name, or `'custom'` once a spring field is changed. */
+  @tracked springPreset: SpringPresetName | typeof CUSTOM_SPRING;
+  @tracked stiffness: number;
+  @tracked damping: number;
+  @tracked mass: number;
   // Not settable from the URL, so they start at the drawer's defaults.
   @tracked modal = true;
   @tracked backdrop = true;
@@ -75,10 +84,26 @@ export default class DrawerDemo extends Component<{
     this.tall = state.tall;
     this.backdropOpacity = state.backdropOpacity;
     this.springPreset = state.spring;
+    const spring = springPresets[state.spring];
+    this.stiffness = spring.stiffness;
+    this.damping = spring.damping;
+    this.mass = spring.mass;
   }
 
-  get spring() {
-    return springPresets[this.springPreset];
+  get spring(): MobileDrawerSpring {
+    return {
+      stiffness: this.stiffness,
+      damping: this.damping,
+      mass: this.mass,
+    };
+  }
+
+  /** The spring's values, rounded for the fields and the code. */
+  get springFields() {
+    return SPRING_FIELDS.map((field) => ({
+      ...field,
+      value: roundSpringValue(this[field.name]),
+    }));
   }
 
   get snapPointButtons() {
@@ -120,7 +145,13 @@ export default class DrawerDemo extends Component<{
       `snapPoints: SnapPoint[] = [${formatSnapPoints(this.snapPoints)}];`,
       ...(this.springPreset === 'default'
         ? []
-        : [`spring = springPresets.${this.springPreset};`]),
+        : this.springPreset === CUSTOM_SPRING
+          ? [
+              `spring: MobileDrawerSpring = {\n${this.springFields
+                .map((field) => `  ${field.name}: ${field.value},`)
+                .join('\n')}\n};`,
+            ]
+          : [`spring = springPresets.${this.springPreset};`]),
       '',
       `<MobileDrawer\n  ${args.join('\n  ')}\n  as |drawer|\n>\n  …\n</MobileDrawer>`,
     ];
@@ -199,7 +230,29 @@ export default class DrawerDemo extends Component<{
 
   setSpring = (event: Event) => {
     const { value } = event.target as HTMLSelectElement;
-    if (isSpringPresetName(value)) this.springPreset = value;
+    if (!isSpringPresetName(value)) return;
+    this.springPreset = value;
+    const spring = springPresets[value];
+    this.stiffness = spring.stiffness;
+    this.damping = spring.damping;
+    this.mass = spring.mass;
+  };
+
+  /**
+   * Applies a typed stiffness, damping or mass once it is a number greater
+   * than 0. While it isn't, the drawer keeps the last valid value. The Spring
+   * control shows the preset that has these values, or Custom.
+   */
+  setSpringField = (name: SpringFieldName, event: Event) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (!(Number.isFinite(value) && value > 0)) return;
+    this[name] = value;
+    this.springPreset =
+      SPRING_PRESETS.find(({ name: preset }) =>
+        SPRING_FIELDS.every(
+          (field) => springPresets[preset][field.name] === this[field.name],
+        ),
+      )?.name ?? CUSTOM_SPRING;
   };
 
   setBackdropOpacity = (event: Event) => {
@@ -396,8 +449,32 @@ export default class DrawerDemo extends Component<{
               selected={{this.isSelected preset.name this.springPreset}}
             >{{preset.label}}</option>
           {{/each}}
+          <option
+            value={{CUSTOM_SPRING}}
+            disabled
+            selected={{this.isSelected CUSTOM_SPRING this.springPreset}}
+          >Custom</option>
         </select>
       </label>
+      <div class="demo-spring-fields">
+        {{#each this.springFields as |field|}}
+          <label>
+            {{field.label}}
+            <input
+              type="number"
+              min="0"
+              step={{field.step}}
+              inputmode="decimal"
+              value={{field.value}}
+              {{on "input" (fn this.setSpringField field.name)}}
+            />
+          </label>
+        {{/each}}
+      </div>
+      <p class="demo-hint">
+        Higher stiffness is faster, lower damping bounces more and a higher mass
+        is slower. Each value must be greater than 0.
+      </p>
       <div class="demo-buttons">
         Set @activeSnapPoint:
         {{#each this.snapPointButtons as |snapPoint|}}
