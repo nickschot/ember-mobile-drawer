@@ -175,11 +175,12 @@ With `@modal={{false}}` the drawer doesn't move focus, trap it, make the page in
 
 A modal drawer with a smallest snap point above `0` is only modal above its peek.
 
+Below its highest snap point the content of a drawer doesn't scroll along its axis, so part of it is off screen. When keyboard focus (`:focus-visible`, for example after Tab) moves to an element in the tray that isn't fully on screen, an open drawer (modal or not) moves to its highest snap point, like `open()`: through `@onSnapPointChange` when `@activeSnapPoint` is set, the same as after a drag. When it gets there, the tray scrolls the element into view if the browser didn't. This also happens when the initial focus of a drawer that opens is off screen. Focus from a tap or a click doesn't move the drawer, and neither does focus at the highest snap point or at a peek (a smallest snap point above `0`), or focus inside a drawer nested in this one (that drawer handles its own content). With reduced motion the drawer jumps there.
+
 Limits of modal drawers:
 
 - **Content rendered elsewhere becomes inert.** Popovers, dropdowns and menus that belong to the drawer's content must be rendered inside the drawer. Addons that render into a `<body>`-level element (a "wormhole" or portal, such as ember-basic-dropdown and ember-power-select) put their content next to the drawer, where it is inert and can't be clicked. Render them in place (`@renderInPlace={{true}}` for ember-basic-dropdown and ember-power-select). Elements added to `<body>` after the drawer opened are not made inert.
 - **The scroll lock assumes the document scrolls.** It sets `overflow: hidden` on `<html>`. If your app scrolls inside `<body>` or a wrapper element instead (common in app-like layouts), that element keeps scrolling; lock it yourself while the drawer is open. Fixed-position page elements are not adjusted for the scrollbar that disappears.
-- **Content below the visible part of a partly open drawer.** At a snap point below the highest one, Tab can move focus to elements that are off screen. Give keyboard users a way to expand the drawer (for example, open it to its highest snap point when it is opened with the keyboard). See [#83](https://github.com/nickschot/ember-mobile-drawer/issues/83).
 - **Safari doesn't focus buttons on click**, so after opening a drawer with a mouse or touch there, no element gets focus back on close.
 
 Animations respect `prefers-reduced-motion`: with reduced motion the drawer jumps to its snap point instead of animating.

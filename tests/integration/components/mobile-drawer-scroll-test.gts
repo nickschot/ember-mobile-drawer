@@ -1704,7 +1704,9 @@ module(
         state.active = 1;
         await renderDrawer(state);
         const field = create();
-        el('.mobile-drawer__content').append(field);
+        // At the start, where it shows: keyboard focus on a field off screen
+        // would move the drawer to its highest snap point.
+        el('.mobile-drawer__content').prepend(field);
         field.focus();
         assert.strictEqual(document.activeElement, field, 'focused');
         // As the browser does to show the focused field.
@@ -1774,10 +1776,11 @@ module(
       state.active = 1;
       await renderDrawer(state);
       const button = document.createElement('button');
-      button.textContent = 'At the end';
-      el('.mobile-drawer__content').append(button);
-      // As Tab does: focus with a focus ring. The browser scrolls the button
-      // into view.
+      button.textContent = 'At the start';
+      // Where it shows: keyboard focus on a button off screen would move the
+      // drawer to its highest snap point.
+      el('.mobile-drawer__content').prepend(button);
+      // As Tab does: focus with a focus ring.
       focus(button, true);
       assert.strictEqual(document.activeElement, button, 'focused');
       assert.true(button.matches(':focus-visible'), 'keyboard focus');
