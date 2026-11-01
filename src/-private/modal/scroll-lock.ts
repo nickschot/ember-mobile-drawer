@@ -28,7 +28,9 @@
  *   field in a drawer has focus (the on-screen keyboard): iOS scrolls the
  *   visual viewport to show the field, which moves the fixed drawer with
  *   it, as with the fixed `<body>`. The page goes back when the field loses
- *   focus or the keyboard closes (#116).
+ *   focus or the keyboard closes. A tap on a field that the keyboard will
+ *   not cover focuses it without that scroll, which can go up on a tall
+ *   page (see `onTouchEnd`, #116).
  *
  * @module
  * @internal
@@ -103,16 +105,39 @@ function keyboardOpen(): boolean {
   return typingFieldFocused();
 }
 
+/** `<input>` types that open no on-screen keyboard. */
+const NON_TEXT_INPUTS = new Set([
+  'button',
+  'checkbox',
+  'color',
+  'file',
+  'hidden',
+  'image',
+  'radio',
+  'range',
+  'reset',
+  'submit',
+]);
+
+/**
+ * Whether `element` is a field the user types in (it opens the on-screen
+ * keyboard), in a locked drawer.
+ */
+function isTypingField(element: Element | null): element is HTMLElement {
+  if (!(element instanceof HTMLElement)) return false;
+  const field =
+    (element instanceof HTMLInputElement &&
+      !NON_TEXT_INPUTS.has(element.type)) ||
+    element instanceof HTMLTextAreaElement
+      ? !(element as HTMLInputElement).readOnly &&
+        !(element as HTMLInputElement).disabled
+      : element.isContentEditable;
+  return field && allowed.some((tray) => tray.contains(element));
+}
+
 /** Whether a field the user types in has focus in a locked drawer. */
 function typingFieldFocused(): boolean {
-  const active = document.activeElement;
-  return (
-    active instanceof HTMLElement &&
-    (active instanceof HTMLTextAreaElement ||
-      active instanceof HTMLInputElement ||
-      active.isContentEditable) &&
-    allowed.some((element) => element.contains(active))
-  );
+  return isTypingField(document.activeElement);
 }
 
 /** Scrolls the page back to where it was when it was locked. */
@@ -125,31 +150,59 @@ function restorePinned(): void {
 }
 
 /**
- * iOS still scrolls the page with `overflow: hidden`: to show a focused text
- * field above the on-screen keyboard, it moves the visual viewport (and with
- * it `scrollY`) so that the field is in the middle of the part that the
- * keyboard doesn't cover. The fixed drawer moves with the visual viewport, so
- * that is what shows the field (the #71 lock gets the same scroll, see
- * #116). Thus while the keyboard is open, the scroll stays: scrolling it back
- * hid the field and made the sheet jump. Any other scroll of the page is
- * undone at once. When the keyboard closes, the page goes back to its
- * position (see `onViewportResize`).
+ * Any scroll of the page while locked is undone at once. Not while the
+ * keyboard is open: iOS (or `revealFocused`) then scrolls to show the
+ * focused field, and the fixed drawer moves with it.
  */
 const onScroll = (): void => {
   if (!pinned || keyboardOpen()) return;
   restorePinned();
 };
 
-/** The keyboard closed: put the page back where it was. */
+/** The part of the viewport (px) that the keyboard covered last time. */
+let keyboardHeight: number | undefined;
+
+/** The part of the viewport that the keyboard will cover: a guess. */
+function predictedKeyboardHeight(): number {
+  if (keyboardHeight !== undefined) return keyboardHeight;
+  const { innerWidth, innerHeight } = window;
+  // iPhone, keyboard and autocomplete bar: 46% of the height in portrait.
+  return innerHeight * (innerHeight > innerWidth ? 0.55 : 0.8);
+}
+
+/** Space (px) between the focused field and the keyboard. */
+const REVEAL_MARGIN = 16;
+
+/**
+ * The keyboard opened or closed. Open: remember its height, and if it
+ * covers the focused field (the guess of `onTouchEnd` was wrong), scroll the
+ * page down so that the field shows. Only down, as with the #71 lock: the
+ * drawer moves up with the visual viewport. Closed: put the page back.
+ */
 const onViewportResize = (): void => {
-  if (!pinned || keyboardOpen()) return;
-  restorePinned();
+  if (!pinned) return;
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const covered = window.innerHeight - viewport.height * viewport.scale;
+  if (covered > 1) {
+    keyboardHeight = covered;
+    const active = document.activeElement;
+    if (isTypingField(active)) {
+      const { bottom } = active.getBoundingClientRect();
+      const visible = viewport.offsetTop + viewport.height;
+      const delta = bottom + REVEAL_MARGIN - visible;
+      if (delta > 0) {
+        window.scrollBy({ top: Math.min(delta, covered), behavior: 'instant' });
+      }
+    }
+    return;
+  }
+  if (!keyboardOpen()) restorePinned();
 };
 
 /**
  * Focus left a field in a drawer, and not for another one: put the page back
- * at once, as iOS does with the #71 lock, and not only once the keyboard
- * has closed.
+ * at once, as iOS does with the #71 lock.
  */
 const onFocusOut = (): void => {
   // `activeElement` is the new focus only after the focusout.
@@ -158,9 +211,66 @@ const onFocusOut = (): void => {
   }, 0);
 };
 
+/** Where the current touch started (overflow lock). */
+let touchStart: { x: number; y: number } | undefined;
+
 const onTouchStart = (event: TouchEvent): void => {
   const touch = event.touches[0];
   lastTouch = touch ? { x: touch.clientX, y: touch.clientY } : undefined;
+  touchStart = event.touches.length === 1 ? lastTouch : undefined;
+};
+
+/**
+ * A tap on a text field in a drawer that the keyboard will not cover: focus
+ * it without the scroll of iOS.
+ *
+ * iOS shows a focused field by scrolling the visual viewport (and `scrollY`)
+ * so that the field is in the middle of the part that the keyboard doesn't
+ * cover. The fixed drawer moves with it. With the #71 lock (a fixed
+ * `<body>`) the page can only scroll from 0 down to the keyboard height, so
+ * iOS can only scroll down: when the field is high in the drawer (at full
+ * height), nothing moves. With this lock the page is tall, so iOS also
+ * scrolls up (49px in the simulator): the page and the drawer jump, and
+ * jump back when the keyboard closes (#116).
+ *
+ * Thus when the field will be above the keyboard (`predictedKeyboardHeight`),
+ * the tap's default (focus and that scroll) is cancelled, and the field gets
+ * `focus({ preventScroll: true })`: iOS then doesn't scroll at all. Else iOS
+ * does its own scroll, down, as with the #71 lock. A wrong guess is fixed
+ * when the keyboard opens (`onViewportResize`).
+ *
+ * Only `<input>` and `<textarea>`, not a field that has focus, and not after
+ * the finger moved (a swipe). The caret goes where `focus()` puts it, not
+ * under the finger.
+ */
+const onTouchEnd = (event: TouchEvent): void => {
+  const start = touchStart;
+  touchStart = undefined;
+  const target = event.target;
+  const touch = event.changedTouches[0];
+  if (
+    !pinned ||
+    !start ||
+    !touch ||
+    !event.cancelable ||
+    !(
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement
+    ) ||
+    !isTypingField(target) ||
+    target === document.activeElement ||
+    Math.abs(touch.clientX - start.x) > 10 ||
+    Math.abs(touch.clientY - start.y) > 10
+  ) {
+    return;
+  }
+  const viewport = window.visualViewport;
+  const top = viewport?.offsetTop ?? 0;
+  const visible = top + window.innerHeight - predictedKeyboardHeight();
+  const { bottom } = target.getBoundingClientRect();
+  if (bottom + REVEAL_MARGIN > visible) return;
+  event.preventDefault();
+  target.focus({ preventScroll: true });
 };
 
 function canScroll(element: Element, dx: number, dy: number): boolean {
@@ -243,6 +353,7 @@ function lock(): Saved {
     window.visualViewport?.addEventListener('resize', onViewportResize);
     document.addEventListener('focusout', onFocusOut);
     document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchend', onTouchEnd, { passive: false });
     document.addEventListener('touchmove', onTouchMoveOverflow, {
       passive: false,
     });
@@ -272,8 +383,10 @@ function unlock(state: Saved): void {
     window.visualViewport?.removeEventListener('resize', onViewportResize);
     document.removeEventListener('focusout', onFocusOut);
     document.removeEventListener('touchstart', onTouchStart);
+    document.removeEventListener('touchend', onTouchEnd);
     document.removeEventListener('touchmove', onTouchMoveOverflow);
     lastTouch = undefined;
+    touchStart = undefined;
     pinned = undefined;
     body.style.overflow = overflow.bodyOverflow;
     html.style.overscrollBehavior = overflow.htmlOverscroll;

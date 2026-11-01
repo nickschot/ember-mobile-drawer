@@ -63,6 +63,7 @@ function logSample(page: number, tag = 'raf'): void {
     `tray=${r(trayRect?.top)}..${r(trayRect?.bottom)}`,
     `field=${r(fieldRect?.top)}..${r(fieldRect?.bottom)}`,
     `focus=${document.activeElement?.tagName ?? '-'}`,
+    `body=${document.body.style.position || 'static'}`,
   ].join(' ');
   if (tag === 'raf') {
     if (sample === lastSample) return;

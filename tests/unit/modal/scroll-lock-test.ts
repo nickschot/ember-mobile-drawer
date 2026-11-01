@@ -140,6 +140,52 @@ module(
       window.scrollTo({ top: start, behavior: 'instant' });
     });
 
+    test('a tap on a field above the keyboard focuses it without the scroll of iOS', function (assert) {
+      tray.style.cssText = 'position: fixed; top: 0; left: 0; right: 0;';
+      const high = document.createElement('input');
+      const low = document.createElement('input');
+      low.style.cssText = `position: fixed; top: ${window.innerHeight - 30}px;`;
+      tray.prepend(high);
+      tray.append(low);
+      const tap = (target: Element, dy = 0): boolean => {
+        const start = new Touch({
+          identifier: 1,
+          target,
+          clientX: 10,
+          clientY: 10,
+        });
+        const end = new Touch({
+          identifier: 1,
+          target,
+          clientX: 10,
+          clientY: 10 + dy,
+        });
+        target.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [start],
+            changedTouches: [start],
+          }),
+        );
+        const event = new TouchEvent('touchend', {
+          bubbles: true,
+          cancelable: true,
+          changedTouches: [end],
+        });
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const release = lockBodyScroll(tray);
+      assert.false(tap(high, 40), 'a swipe is left alone');
+      assert.notStrictEqual(document.activeElement, high);
+      assert.true(tap(high), 'high field: the default is cancelled');
+      assert.strictEqual(document.activeElement, high, '…and it has focus');
+      high.blur();
+      assert.false(tap(low), 'low field: iOS scrolls, as with the #71 lock');
+      release();
+      assert.false(tap(high), 'no lock: left alone');
+    });
+
     test('the default iOS lock still fixes <body>', function (assert) {
       delete drawerEnvironment.iosScrollLock;
       const release = lockBodyScroll(tray);
