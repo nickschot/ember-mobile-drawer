@@ -549,6 +549,109 @@ module('Integration | themes/ios.css', function (hooks) {
     }
   }
 
+  for (const placement of ['bottom', 'top'] as const) {
+    test(`${placement}: with side safe areas the strip and its rim span the full tray width`, async function (assert) {
+      // env(safe-area-inset-*) can't be set in a test. Simulate side safe
+      // areas: the content padding they give, and the theme's copies of them.
+      styles.push(
+        addStyles(`
+          .mobile-drawer-theme-ios {
+            --_mobile-drawer-ios-inset-left: 20px;
+            --_mobile-drawer-ios-inset-right: 30px;
+          }
+          .mobile-drawer__content { padding-left: 20px; padding-right: 30px; }
+        `),
+      );
+      await renderDrawer({ placement, tall: true, expanded: true });
+      finishTransitions();
+
+      const tray = el('[data-test-tray]');
+      tray.style.scrollbarWidth = 'none';
+      const grabber = el('[data-test-grabber]');
+      const t = tray.getBoundingClientRect();
+      const g = grabber.getBoundingClientRect();
+      assert.true(
+        Math.abs(g.left - t.left) < 1 && Math.abs(t.right - g.right) < 1,
+        `the strip is as wide as the tray (${g.left - t.left}, ${t.right - g.right})`,
+      );
+      const strip = getComputedStyle(grabber);
+      assert.strictEqual(strip.paddingLeft, '20px', 'bar clear of the left');
+      assert.strictEqual(strip.paddingRight, '30px', 'bar clear of the right');
+      assert.strictEqual(
+        parseFloat(getComputedStyle(grabber, '::after').width),
+        tray.clientWidth,
+        'the rim box is as wide as the tray',
+      );
+    });
+
+    test(`${placement}: with padding on the tray's leading edge, a negative offset on the grabber removes the gap`, async function (assert) {
+      const side = placement === 'bottom' ? 'top' : 'bottom';
+      // The app fix from the README "Grabber strip limits".
+      styles.push(
+        addStyles(`
+          [data-test-tray] { padding-${side}: 16px; }
+          .mobile-drawer-theme-ios__grabber { ${side}: -16px; }
+        `),
+      );
+      await renderDrawer({ placement, tall: true, expanded: true });
+      const tray = el('[data-test-tray]');
+      const grabber = el('[data-test-grabber]');
+      tray.style.scrollbarWidth = 'none';
+      const max = tray.scrollHeight - tray.clientHeight;
+      // Tests render at a scale; gaps in CSS px.
+      const scale = tray.getBoundingClientRect().height / tray.offsetHeight;
+      const gap = () => {
+        const t = tray.getBoundingClientRect();
+        const g = grabber.getBoundingClientRect();
+        return (side === 'top' ? g.top - t.top : t.bottom - g.bottom) / scale;
+      };
+
+      // At the scroll start (the top of a bottom drawer, the end of a top
+      // drawer) the grabber is below the padding, as the app wants.
+      tray.scrollTop = placement === 'bottom' ? 0 : max;
+      assert.true(Math.abs(gap() - 16) < 1, `at rest: ${gap()}px`);
+      // Scrolled: it sticks at the tray edge, no gap above it.
+      tray.scrollTop = Math.round(max / 2);
+      assert.true(Math.abs(gap()) < 1, `scrolled: ${gap()}px`);
+    });
+  }
+
+  test('the rim over the strip is only drawn where the strip is opaque', function (assert) {
+    // Without relative colours the expanded strip is translucent: the tray
+    // rim shows through it, and a second rim would make it brighter.
+    const found: { selector: string; inSupports: boolean }[] = [];
+    const visit = (rules: CSSRuleList, inSupports: boolean) => {
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSStyleRule &&
+          rule.selectorText.includes('mobile-drawer-theme-ios__grabber') &&
+          rule.selectorText.includes('::after') &&
+          rule.style.getPropertyValue('box-shadow') !== ''
+        ) {
+          found.push({ selector: rule.selectorText, inSupports });
+        }
+        if (rule instanceof CSSGroupingRule) {
+          visit(
+            rule.cssRules,
+            inSupports ||
+              (rule instanceof CSSSupportsRule &&
+                rule.conditionText.includes('rgb(from light-dark(')),
+          );
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      visit(sheet.cssRules, false);
+    }
+    assert.true(found.length > 0, 'the theme draws a rim on the strip');
+    for (const { selector, inSupports } of found) {
+      assert.true(
+        inSupports,
+        `inside the relative colour @supports: ${selector}`,
+      );
+    }
+  });
+
   test('below the highest snap point the strip draws no second rim', async function (assert) {
     await renderDrawer({ tall: true });
     assert.true(
