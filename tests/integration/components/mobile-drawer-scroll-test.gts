@@ -208,6 +208,10 @@ class State {
   @tracked nested = false;
   /** Size of a block after the nested scrollers, in px. */
   @tracked filler = 0;
+  /** Renders a non-modal drawer with a handle inside the drawer. */
+  @tracked innerDrawer = false;
+  /** Renders a text input and a marked scroll element in the handle. */
+  @tracked handleContent = false;
   changes: number[] = [];
 
   onChange = (index: number) => {
@@ -221,6 +225,8 @@ const containerStyle = htmlSafe(
 );
 const sizeStyle = (size: number) =>
   htmlSafe(`width: ${size}px; height: ${size}px`);
+const innerStyle = htmlSafe('position: relative; width: 300px; height: 300px');
+const innerSnapPoints: SnapPoint[] = [0, '100%'];
 const scrollerStyle = htmlSafe(
   'width: 300px; height: 150px; overflow: auto; overscroll-behavior: contain',
 );
@@ -243,7 +249,41 @@ async function renderDrawer(state: State) {
             style="width: 40px; height: 40px"
             data-test-handle
             {{drawer.handle}}
-          ></div>
+          >
+            {{#if state.handleContent}}
+              <input
+                style="width: 30px; height: 10px"
+                aria-label="Field"
+                data-test-handle-field
+              />
+              <div
+                style="width: 30px; height: 20px; overflow: auto"
+                data-mobile-drawer-scroll
+                data-test-handle-scroller
+              >
+                <div style="height: 100px"></div>
+              </div>
+            {{/if}}
+          </div>
+          {{#if state.innerDrawer}}
+            <div style={{innerStyle}}>
+              <MobileDrawer
+                @modal={{false}}
+                @snapPoints={{innerSnapPoints}}
+                @activeSnapPoint={{1}}
+                style="position: absolute"
+                data-test-inner
+                as |inner|
+              >
+                <div
+                  style="width: 40px; height: 40px"
+                  data-test-inner-handle
+                  {{inner.handle}}
+                ></div>
+                <output data-test-inner-dragging>{{inner.isDragging}}</output>
+              </MobileDrawer>
+            </div>
+          {{/if}}
           {{#if state.nested}}
             <div
               style={{scrollerStyle}}
@@ -1121,9 +1161,13 @@ module(
       const handle = await gesture(el('[data-test-handle]'), 'down', 30);
       assert.true(handle.dragging, 'the handle drags');
       assert.true(handle.shift < -80, `(${handle.shift})`);
+      assert.true(
+        handle.prevented.every(Boolean),
+        'the handle cancels its touchmoves',
+      );
     });
 
-    test('pan() still drags from the scroll start', async function (assert) {
+    test('pan() drags from a handle, also with scrolled content', async function (assert) {
       const state = new State();
       await renderDrawer(state);
       scrollTo(tray(), 'bottom', 'start');
@@ -1152,7 +1196,148 @@ module(
       } finally {
         document.removeEventListener('pointermove', recordAgain);
       }
-      assert.strictEqual(moved, 0, 'scrolled content: no drag');
+      assert.true(moved < -5, `scrolled content: drags (${moved})`);
+    });
+
+    for (const placement of PLACEMENTS) {
+      const axisPan = vertical(placement) ? 'pan-x' : 'pan-y';
+
+      test(`${placement}: without @handleOnly a handle drags at the highest snap point with scrolled content`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        assert.strictEqual(
+          el('[data-test-handle]').style.touchAction,
+          axisPan,
+          'the browser does not pan along the axis on the handle',
+        );
+        assert.strictEqual(tray().style.touchAction, 'pan-x pan-y');
+        scrollTo(tray(), placement, 'middle');
+        const scrolled = scrollPosition(tray(), placement);
+
+        const content = await gesture(
+          el('[data-test-content]'),
+          CLOSING[placement],
+          30,
+        );
+        assert.false(content.dragging, 'the content scrolls');
+        assert.false(content.prevented.some(Boolean));
+
+        const opening = await gesture(
+          el('[data-test-handle]'),
+          OPENING[placement],
+          30,
+        );
+        assert.true(opening.dragging, 'the handle drags towards open');
+        assert.true(
+          opening.shift > 0 && opening.shift < 24,
+          `rubber-bands (${opening.shift})`,
+        );
+        assert.true(
+          opening.prevented.length > 0 && opening.prevented.every(Boolean),
+          'every touchmove is cancelled, so the content does not scroll',
+        );
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(state.changes, [], 'back at the highest snap point');
+        assert.strictEqual(
+          scrollPosition(tray(), placement),
+          scrolled,
+          'the scroll position is kept',
+        );
+
+        const closing = await gesture(
+          el('[data-test-handle]'),
+          CLOSING[placement],
+          30,
+        );
+        assert.true(closing.dragging, 'the handle drags towards close');
+        assert.true(closing.shift < -80, `the tray follows (${closing.shift})`);
+        assert.true(
+          closing.prevented.length > 0 && closing.prevented.every(Boolean),
+          'every touchmove is cancelled',
+        );
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(state.changes, [1], 'settles lower');
+      });
+
+      test(`${placement}: with @handleOnly a handle still drags at the highest snap point with scrolled content`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        state.handleOnly = true;
+        await renderDrawer(state);
+        assert.strictEqual(el('[data-test-handle]').style.touchAction, axisPan);
+        assert.strictEqual(tray().style.touchAction, '');
+        scrollTo(tray(), placement, 'middle');
+
+        const content = await gesture(
+          el('[data-test-content]'),
+          CLOSING[placement],
+          30,
+        );
+        assert.false(content.dragging, 'the content does not drag');
+
+        const handle = await gesture(
+          el('[data-test-handle]'),
+          CLOSING[placement],
+          30,
+        );
+        assert.true(handle.dragging, 'the handle drags');
+        assert.true(handle.shift < -80, `(${handle.shift})`);
+        assert.true(
+          handle.prevented.length > 0 && handle.prevented.every(Boolean),
+          'every touchmove is cancelled, so the content does not scroll',
+        );
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(state.changes, [1]);
+      });
+    }
+
+    for (const handleOnly of [false, true]) {
+      const mode = handleOnly ? 'with @handleOnly' : 'without @handleOnly';
+
+      test(`${mode}: a text field in a handle is not part of the handle`, async function (assert) {
+        const state = new State();
+        state.handleOnly = handleOnly;
+        state.handleContent = true;
+        await renderDrawer(state);
+        scrollTo(tray(), 'bottom', 'middle');
+
+        const field = await gesture(el('[data-test-handle-field]'), 'down', 30);
+        assert.false(field.dragging, 'the field does not drag');
+        assert.false(
+          field.prevented.some(Boolean),
+          'its touchmoves are left to the browser',
+        );
+
+        el('[data-test-handle-scroller]').scrollTop = 40;
+        assert.strictEqual(el('[data-test-handle-scroller]').scrollTop, 40);
+        const scroller = await gesture(
+          el('[data-test-handle-scroller]'),
+          'down',
+          30,
+        );
+        assert.true(scroller.dragging, 'a scroll element in a handle drags');
+        assert.true(scroller.prevented.every(Boolean));
+      });
+    }
+
+    test('a handle of a nested drawer does not drag the outer drawer', async function (assert) {
+      const state = new State();
+      state.innerDrawer = true;
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      const scrolled = tray().scrollTop;
+
+      const result = await gesture(el('[data-test-inner-handle]'), 'down', 30);
+      assert.false(result.dragging, 'the outer drawer does not drag');
+      assert.strictEqual(result.shift, 0, 'the outer tray stays');
+      assert.strictEqual(tray().scrollTop, scrolled);
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, []);
     });
   },
 );

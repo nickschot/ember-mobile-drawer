@@ -711,12 +711,12 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     );
     assert.strictEqual(
       el('[data-test-handle]').style.touchAction,
-      '',
-      'the handle is a plain element',
+      'pan-x',
+      'the handle still drags',
     );
   });
 
-  test('without @handleOnly a handle is part of the tray', async function (assert) {
+  test('without @handleOnly a handle moves the drawer once', async function (assert) {
     const state = new State();
     await renderDrawer(state);
     let last = 400;
@@ -729,6 +729,31 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
       near(last, 400 - movedAtLastMove(40)),
       `follows the finger once (${last})`,
     );
+  });
+
+  test('toggling @handleOnly during a handle drag settles or keeps the drag', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+
+    let toggled = false;
+    await onEveryMove(
+      () => {
+        if (!toggled && openOffset('bottom') < 395) {
+          toggled = true;
+          state.handleOnly = true;
+        }
+      },
+      () => pan('[data-test-handle]', 'down'),
+    );
+    await settled();
+    assert.true(toggled, 'toggled mid-drag');
+    assert.dom('[data-test-dragging]').hasText('false', 'not stuck dragging');
+    clock.runUntilIdle();
+    await settled();
+    assert.strictEqual(openOffset('bottom'), 400, 'settled on a snap point');
+
+    await pan('[data-test-handle]', 'down');
+    assert.true(openOffset('bottom') < 400, 'the handle drags again');
   });
 
   test('mouse input does not drag', async function (assert) {

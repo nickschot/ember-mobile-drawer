@@ -34,15 +34,22 @@ export interface MobileDrawerApi {
    */
   activeSnapPoint: number;
   /**
-   * Makes an element a drag handle when the drawer has `@handleOnly={{true}}`:
-   * dragging then only starts on handles, so the rest of the tray keeps its
-   * native touch behaviour (e.g. scrolling). Without `@handleOnly` the whole
-   * tray drags and this modifier does nothing, so a handle can be marked up
-   * either way.
+   * Makes an element a drag handle: a gesture that starts on it always
+   * drags the drawer and never scrolls the content, at every snap point,
+   * also when the content is scrolled. Use it on a grabber or a sticky
+   * header. The element gets `touch-action: pan-x` (`pan-y` for `left` and
+   * `right`). Taps on buttons in it still work. The handle wins over the
+   * elements in it (also a `data-mobile-drawer-scroll` element), except a
+   * text field, so keep handles small.
+   *
+   * Without `@handleOnly` the rest of the tray drags too (and scrolls where
+   * the content can scroll). With `@handleOnly={{true}}` dragging only
+   * starts on handles, so the rest of the tray keeps its native touch
+   * behaviour (e.g. scrolling).
    *
    * ```gts
-   * <MobileDrawer @handleOnly={{true}} as |drawer|>
-   *   <div class="grabber" {{drawer.handle}}></div>
+   * <MobileDrawer as |drawer|>
+   *   <header class="sheet-header" {{drawer.handle}}>...</header>
    * </MobileDrawer>
    * ```
    */

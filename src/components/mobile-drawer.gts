@@ -230,10 +230,12 @@ export interface MobileDrawerSignature {
     /**
      * Only start a drag on elements with the yielded `handle` modifier,
      * instead of anywhere on the tray. Use it when the content has its own
-     * gestures. Either way the content only scrolls along the axis at the
-     * highest snap point; without it, scrollable content (the tray and
-     * elements marked `data-mobile-drawer-scroll`) scrolls there and drags
-     * elsewhere, see the class docs. Default `false`.
+     * gestures. Without it, the tray drags too, and a handle is an area that
+     * always drags (also when the content is scrolled). Either way the
+     * content only scrolls along the axis at the highest snap point;
+     * without it, scrollable content (the tray and elements marked
+     * `data-mobile-drawer-scroll`) scrolls there and drags elsewhere, see
+     * the class docs. Default `false`.
      */
     handleOnly?: boolean;
     /**
@@ -395,6 +397,19 @@ function isEditable(element: Element): boolean {
   );
 }
 
+/**
+ * Whether `element` is a field that takes text: a text `<input>` (not
+ * `disabled`), a `<textarea>` or contenteditable content. Unlike
+ * `isEditable`, `readonly` fields count: their text can still be selected.
+ */
+function isTextField(element: Element): boolean {
+  if (element instanceof HTMLInputElement) {
+    return !element.disabled && !NON_TEXT_INPUTS.has(element.type);
+  }
+  if (element instanceof HTMLTextAreaElement) return !element.disabled;
+  return element instanceof HTMLElement && element.isContentEditable;
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
@@ -415,8 +430,8 @@ const clampIndex = (index: number, count: number) =>
  * release would carry the drawer is picked; a release faster than
  * `FLING_VELOCITY` always moves at least one snap point its way. A touch
  * holds a running animation where it is, and a drag continues from there.
- * With `@handleOnly`, only elements with the yielded `handle` modifier start
- * a drag. One finger drags at a time.
+ * Elements with the yielded `handle` modifier always drag, see below. With
+ * `@handleOnly`, only they start a drag. One finger drags at a time.
  *
  * Scroll vs drag: the tray is a scroll container, as is every element in it
  * marked with `data-mobile-drawer-scroll`. Each touch gesture is decided
@@ -436,11 +451,28 @@ const clampIndex = (index: number, count: number) =>
  * at it, but iOS Safari doesn't reliably honour `touch-action` on a scroll
  * container, so nothing relies on it alone. Touchmoves are only cancelled
  * once a gesture is decided, so swipes across the axis (a carousel, a list
- * in a side drawer) keep working. Handles always drag and keep `didPan`'s
- * `touch-action`. With `@handleOnly` the content is locked below the
- * highest snap point too, so it only scrolls when the drawer is fully open,
- * and swipes along the axis on it are cancelled there without dragging
- * (see `#onTrayTouchMove`), so the page behind doesn't scroll instead.
+ * in a side drawer) keep working.
+ *
+ * Handles: an element with the `handle` modifier is a drag source of its
+ * own, with `didPan`'s `touch-action` (`pan-x` for a vertical axis, `pan-y`
+ * for a horizontal one), so the browser doesn't pan along the axis on it. A
+ * gesture that starts on a handle always drags, at every snap point, also
+ * when the content is scrolled (see `#onHandle`): a sticky header with the
+ * modifier stays a way to drag a scrolled sheet. The handle's drag source
+ * decides such a gesture as a drag like the tray's does (`shouldHandleDrag`),
+ * so it cancels the touchmoves, also with `@handleOnly`. Without
+ * `@handleOnly` the tray's drag source decides it as a drag too
+ * (`shouldDrag`); whichever of the two recognises the pan first owns the
+ * drag, and the other is ignored. A handle wins over everything in it, also
+ * a `data-mobile-drawer-scroll` element, except a text field (see
+ * `#onHandle`). A handle belongs to the drawer that yielded it, not to a
+ * drawer around that one. A tap on an element in a handle (a button) still
+ * clicks.
+ *
+ * With `@handleOnly` the content is locked below the highest snap point
+ * too, so it only scrolls when the drawer is fully open, and swipes along
+ * the axis on it are cancelled there without dragging (see
+ * `#onTrayTouchMove`), so the page behind doesn't scroll instead.
  * When a bottom or top drawer leaves its highest snap point, its tray
  * scrolls back to its scroll start, the content start at the leading edge;
  * at the highest snap point it opens at `scrollTop` 0 (see
@@ -571,6 +603,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     cancels?: boolean;
     far: boolean;
   };
+  /**
+   * The elements with the yielded `handle` modifier, see `#onHandle`.
+   */
+  #handles = new Set<HTMLElement>();
   /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
   /**
@@ -1950,14 +1986,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Decides whether a gesture on the tray drags the drawer or scrolls (see
-   * the class docs). Called once per gesture, after a touch on a moving
-   * drawer has held it.
+   * the class docs). A gesture that starts on a handle always drags. Called
+   * once per gesture, after a touch on a moving drawer has held it.
    */
   private shouldDrag = (movement: number, target: Element | null): boolean => {
     const layout = this.#layout;
     const tray = this.#tray;
     if (!layout || !tray) return true;
     if (this.#renderedOffset < layout.maxOffset - EPSILON) return true;
+    if (this.#onHandle(target)) return true;
     const vertical = this.axis === 'vertical';
     for (
       let element = target instanceof Element ? target : tray;
@@ -1973,6 +2010,44 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (element === tray) break;
     }
     return true;
+  };
+
+  /**
+   * Whether `target` is in one of this drawer's handles (not a nested
+   * drawer's). A gesture that starts there always drags. A text field in a
+   * handle (see `isTextField`) is not part of it, so text selection in it
+   * keeps working: without `@handleOnly` a gesture there follows the rules
+   * of the rest of the tray, with it a gesture there doesn't drag.
+   */
+  #onHandle(target: Element | null): boolean {
+    const tray = this.#tray;
+    for (
+      let element = target;
+      element && element !== tray && tray?.contains(element);
+      element = element.parentElement
+    ) {
+      if (isTextField(element)) return false;
+      if (this.#handles.has(element as HTMLElement)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The handles' `shouldDrag`: a gesture on a handle drags (see
+   * `#onHandle`). With it the handle's drag source also cancels the
+   * touchmoves of a drag, so the browser can't scroll the tray under it,
+   * also with `@handleOnly`, where the tray isn't a drag source.
+   */
+  private shouldHandleDrag = (_movement: number, target: Element | null) =>
+    this.#onHandle(target);
+
+  private onHandleInstall = (element: HTMLElement): void => {
+    this.#handles.add(element);
+  };
+
+  private onHandleTeardown = (element: HTMLElement): void => {
+    this.#handles.delete(element);
+    this.onDragSourceTeardown(element);
   };
 
   /**
@@ -2179,9 +2254,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * The pan modifier of `source` was torn down (its element removed, or
-   * `@handleOnly` changed). If it owned the drag, its pointer events won't
-   * arrive any more: settle from where the drawer is, as on `pointercancel`.
+   * The pan modifier of `source` was torn down (its element removed, or,
+   * for the tray, `@handleOnly` changed). If it owned the drag, its pointer
+   * events won't arrive any more: settle from where the drawer is, as on
+   * `pointercancel`.
    * Teardown happens during rendering, so the release waits for a microtask.
    */
   private onDragSourceTeardown = (source: HTMLElement): void => {
@@ -2314,19 +2390,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
               open=this.open
               close=this.close
               activeSnapPoint=this.activeSnapPoint
-              handle=(if
-                this.handleOnly
-                (modifier
-                  dragSource
-                  axis=this.axis
-                  pointerTypes=POINTER_TYPES
-                  onPointerDown=this.onPointerDown
-                  onPanStart=this.onPanStart
-                  onPan=this.onPan
-                  onPanEnd=this.onPanEnd
-                  onTeardown=this.onDragSourceTeardown
-                )
-                noop
+              handle=(modifier
+                dragSource
+                axis=this.axis
+                pointerTypes=POINTER_TYPES
+                onPointerDown=this.onPointerDown
+                onPanStart=this.onPanStart
+                onPan=this.onPan
+                onPanEnd=this.onPanEnd
+                onInstall=this.onHandleInstall
+                shouldDrag=this.shouldHandleDrag
+                onTeardown=this.onHandleTeardown
               )
               isDragging=this.isDragging
               isAnimating=this.isAnimating
