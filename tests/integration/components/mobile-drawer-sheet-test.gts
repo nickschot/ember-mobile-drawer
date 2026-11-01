@@ -142,9 +142,18 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
       .exists({ count: 1 });
     assert
       .dom('[data-test-drawer] > .mobile-drawer__sheet > *')
-      .exists({ count: 1 }, 'only the tray is in it');
+      .exists({ count: 2 }, 'only the glass layer and the tray are in it');
     assert.strictEqual(getComputedStyle(sheet()).pointerEvents, 'none');
     assert.strictEqual(getComputedStyle(tray()).pointerEvents, 'auto');
+    const glass = sheet().firstElementChild!;
+    assert.dom(glass).hasClass('mobile-drawer__glass', 'the glass layer first');
+    assert.dom(glass).hasAttribute('aria-hidden', 'true');
+    assert.strictEqual(
+      getComputedStyle(glass).display,
+      'none',
+      'the base styles hide the glass layer',
+    );
+    assert.strictEqual(getComputedStyle(glass).pointerEvents, 'none');
   });
 
   test('the expand progress is 0 up to the second-highest snap point, 1 at the highest, and linear in between', async function (assert) {

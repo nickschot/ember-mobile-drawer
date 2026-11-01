@@ -25,7 +25,7 @@
  * doesn't clip it), a child of `<html>`, so that a fixed `<body>` (the iOS
  * scroll lock) doesn't contain it, from the bottom of the root to the
  * bottom of the screen, with the tray's background colour and backdrop
- * filter. It doesn't take pointer events and is hidden from assistive
+ * filter (or the glass layer's, see `glass`). It doesn't take pointer events and is hidden from assistive
  * technology. While it shows, the root gets `data-keyboard`, so the
  * floating sheet goes to the edges and the bottom of the root and meets
  * it (see styles.css). It changes nothing that is in the drawer: the field
@@ -57,6 +57,15 @@
  * @internal
  */
 
+/** A computed `backdrop-filter`, also where only the prefixed one is set. */
+function backdropFilterOf(style: CSSStyleDeclaration): string {
+  return (
+    style.backdropFilter ||
+    style.getPropertyValue('-webkit-backdrop-filter') ||
+    'none'
+  );
+}
+
 /** The class of the fill element, a child of `<html>`. */
 export const KEYBOARD_FILL_CLASS = 'mobile-drawer-keyboard-fill';
 /** On the drawer's root while the fill shows. */
@@ -72,6 +81,12 @@ export type ViewportLike = Pick<
 export interface KeyboardFillOptions {
   root: HTMLElement;
   tray: HTMLElement;
+  /**
+   * The sheet's `.mobile-drawer__glass` layer, if any. A theme may put the
+   * tray's blur on it (see styles.css); the fill then takes the blur from
+   * it.
+   */
+  glass?: HTMLElement;
   /** The visual viewport, or `null` where there is none. */
   viewport: ViewportLike | null;
   /** Whether the drawer can need the fill now: open, from the bottom. */
@@ -205,10 +220,12 @@ export class KeyboardFill {
     const tray = getComputedStyle(this.#options.tray);
     const { style } = element;
     style.backgroundColor = tray.backgroundColor;
-    const filter =
-      tray.backdropFilter ||
-      tray.getPropertyValue('-webkit-backdrop-filter') ||
-      'none';
+    let filter = backdropFilterOf(tray);
+    // The theme's blur may be on the glass layer under the tray instead.
+    if (filter === 'none' && this.#options.glass) {
+      const glass = getComputedStyle(this.#options.glass);
+      if (glass.display !== 'none') filter = backdropFilterOf(glass);
+    }
     style.setProperty('backdrop-filter', filter);
     style.setProperty('-webkit-backdrop-filter', filter);
     style.zIndex = getComputedStyle(this.#options.root).zIndex;

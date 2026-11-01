@@ -701,7 +701,9 @@ const clampIndex = (index: number, count: number) =>
  * the sheet and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
  * after the backdrop (for the iOS Safari 26 bars, see styles.css), and a
  * `.mobile-drawer__shadow` before the sheet, for a theme's outer shadow of
- * a floating bottom sheet (see `#paintShadow`).
+ * a floating bottom sheet (see `#paintShadow`), and an empty
+ * `.mobile-drawer__glass` in the sheet before the tray, for a theme's
+ * `backdrop-filter` on a floating bottom sheet (see `#paintShadow`).
  * Attributes are applied to the root element.
  *
  * Sheet: the sheet clips the tray. Every frame the component writes the
@@ -816,6 +818,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #shadow?: HTMLElement;
   /** The `.mobile-drawer__shadow-body` in it, see `#paintShadow`. */
   #shadowBody?: HTMLElement;
+  /** The sheet's `.mobile-drawer__glass` child, see `#paintShadow`. */
+  #glass?: HTMLElement;
   /**
    * The sheet's colour below the root while an on-screen keyboard is open
    * in iOS Safari, see `KeyboardFill`.
@@ -1170,6 +1174,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#shadow?.querySelector<HTMLElement>(
           '.mobile-drawer__shadow-body',
         ) ?? undefined;
+      this.#glass =
+        this.#sheet.querySelector<HTMLElement>(
+          ':scope > .mobile-drawer__glass',
+        ) ?? undefined;
       this.#content = this.#tray.querySelector<HTMLElement>(
         ':scope > .mobile-drawer__content',
       )!;
@@ -1239,6 +1247,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#keyboardFill = new KeyboardFill({
         root,
         tray,
+        glass: this.#glass,
         viewport: drawerEnvironment.visualViewport
           ? drawerEnvironment.visualViewport()
           : (window.visualViewport ?? null),
@@ -1391,11 +1400,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
 
     this.#layout = { resolved, container, trayLength, maxOffset };
-    // The shadow layer has the tray's length (bottom sheets only).
-    if (this.#shadow) {
-      this.#shadow.style.height =
-        this.placement === 'bottom' ? `${trayLength}px` : '';
-    }
+    // The shadow and glass layers have the tray's length (bottom sheets
+    // only).
+    const layerHeight = this.placement === 'bottom' ? `${trayLength}px` : '';
+    if (this.#shadow) this.#shadow.style.height = layerHeight;
+    if (this.#glass) this.#glass.style.height = layerHeight;
     const open = resolved
       .filter((snapPoint) => snapPoint.offset > 0)
       .map((snapPoint) => snapPoint.indices);
@@ -1863,12 +1872,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * (`.mobile-drawer__shadow-body`) gets the opposite transform, so it
    * stays at the sheet's bottom edge while the layer around it moves. Both
    * are transforms only, so a theme's shadow on them is not painted again
-   * while the drawer moves. Only for bottom drawers: the layer is only used
-   * for a floating bottom sheet.
+   * while the drawer moves. The glass layer (`.mobile-drawer__glass`, in
+   * the sheet) gets the tray's `transform` too, so a theme's blur on it
+   * stays under the tray. Only for bottom drawers: the layers are only
+   * used for a floating bottom sheet.
    */
   #paintShadow(transform: string, distance: number): void {
+    if (this.placement !== 'bottom') return;
+    if (this.#glass) this.#glass.style.transform = transform;
     const shadow = this.#shadow;
-    if (!shadow || this.placement !== 'bottom') return;
+    if (!shadow) return;
     shadow.style.transform = transform;
     if (this.#shadowBody) {
       this.#shadowBody.style.transform = `translate3d(0, ${-distance}px, 0)`;
@@ -3671,6 +3684,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         </div>
       </div>
       <div class="mobile-drawer__sheet">
+        <div class="mobile-drawer__glass" aria-hidden="true"></div>
         <div
           class="mobile-drawer__tray"
           tabindex={{if this.isModal "-1"}}

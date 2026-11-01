@@ -21,6 +21,7 @@
  *       </div>
  *     </div>
  *     <div class="mobile-drawer__sheet">
+ *       <div class="mobile-drawer__glass" aria-hidden="true"></div>
  *       <div class="mobile-drawer__tray">
  *         <div class="mobile-drawer__content">...yielded content...</div>
  *       </div>
@@ -254,6 +255,21 @@
  *                           transform, so it stays where it is. The theme
  *                           draws the shadow on these elements (see
  *                           themes/ios.css). Other drawers don't use it.
+ * .mobile-drawer__glass     Empty layer in the sheet, before (under) the
+ *                           tray, for a theme's `backdrop-filter` on a
+ *                           floating bottom sheet (the iOS theme uses it).
+ *                           `display: none` here. Chrome doesn't clip an
+ *                           element's backdrop-filter with its `clip-path`
+ *                           (only with its border box and `border-radius`),
+ *                           so a blur on the tray shows outside the tray's
+ *                           clip at the floating sheet's top corners (#135).
+ *                           This layer has the sheet's width and the tray's
+ *                           top radius, so its own box is the sheet's shape
+ *                           and the blur needs no `clip-path`. For bottom
+ *                           drawers the component gives it the tray's
+ *                           length (an inline `height`) and every frame the
+ *                           tray's inline `transform`. Other drawers don't
+ *                           use it.
  * .mobile-drawer__content   Wraps the yielded content inside the tray and
  *                           carries the safe-area padding (see below) and,
  *                           for top and left, the auto start margin (see the
@@ -563,6 +579,30 @@
     pointer-events: none;
   }
 
+  /*
+   * Only used by a theme, see the header. In the sheet, at the tray's place
+   * (the root's bottom edge, `inset` below the sheet) but with the sheet's
+   * width, so its top corners are at the inset. The sheet clips its bottom
+   * (with the theme's bottom radius). The component writes its height and
+   * the tray's transform; closed until then.
+   */
+  :where(.mobile-drawer__glass) {
+    /* From the sheet, see the @property rule above. */
+    --mobile-drawer-expand-progress: inherit;
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: calc(
+      -1 * var(--mobile-drawer-inset, 0px) *
+        (1 - var(--mobile-drawer-expand-progress))
+    );
+    left: 0;
+    border-radius: var(--mobile-drawer-radius, 0) var(--mobile-drawer-radius, 0)
+      0 0;
+    transform: translate3d(0, 100%, 0);
+    pointer-events: none;
+  }
+
   /* Only used on iOS, see the iOS block at the end. */
   :where(.mobile-drawer__bar-tint, .mobile-drawer__backdrop-tint) {
     display: none;
@@ -615,13 +655,14 @@
   }
 
   /*
-   * Promote the tray to its own layer only while the drawer can move, instead
-   * of keeping a layer around for every closed drawer on the page.
+   * Promote the tray (and the glass layer under it) to its own layer only
+   * while the drawer can move, instead of keeping a layer around for every
+   * closed drawer on the page.
    */
   :where(
     .mobile-drawer:not([data-closed])
       > .mobile-drawer__sheet
-      > .mobile-drawer__tray
+      > :is(.mobile-drawer__tray, .mobile-drawer__glass)
   ) {
     will-change: transform;
   }
@@ -910,6 +951,17 @@
   ) {
     inset: auto 0 0;
     clip-path: none;
+  }
+  :where(
+    .mobile-drawer[data-keyboard]:not(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+      > .mobile-drawer__glass
+  ) {
+    bottom: 0;
   }
   :where(.mobile-drawer__content),
   :where(

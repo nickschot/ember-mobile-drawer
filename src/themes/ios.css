@@ -16,9 +16,10 @@
  * This file does not @import styles.css; apps import both. It doesn't
  * depend on load order, but load it after styles.css anyway. The real
  * properties it sets are `backdrop-filter` and `transition` on the tray and
- * the grabber's and `border-radius` on the sheet, which the base styles
- * don't set, the shadow layer's boxes (see "The shadow"), and `background`
- * on the tray, `box-shadow` on the tray,
+ * the grabber's, `backdrop-filter` on the glass layer of a bottom sheet
+ * (see "Liquid Glass") and `border-radius` on the sheet, which the base
+ * styles don't set, the shadow layer's boxes (see "The shadow"), and
+ * `background` on the tray, `box-shadow` on the tray,
  * `opacity` and `filter` on the backdrop, `background-color` on the bar
  * tint and `background-color` on the backdrop tint, which the base styles
  * also set: those rules have a specificity above zero (see "Overriding"),
@@ -33,7 +34,9 @@
  * Without the class this file changes nothing.
  *
  * .mobile-drawer-theme-ios           Sets the drawer's custom properties and
- *                                    the tray's glass blur.
+ *                                    the glass blur (on the tray, or for a
+ *                                    bottom sheet on the glass layer under
+ *                                    it, see "Liquid Glass").
  * .mobile-drawer-theme-ios__grabber  Optional. A horizontal grabber bar for
  *                                    bottom and top sheets. Put an element
  *                                    with this class directly in the drawer
@@ -565,9 +568,57 @@
       }
     }
 
-    :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
+    :where(.mobile-drawer-theme-ios .mobile-drawer__tray),
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer:not(
+          [data-placement="top"],
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+        > .mobile-drawer__glass
+    ) {
       -webkit-backdrop-filter: blur(30px) saturate(1.8);
       backdrop-filter: blur(30px) saturate(1.8);
+    }
+
+    /*
+     * A bottom sheet: the blur is on the glass layer under the tray (see
+     * styles.css), not on the tray. Chrome doesn't clip a backdrop-filter
+     * with the tray's `clip-path`, so on the tray the blur showed outside
+     * the floating sheet's top corners (#135). The glass layer has the
+     * sheet's shape in its own box (the sheet's sides, the top radius, and
+     * the sheet's clip with the bottom radius), so the blur needs no
+     * `clip-path`. It is in the sheet, not in the tray: in Safari an
+     * ancestor with a `clip-path` is a backdrop root, and a blur in the
+     * tray would show nothing. The tray's tint is over the blur, as before.
+     */
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer:not(
+          [data-placement="top"],
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+        > .mobile-drawer__glass
+    ) {
+      display: block;
+    }
+
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer:not(
+          [data-placement="top"],
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray
+    ) {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
   }
 
@@ -583,7 +634,10 @@
       }
     }
 
-    :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
+    :where(
+      .mobile-drawer-theme-ios .mobile-drawer__tray,
+      .mobile-drawer-theme-ios .mobile-drawer__glass
+    ) {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
@@ -1069,7 +1123,7 @@
       .mobile-drawer-theme-ios
         .mobile-drawer[data-at-highest]
         > .mobile-drawer__sheet
-        > .mobile-drawer__tray
+        > :is(.mobile-drawer__tray, .mobile-drawer__glass)
     ) {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
