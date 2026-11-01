@@ -3,7 +3,7 @@ import { setupRenderingTest } from 'ember-qunit';
 import { render, settled } from '@ember/test-helpers';
 import { tracked } from '@glimmer/tracking';
 import { htmlSafe } from '@ember/template';
-import { MobileDrawer, type SnapPoint } from '#src/index.ts';
+import { MobileDrawer, type Placement, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
@@ -20,6 +20,9 @@ class State {
   @tracked active = 0;
   @tracked modal = true;
   @tracked inner = 0;
+  @tracked placement: Placement = 'bottom';
+  @tracked shown = true;
+  @tracked snapPoints: SnapPoint[] = SNAP_POINTS;
 }
 
 /** Adds CSS to the page for the duration of a test. */
@@ -86,16 +89,19 @@ async function renderDrawer(state: State) {
     <template>
       {{! template-lint-disable no-inline-styles }}
       <div style={{containerStyle}}>
-        <MobileDrawer
-          @snapPoints={{SNAP_POINTS}}
-          @activeSnapPoint={{state.active}}
-          @modal={{state.modal}}
-          aria-label="Sheet"
-          style="position: absolute"
-          data-test-drawer
-        >
-          <p>Sheet</p>
-        </MobileDrawer>
+        {{#if state.shown}}
+          <MobileDrawer
+            @snapPoints={{state.snapPoints}}
+            @activeSnapPoint={{state.active}}
+            @modal={{state.modal}}
+            @placement={{state.placement}}
+            aria-label="Sheet"
+            style="position: absolute"
+            data-test-drawer
+          >
+            <p>Sheet</p>
+          </MobileDrawer>
+        {{/if}}
       </div>
     </template>,
   );
@@ -110,6 +116,10 @@ function matrix(page: HTMLElement): { scale: number; y: number } {
 
 function progress(page: HTMLElement): string {
   return page.style.getPropertyValue('--mobile-drawer-page-progress');
+}
+
+function bodyIsBlack(): boolean {
+  return getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)';
 }
 
 module('Integration | themes/ios.css | page scale', function (hooks) {
@@ -309,6 +319,153 @@ module('Integration | themes/ios.css | page scale', function (hooks) {
     state.active = 0;
     await settled();
     assert.strictEqual(progress(page), '');
+  });
+
+  for (const placement of ['top', 'left', 'right'] as const) {
+    test(`a ${placement} drawer does not drive the page`, async function (assert) {
+      added.push(applyMotion());
+      const page = addPage();
+      added.push(page);
+      const state = new State();
+      state.placement = placement;
+      await renderDrawer(state);
+      state.active = 2;
+      await settled();
+
+      assert.strictEqual(progress(page), '');
+      assert.false(page.hasAttribute('data-mobile-drawer-page-active'));
+      assert.strictEqual(getComputedStyle(page).transform, 'none');
+      assert.false(bodyIsBlack(), 'no black around the page');
+    });
+  }
+
+  test('a bottom drawer that changes to the top while open stops driving the page', async function (assert) {
+    const page = addPage();
+    added.push(page);
+    const state = new State();
+    await renderDrawer(state);
+    state.active = 1;
+    await settled();
+    assert.strictEqual(progress(page), '0.5');
+
+    state.placement = 'top';
+    await settled();
+    assert.strictEqual(progress(page), '');
+  });
+
+  test('the page is marked active only while it is driven', async function (assert) {
+    const page = addPage();
+    added.push(page);
+    const state = new State();
+    await renderDrawer(state);
+    assert.false(page.hasAttribute('data-mobile-drawer-page-active'));
+
+    state.active = 1;
+    await settled();
+    assert.true(page.hasAttribute('data-mobile-drawer-page-active'));
+
+    state.active = 0;
+    await settled();
+    assert.false(page.hasAttribute('data-mobile-drawer-page-active'));
+  });
+
+  test('a page element rendered while a drawer is open follows the drawer from its next move', async function (assert) {
+    const first = addPage();
+    added.push(first);
+    const state = new State();
+    await renderDrawer(state);
+    state.active = 1;
+    await settled();
+    assert.strictEqual(progress(first), '0.5');
+
+    // A route change replaces the page element.
+    first.remove();
+    const second = addPage();
+    added.push(second);
+    await settled();
+
+    state.active = 2;
+    await settled();
+    assert.strictEqual(progress(second), '1', 'the new element follows');
+    assert.strictEqual(
+      progress(first),
+      '',
+      'the detached element is cleared and not kept',
+    );
+    assert.false(first.hasAttribute('data-mobile-drawer-page-active'));
+
+    // Also a second marked element next to one that stays.
+    const third = addPage();
+    added.push(third);
+    await settled();
+    state.active = 1;
+    await settled();
+    assert.strictEqual(progress(second), '0.5');
+    assert.strictEqual(progress(third), '0.5');
+
+    state.active = 0;
+    await settled();
+    assert.strictEqual(progress(second), '');
+    assert.strictEqual(progress(third), '');
+  });
+
+  test('destroying an open drawer leaves the page alone', async function (assert) {
+    added.push(applyMotion());
+    const page = addPage();
+    added.push(page);
+    const state = new State();
+    await renderDrawer(state);
+    state.active = 2;
+    await settled();
+    assert.strictEqual(progress(page), '1');
+
+    state.shown = false;
+    await settled();
+    assert.strictEqual(progress(page), '');
+    assert.strictEqual(
+      page.style.getPropertyValue('--mobile-drawer-page-viewport-top'),
+      '',
+    );
+    assert.false(page.hasAttribute('data-mobile-drawer-page-active'));
+    assert.strictEqual(getComputedStyle(page).transform, 'none');
+    assert.false(bodyIsBlack());
+  });
+
+  test('@modal toggled while open removes and writes the progress again', async function (assert) {
+    const page = addPage();
+    added.push(page);
+    const state = new State();
+    await renderDrawer(state);
+    state.active = 1;
+    await settled();
+    assert.strictEqual(progress(page), '0.5');
+
+    state.modal = false;
+    await settled();
+    assert.strictEqual(progress(page), '', 'non-modal: removed');
+
+    state.modal = true;
+    await settled();
+    assert.strictEqual(progress(page), '0.5', 'modal again: written');
+  });
+
+  test('a modal drawer that rests at a peek does not make <body> black', async function (assert) {
+    added.push(applyMotion());
+    const page = addPage();
+    added.push(page);
+    const state = new State();
+    state.snapPoints = ['20%', '100%'];
+    await renderDrawer(state);
+    await settled();
+
+    const drawer = document.querySelector('[data-test-drawer]')!;
+    assert.false(drawer.hasAttribute('data-closed'), 'the peek shows');
+    assert.strictEqual(progress(page), '');
+    assert.false(bodyIsBlack(), 'not black at the peek');
+
+    state.active = 1;
+    await settled();
+    assert.true(bodyIsBlack(), 'black when open above the peek');
   });
 
   test('reduced motion: every page rule is in a prefers-reduced-motion: no-preference block', function (assert) {

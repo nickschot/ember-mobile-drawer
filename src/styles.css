@@ -175,28 +175,40 @@
  * [data-mobile-drawer-page]  An element of the app (e.g. a wrapper around the
  *                            page) that should follow the modal drawers. It
  *                            must not contain them: a drawer inside it never
- *                            drives it. While a modal drawer outside it is
- *                            open above its smallest snap point, the
- *                            component writes two inline custom properties on
- *                            it, and removes them again when no such drawer
- *                            is open:
+ *                            drives it. Only modal drawers with placement
+ *                            `bottom` drive it; top, left and right drawers
+ *                            and non-modal drawers never do. While such a
+ *                            drawer outside it is open above its smallest
+ *                            snap point, the component writes two inline
+ *                            custom properties and one attribute on it, and
+ *                            removes them again when no such drawer is open:
  *   --mobile-drawer-page-progress      the largest progress of those drawers,
- *                                      above 0 and at most 1, from their
- *                                      smallest snap point (0) to their
- *                                      largest (1). Every frame.
+ *                                      above 0 and at most 1, linear from
+ *                                      their smallest snap point (0) to
+ *                                      their largest (1). Every frame.
  *   --mobile-drawer-page-viewport-top  the top of the viewport in the
  *                                      element, in px: how far it is
  *                                      scrolled out of view at the top.
  *                                      Measured when it starts to follow.
+ *   [data-mobile-drawer-page-active]   present while the properties are
+ *                                      set, for selectors (e.g. on an
+ *                                      ancestor with :has()).
  *                            Marked elements are looked up when the first
- *                            modal drawer starts to open, so an element
- *                            marked while a drawer is open only follows from
- *                            the next opening. These base styles don't use
- *                            either property. Use them without a fallback, so
- *                            a rule only applies while a drawer is open; and
- *                            register them as not inherited (`@property`,
- *                            as the iOS theme does), so the page's content
- *                            isn't styled again on every frame.
+ *                            drawer starts to open, and again after the DOM
+ *                            changes while a drawer is open, so a page
+ *                            element that is rendered while a drawer is open
+ *                            (e.g. after a route change) follows from the
+ *                            next frame of a drawer. These base styles don't
+ *                            use the properties or the attribute. Use the
+ *                            properties without a fallback, so a rule only
+ *                            applies while a drawer is open; and register
+ *                            them as not inherited (`@property`, as the iOS
+ *                            theme does), so the page's content isn't styled
+ *                            again on every frame. Note: when the iOS theme
+ *                            is loaded, its `@property` rules make both
+ *                            properties not inherited for the whole
+ *                            document, so app CSS can't read them on a child
+ *                            of the page element any more.
  *
  * Safe areas: the content element pads with env(safe-area-inset-*) on every
  * side that touches the viewport edge, and the tray never grows under the

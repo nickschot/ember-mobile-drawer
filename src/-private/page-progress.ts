@@ -12,16 +12,25 @@
  *   viewport, `500px` when the page is scrolled down by 500px), measured
  *   when the element was looked up. Body scrolling is locked while a modal
  *   drawer is open, so it doesn't change after that.
- * Otherwise both properties are removed, so styles that use them (with no
- * fallback) don't apply at all, and e.g. a `transform` on the page doesn't
- * change `position: fixed` content in it while no drawer is open.
+ * It also gets the attribute `data-mobile-drawer-page-active` for that time,
+ * for styles that only need to know that the page is behind an open drawer
+ * (e.g. the iOS theme's black `<body>`).
+ * Otherwise the properties and the attribute are removed, so styles that
+ * use the properties (with no fallback) don't apply at all, and e.g. a
+ * `transform` on the page doesn't change `position: fixed` content in it
+ * while no drawer is open.
  *
- * A drawer inside a marked element never drives that element: the page
- * that contains a drawer can't move without moving the drawer.
+ * Only modal drawers from the bottom call this (see the component's
+ * `#render`). A drawer inside a marked element never drives that element:
+ * the page that contains a drawer can't move without moving the drawer.
  *
  * The marked elements are looked up when the first drawer starts to open
  * and kept until no drawer is open, so the document isn't queried on every
- * frame.
+ * frame. While a drawer is open, a `MutationObserver` marks that list as
+ * out of date when elements are added or removed, or an element is marked
+ * or unmarked (e.g. a route change replaces the page wrapper); it is looked
+ * up again on the next update. An element that leaves the list gets its
+ * properties removed.
  *
  * @module
  * @internal
@@ -31,6 +40,8 @@ export const PAGE_ATTRIBUTE = 'data-mobile-drawer-page';
 export const PAGE_PROGRESS_PROPERTY = '--mobile-drawer-page-progress';
 export const PAGE_VIEWPORT_TOP_PROPERTY = '--mobile-drawer-page-viewport-top';
 
+export const PAGE_ACTIVE_ATTRIBUTE = 'data-mobile-drawer-page-active';
+
 interface Page {
   element: HTMLElement;
   /** The value written last; `0` when nothing is written. */
@@ -39,7 +50,56 @@ interface Page {
 
 /** Progress (above 0) by drawer root. */
 const sources = new Map<Element, number>();
+/** The marked elements; `undefined` when they must be looked up again. */
 let pages: Page[] | undefined;
+/** The pages written so far, also while `pages` is out of date. */
+const written = new Map<HTMLElement, Page>();
+let observer: MutationObserver | undefined;
+
+function write(page: Page, progress: number): void {
+  if (progress === page.progress) return;
+  const { element } = page;
+  const { style } = element;
+  if (progress > 0) {
+    if (page.progress === 0) {
+      const top = -element.getBoundingClientRect().top;
+      style.setProperty(PAGE_VIEWPORT_TOP_PROPERTY, `${top}px`);
+      element.setAttribute(PAGE_ACTIVE_ATTRIBUTE, '');
+      written.set(element, page);
+    }
+    style.setProperty(PAGE_PROGRESS_PROPERTY, String(progress));
+  } else {
+    style.removeProperty(PAGE_PROGRESS_PROPERTY);
+    style.removeProperty(PAGE_VIEWPORT_TOP_PROPERTY);
+    element.removeAttribute(PAGE_ACTIVE_ATTRIBUTE);
+    written.delete(element);
+  }
+  page.progress = progress;
+}
+
+/** Looks up the marked elements, and clears those that are no longer. */
+function findPages(): Page[] {
+  const found = Array.from(
+    document.querySelectorAll<HTMLElement>(`[${PAGE_ATTRIBUTE}]`),
+    (element) => written.get(element) ?? { element, progress: 0 },
+  );
+  for (const page of Array.from(written.values())) {
+    if (!found.includes(page)) write(page, 0);
+  }
+  return found;
+}
+
+function observe(): void {
+  if (observer || typeof MutationObserver === 'undefined') return;
+  observer = new MutationObserver(() => {
+    pages = undefined;
+  });
+  observer.observe(document, {
+    subtree: true,
+    childList: true,
+    attributeFilter: [PAGE_ATTRIBUTE],
+  });
+}
 
 /**
  * Sets the progress of the drawer with root `source`, from `0` to `1`, and
@@ -53,12 +113,10 @@ export function setPageProgress(source: Element, progress: number): void {
     return;
   }
 
+  if (typeof document === 'undefined') return;
   if (!pages) {
-    if (typeof document === 'undefined') return;
-    pages = Array.from(
-      document.querySelectorAll<HTMLElement>(`[${PAGE_ATTRIBUTE}]`),
-      (element) => ({ element, progress: 0 }),
-    );
+    pages = findPages();
+    observe();
   }
 
   for (const page of pages) {
@@ -66,20 +124,12 @@ export function setPageProgress(source: Element, progress: number): void {
     for (const [root, value] of sources) {
       if (value > max && !page.element.contains(root)) max = value;
     }
-    if (max === page.progress) continue;
-    const { style } = page.element;
-    if (max > 0) {
-      if (page.progress === 0) {
-        const top = -page.element.getBoundingClientRect().top;
-        style.setProperty(PAGE_VIEWPORT_TOP_PROPERTY, `${top}px`);
-      }
-      style.setProperty(PAGE_PROGRESS_PROPERTY, String(max));
-    } else {
-      style.removeProperty(PAGE_PROGRESS_PROPERTY);
-      style.removeProperty(PAGE_VIEWPORT_TOP_PROPERTY);
-    }
-    page.progress = max;
+    write(page, max);
   }
 
-  if (sources.size === 0) pages = undefined;
+  if (sources.size === 0) {
+    pages = undefined;
+    observer?.disconnect();
+    observer = undefined;
+  }
 }
