@@ -406,6 +406,9 @@ module('Integration | Component | mobile-drawer | backdrop', function (hooks) {
     state.active = 0;
     await renderDrawer(state);
     assert.dom('.mobile-drawer__backdrop').doesNotExist();
+    assert
+      .dom('.mobile-drawer__backdrop-tint')
+      .doesNotExist('no backdrop tint either');
 
     state.active = 2;
     await settle();

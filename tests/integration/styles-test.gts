@@ -124,6 +124,7 @@ async function renderDrawer(placement?: Placement, closed = false) {
         data-test-root
       >
         <div class="mobile-drawer__backdrop" data-test-backdrop></div>
+        <div class="mobile-drawer__backdrop-tint" data-test-backdrop-tint></div>
         <div class="mobile-drawer__tray" data-test-tray>
           <div class="mobile-drawer__content" data-test-content-wrapper>
             {{! template-lint-disable no-inline-styles }}
@@ -732,13 +733,22 @@ module('Integration | styles.css', function (hooks) {
       'none',
       'no bar tint',
     );
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-backdrop-tint]')).display,
+      'none',
+      'no backdrop tint',
+    );
   });
 
   for (const placement of PLACEMENTS) {
-    test(`${placement}: the bar tint is not shown in other browsers`, async function (assert) {
+    test(`${placement}: the tints are not shown in other browsers`, async function (assert) {
       await renderDrawer(placement);
       assert.strictEqual(
         getComputedStyle(el('[data-test-bar-tint]')).display,
+        'none',
+      );
+      assert.strictEqual(
+        getComputedStyle(el('[data-test-backdrop-tint]')).display,
         'none',
       );
     });
@@ -809,7 +819,87 @@ module('Integration | styles.css', function (hooks) {
         assert.strictEqual(computed.backgroundColor, 'rgb(1, 2, 3)');
 
         root.setAttribute('data-closed', '');
-        assert.strictEqual(computed.display, 'none', 'not while closed');
+        assert.strictEqual(
+          computed.visibility,
+          'hidden',
+          'hidden while closed',
+        );
+        assert.strictEqual(
+          computed.display,
+          'block',
+          'still rendered while closed, so a transition can run on open',
+        );
+      } finally {
+        style.remove();
+      }
+    });
+
+    test(`${placement}: the iOS backdrop tint is an invisible strip in the backdrop colour at the far edge`, async function (assert) {
+      await renderDrawer(placement);
+      const style = applyIosRules();
+      try {
+        const root = el('[data-test-root]');
+        const tint = el('[data-test-backdrop-tint]');
+        const computed = getComputedStyle(tint);
+
+        assert.strictEqual(computed.display, 'block');
+        assert.strictEqual(computed.position, 'fixed');
+        assert.strictEqual(computed.pointerEvents, 'none', 'takes no hits');
+        assert.true(
+          Number(computed.zIndex) > 0,
+          'in front of the tray, also at full height',
+        );
+
+        // Invisible: all of its height is padding on the side away from the
+        // edge, and the background is clipped to the empty content box.
+        assert.strictEqual(computed.height, '16px');
+        assert.strictEqual(computed.backgroundClip, 'content-box');
+        assert.strictEqual(tint.clientHeight, 16);
+        assert.strictEqual(
+          placement === 'bottom' ? computed.paddingBottom : computed.paddingTop,
+          '16px',
+        );
+
+        // At the far edge of the root, across its full width.
+        const rootBox = root.getBoundingClientRect();
+        const box = tint.getBoundingClientRect();
+        assert.strictEqual(box.left, rootBox.left);
+        assert.strictEqual(box.width, rootBox.width);
+        if (placement === 'bottom') {
+          assert.strictEqual(box.top, rootBox.top, 'at the top');
+        } else {
+          assert.strictEqual(box.bottom, rootBox.bottom, 'at the bottom');
+        }
+
+        // The backdrop as it shows: max opacity times the progress, at
+        // least 0.01.
+        const alpha = () => {
+          const match = /\/ ([\d.]+)\)$/.exec(computed.backgroundColor);
+          return match ? Math.round(Number(match[1]) * 1000) / 1000 : NaN;
+        };
+        assert.true(
+          computed.backgroundColor.startsWith('color(srgb 0 0 0 /'),
+          `the backdrop colour (${computed.backgroundColor})`,
+        );
+        assert.strictEqual(alpha(), 0.01, 'progress 0: the minimum');
+        tint.style.setProperty('--mobile-drawer-progress', '0.5');
+        assert.strictEqual(alpha(), 0.2, 'half of the default max 0.4');
+        tint.style.setProperty('--mobile-drawer-progress', '1');
+        assert.strictEqual(alpha(), 0.4, 'the max opacity');
+        root.style.setProperty('--mobile-drawer-backdrop-opacity', '0.6');
+        root.style.setProperty('--mobile-drawer-backdrop-color', 'rgb(7 8 9)');
+        assert.strictEqual(alpha(), 0.6, 'a custom max opacity');
+        assert.true(
+          computed.backgroundColor.startsWith('color(srgb 0.0'),
+          `a custom colour (${computed.backgroundColor})`,
+        );
+
+        root.setAttribute('data-closed', '');
+        assert.strictEqual(
+          computed.visibility,
+          'hidden',
+          'hidden while closed',
+        );
       } finally {
         style.remove();
       }
@@ -817,12 +907,16 @@ module('Integration | styles.css', function (hooks) {
   }
 
   for (const placement of ['left', 'right'] as const) {
-    test(`${placement}: the iOS rules show no bar tint`, async function (assert) {
+    test(`${placement}: the iOS rules show no tints`, async function (assert) {
       await renderDrawer(placement);
       const style = applyIosRules();
       try {
         assert.strictEqual(
           getComputedStyle(el('[data-test-bar-tint]')).display,
+          'none',
+        );
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-backdrop-tint]')).display,
           'none',
         );
       } finally {

@@ -14,10 +14,12 @@
  * This file does not @import styles.css; apps import both. It doesn't
  * depend on load order, but load it after styles.css anyway. The real
  * properties it sets are `backdrop-filter` and `transition` on the tray and
- * the grabber's, which the base styles don't set, and `background` on the
- * expanded tray and `background-color` on its bar tint, which the base
- * styles also set: those two rules have a specificity above zero (see
- * "Overriding"), so they win over the base rules in either order.
+ * the grabber's, which the base styles don't set, `transition` on the bar
+ * tint, and `background` on the expanded tray, `background-color` on its
+ * bar tint and `background-color` on the backdrop tint with the page
+ * scale, which the base styles also set: those three rules have a
+ * specificity above zero (see "Overriding"), so they win over the base
+ * rules in either order.
  *
  * Opt in by putting the theme class on an ancestor of the drawer, e.g.
  *   <body class="mobile-drawer-theme-ios">
@@ -104,9 +106,15 @@
  * Safari blends it over the page background: the toolbar area is close to
  * the glass sheet, but Safari does not blur the page there. While the
  * drawer is [data-expanded] the theme gives the bar tint the opaque sheet
- * colour, and Safari takes the new colour, also after a fade or a drag to
- * the top. With the page scale, the toolbar area has the sheet colour, not
- * the black of `<body>`.
+ * colour, with the same delay as the sheet's fade, so the toolbar area and
+ * the sheet become opaque together. Safari takes the new colour, also
+ * after a drag to the top. With the page scale, the toolbar area has the
+ * sheet colour, not the black of `<body>`.
+ * The status bar above a bottom sheet shows the page with the backdrop
+ * over it (the base styles' `.mobile-drawer__backdrop-tint`), never the
+ * sheet colour, also at full height, as on iOS. With the page scale it is
+ * black, the colour around the scaled page: the theme makes the backdrop
+ * tint black while the page is `data-mobile-drawer-page-active`.
  *
  * Page scale (opt-in, see .mobile-drawer-theme-ios__page): the component
  * writes `--mobile-drawer-page-progress` (0-1) and
@@ -154,9 +162,10 @@
  *
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
- * wins. Two exceptions: the expanded tray's `background` rule and the
- * expanded bar tint's `background-color` rule have the specificity of one
- * class (0,1,0), so they win over the base styles' rules in any load order.
+ * wins. Three exceptions: the expanded tray's `background` rule, the
+ * expanded bar tint's `background-color` rule and the page scale's backdrop
+ * tint `background-color` rule have the specificity of one class (0,1,0),
+ * so they win over the base styles' rules in any load order.
  * App CSS in a later layer or unlayered still wins over them; app CSS in
  * the `ember-mobile-drawer` layer needs more than one class, or must come
  * later, to override them.
@@ -515,6 +524,13 @@
         transition: background-color 0s linear var(--_mobile-drawer-ios-fade);
       }
 
+      /* iOS Safari 26: the toolbar area turns opaque with the sheet, after
+         the fade. Away from the top it turns back at once, as the strip. */
+      :where(.mobile-drawer-theme-ios .mobile-drawer[data-expanded])
+        > .mobile-drawer__bar-tint {
+        transition: background-color 0s linear var(--_mobile-drawer-ios-fade);
+      }
+
       /* The rim over the strip comes with the strip's colour. */
       :where(
         .mobile-drawer-theme-ios
@@ -571,6 +587,19 @@
     :where(
       body:has(> .mobile-drawer-theme-ios__page[data-mobile-drawer-page-active])
     ) {
+      background-color: rgb(0 0 0);
+    }
+
+    /* iOS Safari 26: the status bar shows the black around the scaled page
+       (see "iOS Safari 26 toolbar" in the header). Specificity 0,1,0, so it
+       wins over the base rule in either load order. */
+    :where(
+        body:has(
+            > .mobile-drawer-theme-ios__page[data-mobile-drawer-page-active]
+          )
+          .mobile-drawer[data-placement="bottom"]
+      )
+      > .mobile-drawer__backdrop-tint {
       background-color: rgb(0 0 0);
     }
   }

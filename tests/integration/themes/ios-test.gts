@@ -939,6 +939,35 @@ module('Integration | themes/ios.css', function (hooks) {
     });
   }
 
+  test('with motion, the bar tint turns opaque with the sheet, after the fade', async function (assert) {
+    styles.push(applyMotion());
+    await renderDrawer({ tall: true });
+    const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
+    const tray = () => getComputedStyle(el('[data-test-tray]'));
+
+    assert.strictEqual(
+      tint().transitionDelay,
+      '0s',
+      'away from the top: at once',
+    );
+
+    el('[data-test-root]').setAttribute('data-expanded', '');
+    assert.strictEqual(tint().transitionProperty, 'background-color');
+    assert.strictEqual(tint().transitionDuration, '0s');
+    assert.strictEqual(
+      tint().transitionDelay,
+      tray().transitionDuration.split(',')[0]!.trim(),
+      'the delay is the sheet fade',
+    );
+
+    styles.push(
+      addStyles(
+        '.mobile-drawer-theme-ios { --_mobile-drawer-ios-fade: 0.4s; }',
+      ),
+    );
+    assert.strictEqual(tint().transitionDelay, '0.4s', 'follows the fade');
+  });
+
   test('unlayered app CSS still wins over the expanded tray background', async function (assert) {
     await renderDrawer({ tall: true, expanded: true });
     styles.push(
