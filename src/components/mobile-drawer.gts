@@ -490,6 +490,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #overshoot = 0;
   /**
+   * Set when a run of the spring towards the highest snap point has
+   * reached it; the render then holds the tray there for the rest of that
+   * run (see `#render`). Cleared when the run ends, a drag starts or the
+   * target changes.
+   */
+  #arrivedAtHighest = false;
+  /**
    * Whether the tray was at (or past) the highest snap point at the last
    * render, i.e. whether its content may scroll. See `#trayTouchAction`.
    */
@@ -1161,7 +1168,25 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // overshoot, but never pulls the tray further off its edge than where
     // the finger left it.
     const max = this.#drag ? Infinity : layout.trayLength + this.#overshoot;
-    const open = clamp(offset, 0, max);
+    let open = clamp(offset, 0, max);
+    // A spring that bounces comes back below its target after it overshoots
+    // it. At the highest snap point that would lock the content's scrolling
+    // again for a moment (and make a touch drag instead of scroll), so once a
+    // run towards the highest snap point gets there, the tray stays there
+    // for the rest of the run. The undershoot is a fraction of a percent of
+    // the move, so this doesn't show.
+    const spring = this.#spring!;
+    if (
+      this.#drag ||
+      !spring.isAnimating ||
+      layout.maxOffset <= 0 ||
+      Math.abs(spring.target - layout.maxOffset) > EPSILON
+    ) {
+      this.#arrivedAtHighest = false;
+    } else if (this.#arrivedAtHighest || open >= layout.maxOffset - EPSILON) {
+      this.#arrivedAtHighest = true;
+      open = Math.max(open, layout.maxOffset);
+    }
     if (!this.#drag) {
       this.#overshoot = clamp(open - layout.trayLength, 0, this.#overshoot);
     }
@@ -1191,11 +1216,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#paintBackdrop();
     // For the page behind (`data-mobile-drawer-page`, see
     // `setPageProgress`): from the smallest snap point (0) to the largest
-    // (1), for modal drawers only; a non-modal drawer leaves the page as it
-    // is, usable.
+    // (1), for modal bottom drawers only. A non-modal drawer leaves the page
+    // as it is, usable; and like on iOS, only a sheet from the bottom moves
+    // the page back, not a top or side drawer.
     setPageProgress(
       root,
-      this.isModal && layout.maxOffset > smallest
+      this.isModal && this.placement === 'bottom' && layout.maxOffset > smallest
         ? clamp((open - smallest) / (layout.maxOffset - smallest), 0, 1)
         : 0,
     );
