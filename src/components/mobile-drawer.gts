@@ -39,6 +39,14 @@ import {
   tabbables,
 } from '../-private/modal/focus.ts';
 import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
+import {
+  addPortal,
+  logicalParent,
+  logicallyContains,
+  portalsOf,
+  removePortal,
+} from '../-private/nesting.ts';
+import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
 import type { MobileDrawerSpring } from '../springs.ts';
 
@@ -148,6 +156,12 @@ const modalStack: object[] = [];
 
 /** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
 const mountedDrawers = new Set<object>();
+
+/**
+ * The root elements of the drawers in `mountedDrawers`, to tell a drawer's
+ * root from another element with the `mobile-drawer` class, see `#inNested`.
+ */
+const mountedRoots = new WeakSet<Element>();
 
 /** The kind of input the user gave last, see `trackInput`. */
 type InputType = 'keyboard' | 'pointer';
@@ -643,7 +657,12 @@ const clampIndex = (index: number, count: number) =>
  * in a nested drawer (its tray, a handle or its backdrop) belongs to that
  * drawer only (see `#inNested`): it never drags this drawer, also when the
  * nested drawer is at its closed position and the finger moves on, and it
- * doesn't hold this drawer's running animation.
+ * doesn't hold this drawer's running animation. A nested drawer in the
+ * yielded `Nested` renders outside the tray (see `nesting.ts`), so the tray
+ * doesn't clip it; its touches never reach this drawer. For the modal
+ * stack, `data-nested`, `inert`, focus, the scroll lock and the hiding of
+ * a closed drawer it still counts as inside this drawer. When this drawer
+ * starts to close, it closes such a drawer (see `#closePortaled`).
  *
  * With `@handleOnly` the content is locked below the highest snap point
  * too, so it only scrolls when the drawer is fully open, and swipes along
@@ -716,6 +735,37 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   @tracked uncontrolledVersion = 0;
   /** Whether the modal behaviour is on, for `aria-modal`. */
   @tracked modalActive = false;
+  /**
+   * The parent element of the root, once the drawer is in the DOM: where
+   * the yielded `Nested` renders without `@destination`.
+   */
+  @tracked nestedParent?: Element;
+
+  /**
+   * The portal elements of the yielded `Nested` (see `nesting.ts`). They
+   * are a part of the tray for the nesting relation, and hidden with the
+   * drawer (`data-closed`, see `#setClosed`).
+   */
+  #portals = new Set<HTMLElement>();
+
+  /** What the yielded `Nested` registers its portal element with. */
+  private nestedOwner: NestedOwner = {
+    add: (portal) => {
+      this.#portals.add(portal);
+      addPortal(portal, () => this.#tray);
+      // Like the root until the drawer has rendered: closed.
+      portal.toggleAttribute(
+        'data-closed',
+        this.#root?.hasAttribute('data-closed') ?? true,
+      );
+      MobileDrawer.#portalsChanged();
+    },
+    remove: (portal) => {
+      this.#portals.delete(portal);
+      removePortal(portal);
+      MobileDrawer.#portalsChanged();
+    },
+  };
 
   /**
    * The snap point when uncontrolled. Not tracked (see `uncontrolledVersion`)
@@ -898,6 +948,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #applyQueued = false;
   /** Undoes the modal behaviour while it is on. */
   #releaseModal?: () => void;
+  /**
+   * Undoes the `inert` part of the modal behaviour while it is on, see
+   * `#makeOutsideInert`.
+   */
+  #releaseInert?: () => void;
   #warnedLabel = false;
   /**
    * The pointer that went down on the backdrop, from its `pointerdown` until
@@ -1048,7 +1103,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         passive: true,
       });
       mountedDrawers.add(this);
+      mountedRoots.add(root);
       MobileDrawer.#syncNested();
+      // Where the yielded `Nested` renders by default. Tracked state, so not
+      // during rendering (and the drawers around this one are in the DOM
+      // by then).
+      queueMicrotask(() => {
+        if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
+      });
       this.#measure();
       // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
@@ -1148,6 +1210,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
       this.#sheet?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
+      if (this.#root) mountedRoots.delete(this.#root);
       MobileDrawer.#syncNested();
       trackInput(this, false);
       this.#focused = undefined;
@@ -1273,7 +1336,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#queueState({ isAnimating: spring.isAnimating });
     // Show the drawer now rather than at the first frame, so focus can move
     // into an opening drawer right away.
-    if (spring.isAnimating) this.#root!.removeAttribute('data-closed');
+    if (spring.isAnimating) this.#setClosed(false);
   }
 
   /**
@@ -1647,10 +1710,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         ? clamp((open - smallest) / (layout.maxOffset - smallest), 0, 1)
         : 0,
     );
-    root.toggleAttribute(
-      'data-closed',
-      open <= 0 && !this.#spring!.isAnimating && !this.#drag,
-    );
+    this.#setClosed(open <= 0 && !this.#spring!.isAnimating && !this.#drag);
+  }
+
+  /**
+   * Sets or removes `data-closed` on the root and on the portals of the
+   * yielded `Nested`, so a nested drawer rendered outside the tray hides
+   * with this drawer, like one inside it.
+   */
+  #setClosed(closed: boolean): void {
+    this.#root!.toggleAttribute('data-closed', closed);
+    for (const portal of this.#portals) {
+      portal.toggleAttribute('data-closed', closed);
+    }
   }
 
   /**
@@ -2006,6 +2078,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (hidden !== this.#hidden) {
       this.#hidden = hidden;
       MobileDrawer.#syncNested();
+      if (hidden) this.#closePortaled();
     }
     trackInput(this, !this.#hidden);
     if (!this.#hasReportBaseline) {
@@ -2023,7 +2096,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (
         (active instanceof HTMLElement || active instanceof SVGElement) &&
         active !== document.body &&
-        !this.#root!.contains(active)
+        !this.#contains(active)
       ) {
         this.#returnFocus = active;
         this.#returnFocusPath = this.#ancestorsOf(active);
@@ -2036,11 +2109,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // Focus is already inside: return it to where it came from into the
       // tray, e.g. on Escape.
       const from = this.#enteredFrom;
-      if (
-        this.#openedByFocus &&
-        from?.isConnected &&
-        !this.#root!.contains(from)
-      ) {
+      if (this.#openedByFocus && from?.isConnected && !this.#contains(from)) {
         this.#returnFocus = from;
         this.#returnFocusPath = this.#ancestorsOf(from);
       }
@@ -2107,13 +2176,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #activateModal(): void {
     const root = this.#root!;
     const tray = this.#tray!;
-    const releaseInert = inertOutside(root);
-    const releaseScroll = lockBodyScroll(tray);
+    this.#makeOutsideInert();
+    // The tray, with the portals of the drawers nested in it.
+    const releaseScroll = lockBodyScroll((target) =>
+      logicallyContains(tray, target),
+    );
     // Below the modal drawers inside this one (e.g. a peeking drawer that
-    // opens under its open nested drawer): the nested drawer stays in front,
-    // so it keeps Escape and the Tab wrap.
+    // opens under its open nested drawer, also one rendered outside the
+    // tray with `Nested`): the nested drawer stays in front, so it keeps
+    // Escape and the Tab wrap.
     const nested = modalStack.findIndex((other) =>
-      root.contains((other as MobileDrawer).#root ?? null),
+      logicallyContains(root, (other as MobileDrawer).#root),
     );
     modalStack.splice(nested === -1 ? modalStack.length : nested, 0, this);
     MobileDrawer.#syncNested();
@@ -2123,7 +2196,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       modalStack.splice(modalStack.indexOf(this), 1);
       MobileDrawer.#syncNested();
       releaseScroll();
-      releaseInert();
+      this.#releaseInert?.();
+      this.#releaseInert = undefined;
     };
     this.modalActive = true;
 
@@ -2164,10 +2238,131 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!this.#destroyed) this.modalActive = false;
   }
 
+  /**
+   * Where the yielded `Nested` renders by default: the parent element of
+   * the root, or, when this drawer is inside the tray of another drawer
+   * (also through a `Nested` of that drawer), the parent element of the
+   * outermost such drawer. A transformed tray is the containing block of the
+   * fixed drawers in it, so a nested drawer in the tray of any drawer
+   * around this one would be clipped by that tray again.
+   */
+  #nestedDestination(): Element | undefined {
+    let root = this.#root!;
+    for (;;) {
+      const inner = root;
+      const outer = [...(mountedDrawers as Set<MobileDrawer>)].find(
+        (other) =>
+          other.#root !== inner &&
+          !!other.#tray &&
+          logicallyContains(other.#tray, inner),
+      );
+      const outerRoot = outer ? outer.#root : undefined;
+      if (!outerRoot) break;
+      root = outerRoot;
+    }
+    return root.parentElement ?? undefined;
+  }
+
+  /**
+   * Called when this drawer starts to close (see `#hidden`): closes the
+   * drawers in the portals of its `Nested` that show, like `close()`, so
+   * they move away together with this drawer. A drawer inside the tray
+   * moves with the tray; one in a portal would else stay on the screen
+   * until this drawer has closed, and then disappear at once. In a
+   * microtask: `close()` can call `@onSnapPointChange`, which must not run
+   * during rendering. A controlled drawer whose parent doesn't take the new
+   * index hides with this drawer (`data-closed` on the portal).
+   */
+  #closePortaled(): void {
+    if (this.#portals.size === 0) return;
+    queueMicrotask(() => {
+      if (this.#destroyed || !this.#hidden) return;
+      const root = this.#root!;
+      for (const other of mountedDrawers as Set<MobileDrawer>) {
+        const otherRoot = other.#root;
+        if (
+          other === this ||
+          other.#hidden ||
+          !otherRoot ||
+          ![...this.#portals].some((portal) => portal.contains(otherRoot)) ||
+          other.#closestDrawerRoot() !== root
+        ) {
+          continue;
+        }
+        other.close();
+      }
+    });
+  }
+
+  /**
+   * The root of the nearest drawer around this one, also through portals
+   * (see `nesting.ts`).
+   */
+  #closestDrawerRoot(): Element | undefined {
+    for (
+      let node = this.#root ? logicalParent(this.#root) : null;
+      node;
+      node = logicalParent(node)
+    ) {
+      if (mountedRoots.has(node)) return node;
+    }
+    return undefined;
+  }
+
+  /**
+   * Makes the page outside the drawer inert (see `inertOutside`), or
+   * updates that: everything except the root and the portals of the drawers
+   * nested in this one (see `nesting.ts`), which are a part of this drawer.
+   * The new `inert` attributes are set before the old ones are released, so
+   * an element that stays inert never loses it in between.
+   */
+  #makeOutsideInert(): void {
+    const root = this.#root!;
+    const release = this.#releaseInert;
+    this.#releaseInert = inertOutside(root, ...portalsOf(root));
+    release?.();
+  }
+
+  /**
+   * Called when a portal of the yielded `Nested` is added or removed:
+   * updates what the open modal drawers make inert (a portal can be added
+   * in an element that is inert already), `data-nested`, and the open state
+   * of the drawers nested in the drawers. In a microtask: portals are added
+   * and removed during rendering, where the open state must not change.
+   */
+  static #portalsChanged(): void {
+    if (MobileDrawer.#portalsQueued) return;
+    MobileDrawer.#portalsQueued = true;
+    queueMicrotask(() => {
+      MobileDrawer.#portalsQueued = false;
+      MobileDrawer.#applyPortals();
+    });
+  }
+
+  static #portalsQueued = false;
+
+  static #applyPortals(): void {
+    for (const drawer of modalStack as MobileDrawer[]) {
+      if (drawer.#releaseInert) drawer.#makeOutsideInert();
+    }
+    MobileDrawer.#syncNested();
+    for (const drawer of mountedDrawers as Set<MobileDrawer>) {
+      if (drawer.#portals.size > 0) drawer.#applyNested();
+    }
+  }
+
+  /**
+   * Whether `node` is inside the drawer: in its DOM, or in a portal of a
+   * drawer nested in it (see `nesting.ts`).
+   */
+  #contains(node: Node | null | undefined): boolean {
+    const root = this.#root;
+    return !!root && logicallyContains(root, node);
+  }
+
   /** Whether focus is inside the drawer. */
   #hasFocus(): boolean {
-    const active = document.activeElement;
-    return !!active && !!this.#root?.contains(active);
+    return this.#contains(document.activeElement);
   }
 
   /**
@@ -2199,7 +2394,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const ancestor = path.find((element) => element.isConnected);
     if (!ancestor) return;
     tabbables(ancestor)
-      .find((element) => !root?.contains(element))
+      .find((element) => !(root && logicallyContains(root, element)))
       ?.focus();
   }
 
@@ -2238,7 +2433,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #hiddenByDrawer(element: Element): boolean {
     for (const other of mountedDrawers as Set<MobileDrawer>) {
-      if (other !== this && other.#hidden && other.#root?.contains(element)) {
+      if (other !== this && other.#hidden && other.#contains(element)) {
         return true;
       }
     }
@@ -2285,7 +2480,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         !!frontRoot &&
           drawer !== front &&
           !drawer.#hidden &&
-          !frontRoot.contains(root),
+          !logicallyContains(frontRoot, root),
       );
     }
   }
@@ -2295,7 +2490,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const root = this.#root;
     if (!root) return;
     for (const other of mountedDrawers as Set<MobileDrawer>) {
-      if (other !== this && other.#root && root.contains(other.#root)) {
+      if (
+        other !== this &&
+        other.#root &&
+        logicallyContains(root, other.#root)
+      ) {
         other.#applyOpen();
       }
     }
@@ -2526,7 +2725,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!root || !(target instanceof Element) || !root.contains(target)) {
       return false;
     }
-    return target.closest('.mobile-drawer') !== root;
+    // The root of a mounted drawer, not any element with the
+    // `mobile-drawer` class (e.g. an app element that reuses it). A drawer
+    // nested with `Nested` is not in this drawer's DOM: its events never get
+    // here.
+    for (
+      let element: Element | null = target;
+      element && element !== root;
+      element = element.parentElement
+    ) {
+      if (mountedRoots.has(element)) return true;
+    }
+    return false;
   }
 
   private onHandleInstall = (element: HTMLElement): void => {
@@ -2641,7 +2851,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (
       (from instanceof HTMLElement || from instanceof SVGElement) &&
-      !this.#root?.contains(from)
+      !this.#contains(from)
     ) {
       this.#enteredFrom = from;
     }
@@ -2714,7 +2924,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#destroyed ||
       this.#drag ||
       !(to instanceof Node) ||
-      this.#root!.contains(to)
+      this.#contains(to)
     ) {
       return;
     }
@@ -3284,6 +3494,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
                 isDragging=this.isDragging
                 isAnimating=this.isAnimating
                 progress=this.progress
+                Nested=(component
+                  NestedPortal owner=this.nestedOwner fallback=this.nestedParent
+                )
               )
             }}
           </div>

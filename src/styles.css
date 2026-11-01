@@ -67,7 +67,13 @@
  *                           opened, when this drawer shows (is not closed
  *                           or closing) and is not inside it. Not used by
  *                           these base styles; for themes (e.g. the iOS
- *                           theme dims the sheet).
+ *                           theme dims the sheet). A drawer rendered with
+ *                           the yielded `Nested` counts as inside it.
+ * .mobile-drawer-nested     Not in the drawer: the element the yielded
+ *                           `Nested` renders a nested drawer in, outside
+ *                           the tray (`display: contents`). It gets
+ *                           [data-closed] with the drawer that yields it,
+ *                           which hides the nested drawer too.
  * [role] [aria-modal]       On the root: `role="dialog"` for modal drawers
  *                           (the default), and `aria-modal="true"` while a
  *                           modal drawer is open. A modal drawer's tray has
@@ -453,6 +459,19 @@
   }
 
   :where(.mobile-drawer[data-closed]) {
+    visibility: hidden;
+  }
+
+  /*
+   * The element the yielded `Nested` renders a nested drawer in, outside the
+   * outer drawer's tray: no box of its own, and hidden with the outer drawer
+   * (the component copies the outer root's [data-closed] to it).
+   */
+  :where(.mobile-drawer-nested) {
+    display: contents;
+  }
+
+  :where(.mobile-drawer-nested[data-closed]) {
     visibility: hidden;
   }
 

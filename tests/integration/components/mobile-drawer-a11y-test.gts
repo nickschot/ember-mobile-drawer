@@ -62,6 +62,8 @@ class State {
   @tracked secondActive: number | undefined;
   @tracked nestedShown = false;
   @tracked nestedActive = 0;
+  /** Whether the nested drawer renders outside the tray, with `Nested`. */
+  @tracked portaled = false;
   @tracked triggerShown = true;
   changes: number[] = [];
   /** Whether the parent accepts changes requested by the drawer. */
@@ -128,21 +130,41 @@ async function renderDrawer(state: State) {
               {{/if}}
               <output data-test-active>{{drawer.activeSnapPoint}}</output>
               {{#if state.nestedShown}}
-                <MobileDrawer
-                  @snapPoints={{SNAP_POINTS}}
-                  @activeSnapPoint={{state.nestedActive}}
-                  @onSnapPointChange={{state.onNestedChange}}
-                  style="position: absolute"
-                  aria-label="Nested"
-                  data-test-nested
-                >
-                  <div style={{contentStyle}}>
-                    <button
-                      type="button"
-                      data-test-nested-button
-                    >Nested</button>
-                  </div>
-                </MobileDrawer>
+                {{#if state.portaled}}
+                  <drawer.Nested>
+                    <MobileDrawer
+                      @snapPoints={{SNAP_POINTS}}
+                      @activeSnapPoint={{state.nestedActive}}
+                      @onSnapPointChange={{state.onNestedChange}}
+                      style="position: absolute"
+                      aria-label="Nested"
+                      data-test-nested
+                    >
+                      <div style={{contentStyle}}>
+                        <button
+                          type="button"
+                          data-test-nested-button
+                        >Nested</button>
+                      </div>
+                    </MobileDrawer>
+                  </drawer.Nested>
+                {{else}}
+                  <MobileDrawer
+                    @snapPoints={{SNAP_POINTS}}
+                    @activeSnapPoint={{state.nestedActive}}
+                    @onSnapPointChange={{state.onNestedChange}}
+                    style="position: absolute"
+                    aria-label="Nested"
+                    data-test-nested
+                  >
+                    <div style={{contentStyle}}>
+                      <button
+                        type="button"
+                        data-test-nested-button
+                      >Nested</button>
+                    </div>
+                  </MobileDrawer>
+                {{/if}}
               {{/if}}
             </div>
           </MobileDrawer>
@@ -567,247 +589,295 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
       assert.strictEqual(active(), el('[data-test-trigger]'));
     });
 
-    test('app code closing a parent drawer under an open nested one frees the page', async function (assert) {
-      const state = new State();
-      await renderDrawer(state);
-      await openFromTrigger(state);
-      state.nestedShown = true;
-      state.nestedActive = 2;
-      await settle();
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
-      assert.strictEqual(bodyScrollLocks(), 2);
+    // Also with the nested drawer rendered outside the parent's tray with
+    // the yielded `Nested`: the nesting relation is the same.
+    for (const portaled of [false, true]) {
+      const suffix = portaled ? ' (Nested)' : '';
 
-      // E.g. a route change resets the parent's state only.
-      state.active = 0;
-      await settled();
-      assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert
-        .dom('[data-test-nested]')
-        .doesNotHaveAttribute('aria-modal', 'the nested drawer is not modal');
-      assert.strictEqual(
-        active(),
-        el('[data-test-trigger]'),
-        'focus returns to the trigger of the parent',
-      );
-      await settle();
-      assert.dom('[data-test-drawer]').hasAttribute('data-closed');
+      test(`app code closing a parent drawer under an open nested one frees the page${suffix}`, async function (assert) {
+        const state = new State();
+        state.portaled = portaled;
+        await renderDrawer(state);
+        await openFromTrigger(state);
+        state.nestedShown = true;
+        state.nestedActive = 2;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
+        assert.strictEqual(bodyScrollLocks(), 2);
 
-      state.changes = [];
-      await triggerKeyEvent(document.body, 'keydown', 'Escape');
-      assert.strictEqual(state.nestedActive, 2, 'no hidden drawer on Escape');
+        // E.g. a route change resets the parent's state only.
+        state.active = 0;
+        await settled();
+        assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert
+          .dom('[data-test-nested]')
+          .doesNotHaveAttribute('aria-modal', 'the nested drawer is not modal');
+        assert.strictEqual(
+          active(),
+          el('[data-test-trigger]'),
+          'focus returns to the trigger of the parent',
+        );
+        await settle();
+        assert.dom('[data-test-drawer]').hasAttribute('data-closed');
 
-      // Opening the parent again brings the nested drawer's modality back.
-      state.active = 2;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(bodyScrollLocks(), 2);
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
+        if (portaled) {
+          // A drawer in `Nested` closes with the parent (it doesn't move
+          // with the parent's tray), so it doesn't come back.
+          assert.strictEqual(state.nestedActive, 0, 'closed with the parent');
+          state.active = 2;
+          await settle();
+          assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+          assert.strictEqual(bodyScrollLocks(), 1);
+        } else {
+          state.changes = [];
+          await triggerKeyEvent(document.body, 'keydown', 'Escape');
+          assert.strictEqual(
+            state.nestedActive,
+            2,
+            'no hidden drawer on Escape',
+          );
 
-      state.nestedShown = false;
-      state.active = 0;
-      await settle();
-    });
+          // Opening the parent again brings the nested drawer's modality
+          // back.
+          state.active = 2;
+          await settle();
+          assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+          assert.strictEqual(bodyScrollLocks(), 2);
+          assert.strictEqual(active(), el('[data-test-nested-button]'));
+        }
 
-    test('a nested modal drawer inside a peeking parent is modal', async function (assert) {
-      const state = new State();
-      state.snapPoints = PEEK_SNAP_POINTS;
-      await renderDrawer(state);
-      await settle();
-      assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-closed');
-      assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
+        state.nestedShown = false;
+        state.active = 0;
+        await settle();
+      });
 
-      await focus('[data-test-trigger]');
-      state.nestedShown = true;
-      state.nestedActive = 2;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
-      assert.strictEqual(bodyScrollLocks(), 1, 'the page is locked');
-      assert.dom('[data-test-page]').hasAttribute('inert', '');
-      assert.dom('[data-test-trigger]').hasAttribute('inert', '');
-      assert.ok(
-        el('[data-test-first]').closest('[inert]'),
-        'the content of the parent is inert',
-      );
-      assert.notOk(
-        el('[data-test-nested-button]').closest('[inert]'),
-        'the nested drawer is not inert',
-      );
+      test(`a nested modal drawer inside a peeking parent is modal${suffix}`, async function (assert) {
+        const state = new State();
+        state.portaled = portaled;
+        state.snapPoints = PEEK_SNAP_POINTS;
+        await renderDrawer(state);
+        await settle();
+        assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-closed');
+        assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
 
-      await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Escape');
-      await settle();
-      assert.strictEqual(state.nestedActive, 0, 'the nested drawer closes');
-      assert.dom('[data-test-active]').hasText('0', 'the parent still peeks');
-      assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-closed');
-      assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
-      assert.strictEqual(
-        active(),
-        el('[data-test-trigger]'),
-        'focus returns to the trigger',
-      );
+        await focus('[data-test-trigger]');
+        state.nestedShown = true;
+        state.nestedActive = 2;
+        await settle();
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
+        assert.strictEqual(bodyScrollLocks(), 1, 'the page is locked');
+        assert.dom('[data-test-page]').hasAttribute('inert', '');
+        assert.dom('[data-test-trigger]').hasAttribute('inert', '');
+        assert.ok(
+          el('[data-test-first]').closest('[inert]'),
+          'the content of the parent is inert',
+        );
+        assert.notOk(
+          el('[data-test-nested-button]').closest('[inert]'),
+          'the nested drawer is not inert',
+        );
 
-      // Opened from a button in the peeking parent: focus returns there.
-      await focus('[data-test-first]');
-      state.nestedActive = 2;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
-      await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Escape');
-      await settle();
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert.strictEqual(
-        active(),
-        el('[data-test-first]'),
-        'focus returns to the button in the parent',
-      );
+        await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Escape');
+        await settle();
+        assert.strictEqual(state.nestedActive, 0, 'the nested drawer closes');
+        assert.dom('[data-test-active]').hasText('0', 'the parent still peeks');
+        assert.dom('[data-test-drawer]').doesNotHaveAttribute('data-closed');
+        assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
+        assert.strictEqual(
+          active(),
+          el('[data-test-trigger]'),
+          'focus returns to the trigger',
+        );
 
-      state.nestedShown = false;
-      await settle();
-    });
+        // Opened from a button in the peeking parent: focus returns there.
+        await focus('[data-test-first]');
+        state.nestedActive = 2;
+        await settle();
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
+        await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Escape');
+        await settle();
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert.strictEqual(
+          active(),
+          el('[data-test-first]'),
+          'focus returns to the button in the parent',
+        );
 
-    test('a peeking parent that opens under its nested modal drawer stays behind it', async function (assert) {
-      const state = new State();
-      state.snapPoints = PEEK_SNAP_POINTS;
-      await renderDrawer(state);
-      await settle();
-      await focus('[data-test-first]');
-      state.nestedShown = true;
-      state.nestedActive = 2;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
+        state.nestedShown = false;
+        await settle();
+      });
 
-      // E.g. a button in the nested drawer opens the parent.
-      state.active = 1;
-      await settle();
-      assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(bodyScrollLocks(), 2);
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
-      assert.dom('[data-test-page]').hasAttribute('inert', '');
-      assert.ok(
-        el('[data-test-first]').closest('[inert]'),
-        'the content of the parent is inert',
-      );
+      test(`a peeking parent that opens under its nested modal drawer stays behind it${suffix}`, async function (assert) {
+        const state = new State();
+        state.portaled = portaled;
+        state.snapPoints = PEEK_SNAP_POINTS;
+        await renderDrawer(state);
+        await settle();
+        await focus('[data-test-first]');
+        state.nestedShown = true;
+        state.nestedActive = 2;
+        await settle();
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
 
-      // The nested drawer, in front, keeps the Tab wrap.
-      await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Tab');
-      assert.strictEqual(
-        active(),
-        el('[data-test-nested-button]'),
-        'Tab wraps inside the nested drawer',
-      );
-      (document.activeElement as HTMLElement).blur();
-      await triggerKeyEvent(document.body, 'keydown', 'Tab');
-      assert.strictEqual(
-        active(),
-        el('[data-test-nested-button]'),
-        'body → the nested drawer',
-      );
+        // E.g. a button in the nested drawer opens the parent.
+        state.active = 1;
+        await settle();
+        assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(bodyScrollLocks(), 2);
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
+        assert.dom('[data-test-page]').hasAttribute('inert', '');
+        assert.ok(
+          el('[data-test-first]').closest('[inert]'),
+          'the content of the parent is inert',
+        );
 
-      // Escape closes the nested drawer first, also from <body>.
-      (document.activeElement as HTMLElement).blur();
-      await triggerKeyEvent(document.body, 'keydown', 'Escape');
-      await settle();
-      assert.strictEqual(state.nestedActive, 0, 'the nested drawer closes');
-      assert.dom('[data-test-active]').hasText('1', 'the parent stays open');
-      assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
-      assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(bodyScrollLocks(), 1);
-      assert.dom('[data-test-page]').hasAttribute('inert', '');
-      assert.notOk(el('[data-test-first]').closest('[inert]'));
-      assert.strictEqual(
-        active(),
-        el('[data-test-first]'),
-        'focus returns to the button in the parent',
-      );
+        // The nested drawer, in front, keeps the Tab wrap.
+        await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Tab');
+        assert.strictEqual(
+          active(),
+          el('[data-test-nested-button]'),
+          'Tab wraps inside the nested drawer',
+        );
+        (document.activeElement as HTMLElement).blur();
+        await triggerKeyEvent(document.body, 'keydown', 'Tab');
+        assert.strictEqual(
+          active(),
+          el('[data-test-nested-button]'),
+          'body → the nested drawer',
+        );
 
-      // Then Escape sends the parent back to its peek.
-      await triggerKeyEvent('[data-test-first]', 'keydown', 'Escape');
-      await settle();
-      assert.dom('[data-test-active]').hasText('0');
-      assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
+        // Escape closes the nested drawer first, also from <body>.
+        (document.activeElement as HTMLElement).blur();
+        await triggerKeyEvent(document.body, 'keydown', 'Escape');
+        await settle();
+        assert.strictEqual(state.nestedActive, 0, 'the nested drawer closes');
+        assert.dom('[data-test-active]').hasText('1', 'the parent stays open');
+        assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+        assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(bodyScrollLocks(), 1);
+        assert.dom('[data-test-page]').hasAttribute('inert', '');
+        assert.notOk(el('[data-test-first]').closest('[inert]'));
+        assert.strictEqual(
+          active(),
+          el('[data-test-first]'),
+          'focus returns to the button in the parent',
+        );
 
-      state.nestedShown = false;
-      await settle();
-    });
+        // Then Escape sends the parent back to its peek.
+        await triggerKeyEvent('[data-test-first]', 'keydown', 'Escape');
+        await settle();
+        assert.dom('[data-test-active]').hasText('0');
+        assert.dom('[data-test-drawer]').doesNotHaveAttribute('aria-modal');
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
 
-    test('a peeking parent that closes moves focus out of its nested modal drawer', async function (assert) {
-      const state = new State();
-      state.snapPoints = PEEK_SNAP_POINTS;
-      await renderDrawer(state);
-      await settle();
-      await focus('[data-test-trigger]');
-      state.nestedShown = true;
-      state.nestedActive = 2;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
+        state.nestedShown = false;
+        await settle();
+      });
 
-      // The app drops the peek: the parent was never open, but now closes.
-      state.snapPoints = [0, 400];
-      await settle();
-      assert.dom('[data-test-active]').hasText('0');
-      assert.dom('[data-test-drawer]').hasAttribute('data-closed');
-      assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
-      assert.strictEqual(
-        active(),
-        el('[data-test-trigger]'),
-        'focus moves to the element that opened the nested drawer',
-      );
+      test(`a peeking parent that closes moves focus out of its nested modal drawer${suffix}`, async function (assert) {
+        const state = new State();
+        state.portaled = portaled;
+        state.snapPoints = PEEK_SNAP_POINTS;
+        await renderDrawer(state);
+        await settle();
+        await focus('[data-test-trigger]');
+        state.nestedShown = true;
+        state.nestedActive = 2;
+        await settle();
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
 
-      // At the peek again, the nested drawer is modal again.
-      state.snapPoints = PEEK_SNAP_POINTS;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
-      await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Escape');
-      await settle();
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert.strictEqual(active(), el('[data-test-trigger]'));
+        // The app drops the peek: the parent was never open, but now closes.
+        state.snapPoints = [0, 400];
+        await settle();
+        assert.dom('[data-test-active]').hasText('0');
+        assert.dom('[data-test-drawer]').hasAttribute('data-closed');
+        assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
+        assert.strictEqual(
+          active(),
+          el('[data-test-trigger]'),
+          'focus moves to the element that opened the nested drawer',
+        );
 
-      state.nestedShown = false;
-      await settle();
-    });
+        if (portaled) {
+          // A drawer in `Nested` closes with the parent.
+          assert.strictEqual(state.nestedActive, 0, 'closed with the parent');
+          state.snapPoints = PEEK_SNAP_POINTS;
+          await settle();
+          assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+          state.nestedShown = false;
+          await settle();
+          return;
+        }
 
-    test('a nested modal drawer inside a closed parent is not modal', async function (assert) {
-      const state = new State();
-      await renderDrawer(state);
-      await settle();
-      assert.dom('[data-test-drawer]').hasAttribute('data-closed');
+        // At the peek again, the nested drawer is modal again.
+        state.snapPoints = PEEK_SNAP_POINTS;
+        await settle();
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
+        await triggerKeyEvent('[data-test-nested-button]', 'keydown', 'Escape');
+        await settle();
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert.strictEqual(active(), el('[data-test-trigger]'));
 
-      await focus('[data-test-trigger]');
-      state.nestedShown = true;
-      state.nestedActive = 2;
-      await settle();
-      assert.dom('[data-test-drawer]').hasAttribute('data-closed');
-      assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
-      assert.dom('[inert]').doesNotExist('nothing inert');
-      assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
-      assert.strictEqual(
-        active(),
-        el('[data-test-trigger]'),
-        'focus stays on the trigger',
-      );
+        state.nestedShown = false;
+        await settle();
+      });
 
-      // Opening the parent makes the nested drawer modal.
-      state.active = 2;
-      await settle();
-      assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-      assert.strictEqual(active(), el('[data-test-nested-button]'));
+      test(`a nested modal drawer inside a closed parent is not modal${suffix}`, async function (assert) {
+        const state = new State();
+        state.portaled = portaled;
+        await renderDrawer(state);
+        await settle();
+        assert.dom('[data-test-drawer]').hasAttribute('data-closed');
 
-      state.nestedShown = false;
-      state.active = 0;
-      await settle();
-    });
+        await focus('[data-test-trigger]');
+        state.nestedShown = true;
+        state.nestedActive = 2;
+        await settle();
+        assert.dom('[data-test-drawer]').hasAttribute('data-closed');
+        assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+        assert.dom('[inert]').doesNotExist('nothing inert');
+        assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
+        assert.strictEqual(
+          active(),
+          el('[data-test-trigger]'),
+          'focus stays on the trigger',
+        );
+        assert.strictEqual(
+          getComputedStyle(el('[data-test-nested-button]')).visibility,
+          'hidden',
+          'the closed parent hides the nested drawer',
+        );
+        if (portaled) {
+          assert.false(
+            el('[data-test-drawer]').contains(el('[data-test-nested]')),
+            'the nested drawer is outside the parent',
+          );
+        }
+
+        // Opening the parent makes the nested drawer modal.
+        state.active = 2;
+        await settle();
+        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+        assert.strictEqual(active(), el('[data-test-nested-button]'));
+
+        state.nestedShown = false;
+        state.active = 0;
+        await settle();
+      });
+    }
 
     test('inert that the app sets while the drawer is open stays after the close', async function (assert) {
       const state = new State();

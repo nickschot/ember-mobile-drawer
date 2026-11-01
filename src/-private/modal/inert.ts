@@ -1,10 +1,12 @@
 /**
- * Makes everything on the page except one element `inert`, for modal
- * drawers.
+ * Makes everything on the page except some elements `inert`, for modal
+ * drawers: the drawer's root and the portals of the drawers nested in it
+ * (see `nesting.ts`).
  *
- * "Everything except `element`" are the siblings of `element` and of each of
- * its ancestors up to `<body>`: the smallest set of subtrees that covers the
- * page without covering `element`. Each sibling gets the `inert` attribute,
+ * "Everything except the elements" are the siblings of each element and of
+ * each of its ancestors up to `<body>`, except the elements and their
+ * ancestors: the smallest set of subtrees that covers the page without
+ * covering one of the elements. Each sibling gets the `inert` attribute,
  * which removes it from the tab order, from pointer and find-in-page
  * interaction and from the accessibility tree.
  *
@@ -61,35 +63,56 @@ function own(change: () => void): void {
 }
 
 /**
- * Makes every element on the page outside `element` inert, until the
+ * Makes every element on the page outside `elements` inert, until the
  * returned function is called. Calling it more than once does nothing.
  */
-export function inertOutside(element: Element): () => void {
+export function inertOutside(...elements: Element[]): () => void {
   observer ??=
     typeof MutationObserver === 'undefined'
       ? undefined
       : new MutationObserver(handOver);
+  // The elements and their ancestors: never inert.
+  const kept = new Set<Element>();
+  for (const element of elements) {
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      kept.add(node);
+    }
+  }
   const touched: Element[] = [];
   own(() => {
-    for (
-      let node: Element = element;
-      node.parentElement && node !== document.body;
-      node = node.parentElement
-    ) {
-      for (const sibling of node.parentElement.children) {
-        if (sibling === node || SKIP.has(sibling.tagName)) continue;
-        const count = counts.get(sibling);
-        if (count === undefined) {
-          // Inert already, by the app: not ours to undo.
-          if (sibling.hasAttribute('inert')) continue;
-          sibling.setAttribute('inert', '');
-          observer?.observe(sibling, {
-            attributes: true,
-            attributeFilter: ['inert'],
-          });
+    for (const element of elements) {
+      // Inside another one of the elements: covered by that one.
+      if (
+        elements.some((other) => other !== element && other.contains(element))
+      ) {
+        continue;
+      }
+      for (
+        let node: Element = element;
+        node.parentElement && node !== document.body;
+        node = node.parentElement
+      ) {
+        for (const sibling of node.parentElement.children) {
+          if (
+            kept.has(sibling) ||
+            touched.includes(sibling) ||
+            SKIP.has(sibling.tagName)
+          ) {
+            continue;
+          }
+          const count = counts.get(sibling);
+          if (count === undefined) {
+            // Inert already, by the app: not ours to undo.
+            if (sibling.hasAttribute('inert')) continue;
+            sibling.setAttribute('inert', '');
+            observer?.observe(sibling, {
+              attributes: true,
+              attributeFilter: ['inert'],
+            });
+          }
+          counts.set(sibling, (count ?? 0) + 1);
+          touched.push(sibling);
         }
-        counts.set(sibling, (count ?? 0) + 1);
-        touched.push(sibling);
       }
     }
   });

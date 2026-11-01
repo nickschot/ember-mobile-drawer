@@ -78,7 +78,7 @@ Arguments:
 
 Attributes such as `class`, `aria-label` and `aria-labelledby` go on the drawer's root element.
 
-The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), the `handle` modifier, and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
+The block receives `snapTo(index)`, `open()` (largest snap point), `close()` (smallest snap point), the `handle` modifier, the `Nested` component (see [Nested drawers](#nested-drawers)), and the state `activeSnapPoint`, `isAnimating`, `isDragging` and `progress` (`0` closed to `1` at the largest snap point, for the snap point it is at or moving to). Snap points are recalculated when the viewport or the content changes size, and the drawer stays at the same snap point.
 
 ### Backdrop
 
@@ -286,6 +286,45 @@ Classic scrollbars: during the bounce past fully open (see [Dragging](#dragging)
 
 It doesn't help left and right drawers: `scrollbar-gutter` only reserves space for the vertical scrollbar, not the horizontal one.
 
+### Nested drawers
+
+A drawer can open another drawer, for example a sheet with a list that opens a details sheet for an item. Render the nested drawer in the yielded `Nested` component, not directly in the outer drawer's block:
+
+```gts
+<MobileDrawer
+  @snapPoints={{this.snapPoints}}
+  @activeSnapPoint={{this.active}}
+  @onSnapPointChange={{this.setActive}}
+  aria-label="Places"
+  as |drawer|
+>
+  <button type="button" {{on "click" this.showDetails}}>Coffee</button>
+
+  <drawer.Nested>
+    <MobileDrawer
+      @activeSnapPoint={{this.detailsActive}}
+      @onSnapPointChange={{this.setDetailsActive}}
+      aria-label="Details"
+    >
+      ...
+    </MobileDrawer>
+  </drawer.Nested>
+</MobileDrawer>
+```
+
+Why: the outer drawer's tray moves with a `transform`, so it is the containing block of everything inside it, also of a nested drawer's fixed root. A drawer inside the tray covers the tray, not the screen: while the outer drawer isn't fully open (for example at `'40%'`), the nested sheet is in the part of the tray that is off screen, and only its backdrop shows. iOS shows a nested sheet over the whole screen. `Nested` does the same: it renders its block outside the tray with `{{#in-element}}`, at the end of the outer drawer's parent element (so the nested drawer has the same ancestors, for example the element with a theme class; when the outer drawer is itself inside the tray of another drawer, at the end of the parent element of the outermost of those drawers, so no tray clips it), in a `<div class="mobile-drawer-nested">` with `display: contents`. Use `@destination` to render it in another element, for example `<drawer.Nested @destination={{this.layer}}>`. Without `@destination` the block renders once the outer drawer is in the DOM, one render after the outer drawer. With server-side rendering (FastBoot) it is therefore not in the HTML from the server: it renders after the app boots in the browser. A nested drawer is usually closed at first, so that is fine; pass `@destination` if the nested drawer must be in the server HTML.
+
+The nested drawer stays a part of the outer drawer, as if it were inside the tray:
+
+- **Modal stack:** the nested drawer is in front. Escape and the Tab wrap go to it first, also when the outer drawer opens further while the nested drawer is open.
+- **`inert`:** while a modal nested drawer is open, the outer drawer is inert. While the outer drawer is open, the nested drawer's element is not inert.
+- **`data-nested`:** the outer drawer gets it while a modal nested drawer is open (the iOS theme dims the outer sheet).
+- **Focus:** when the nested drawer closes, focus returns to the element that opened it, for example a button in the outer drawer.
+- **Closing the outer drawer:** when the outer drawer starts to close (for example because your app sets its `@activeSnapPoint` to `0`), it closes the nested drawers in its `Nested` that are open, like `close()` (through `@onSnapPointChange` when `@activeSnapPoint` is set). They move away at the same time as the outer drawer: they don't move with the outer tray, so else they would stay on the screen during its close animation. The nested drawer is no longer modal, and stays closed when the outer drawer opens again. If your app keeps a controlled nested drawer open, it hides with the outer drawer (the `.mobile-drawer-nested` element gets `data-closed`) and shows again when the outer drawer opens again.
+- **Gestures:** touches on the nested drawer don't reach the outer drawer, so a drag on the nested drawer never moves the outer one.
+
+A drawer directly inside another drawer's block still works as before, but it only shows while the outer tray is on screen where the nested drawer opens (in practice: while the outer drawer is fully open). Use `Nested` at every level: for three drawers, put the second one in the first one's `Nested` and the third one in the second one's `Nested`.
+
 ### Public imports
 
 These are the package's public API:
@@ -372,7 +411,7 @@ The drawer root (`.mobile-drawer`) carries state attributes you can style on:
 
   The scroll lock (see [Scrolling content](#scrolling-content)) doesn't use it: that follows where the drawer is shown, frame by frame.
 - `data-at-highest`: while the tray is shown at (or past) its highest snap point, where its content can scroll. Unlike `data-expanded` it follows where the drawer is shown, also during a drag or an animation: it comes when the expand progress (see [Floating sheet](#floating-sheet)) gets to 1, and goes when it leaves 1. The iOS theme makes the grabber strip opaque with it.
-- `data-nested`: while a modal drawer in front of this drawer is open (the modal drawer that opened last), and this drawer shows and is not inside it. The iOS theme dims the sheet with it.
+- `data-nested`: while a modal drawer in front of this drawer is open (the modal drawer that opened last), and this drawer shows and is not inside it (a drawer in the yielded `Nested` counts as inside). The iOS theme dims the sheet with it.
 
 ### Floating sheet
 

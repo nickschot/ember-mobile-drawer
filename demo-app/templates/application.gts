@@ -61,7 +61,9 @@ import { pageScale } from '../lib/page-scale.ts';
             [0, '40%', 'content'] and the iOS spring (springPresets.ios). Fully
             open, the list scrolls under the grabber, which stays at the sheet's
             page-facing edge. With "Scale the page", the page behind scales down
-            and gets rounded corners as the sheet opens.
+            and gets rounded corners as the sheet opens. Tap a place for a
+            nested sheet: it renders outside the sheet's tray with the yielded
+            Nested component, so it shows also while the sheet is at 40%.
           </p>
           <div class="demo-buttons"><IosSheetExample /></div>
         </article>
