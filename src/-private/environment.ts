@@ -19,6 +19,11 @@ export const drawerEnvironment: {
   /** Whether to lock body scrolling the iOS way, see `lockBodyScroll`. */
   isIOS?: () => boolean;
   /**
+   * SPIKE (#113): which iOS scroll lock to use. `'fixed'` (the default) fixes
+   * `<body>`; `'overflow'` doesn't, see `lockBodyScroll`.
+   */
+  iosScrollLock?: 'fixed' | 'overflow';
+  /**
    * The time (ms) of drag input, for the release velocity, instead of the
    * event's time stamp or the clock. Read on every pointer event of a drag.
    * `dragDrawer` from `ember-mobile-drawer/test-support` sets it while it

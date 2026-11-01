@@ -4,6 +4,13 @@ import BottomSheetExample from '../components/bottom-sheet-example.gts';
 import SideDrawerExample from '../components/side-drawer-example.gts';
 import IosSheetExample from '../components/ios-sheet-example.gts';
 import { pageScale } from '../lib/page-scale.ts';
+import LockSpikeExample from '../components/lock-spike-example.gts';
+import { lockSpike } from '../lib/lock-spike.ts';
+
+const FILLER = Array.from(
+  { length: 40 },
+  (_, index) => `Page line ${index + 1}`,
+);
 
 <template>
   {{pageTitle "ember-mobile-drawer"}}
@@ -67,6 +74,22 @@ import { pageScale } from '../lib/page-scale.ts';
           </p>
           <div class="demo-buttons"><IosSheetExample /></div>
         </article>
+
+        {{#if lockSpike.debug}}
+          <article class="demo-example" aria-labelledby="example-lock-spike">
+            <h3 id="example-lock-spike">Scroll lock test (spike, #113)</h3>
+            <p class="demo-hint">
+              lock={{lockSpike.lock}}. A text field, a list and a nested drawer.
+              Add modal=0 to the URL for a non-modal drawer.
+            </p>
+            <div class="demo-buttons"><LockSpikeExample /></div>
+          </article>
+          <ol class="lock-spike-filler">
+            {{#each FILLER as |line|}}
+              <li>{{line}}</li>
+            {{/each}}
+          </ol>
+        {{/if}}
       </section>
     </main>
   </div>

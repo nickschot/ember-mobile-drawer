@@ -3,6 +3,8 @@ import EmberRouter from '@ember/routing/router';
 import PageTitleService from 'ember-page-title/services/page-title';
 import '#src/styles.css';
 import '#src/themes/ios.css';
+// SPIKE (#113): sets the iOS scroll lock before anything renders.
+import './lib/lock-spike.ts';
 
 class Router extends EmberRouter {
   location = 'history';
