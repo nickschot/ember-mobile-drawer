@@ -582,6 +582,11 @@ module('Integration | themes/ios.css', function (hooks) {
         tray.clientWidth,
         'the rim box is as wide as the tray',
       );
+      assert.strictEqual(
+        tray.scrollWidth,
+        tray.clientWidth,
+        'no horizontal overflow',
+      );
     });
 
     test(`${placement}: with padding on the tray's leading edge, a negative offset on the grabber removes the gap`, async function (assert) {
@@ -615,6 +620,65 @@ module('Integration | themes/ios.css', function (hooks) {
       assert.true(Math.abs(gap()) < 1, `scrolled: ${gap()}px`);
     });
   }
+
+  for (const placement of ['left', 'right'] as const) {
+    test(`${placement}: with side safe areas the grabber doesn't make the tray scroll sideways`, async function (assert) {
+      // Simulated side safe areas, as above. A side drawer's content pads
+      // only its outer side (see styles.css).
+      const side = placement === 'left' ? 'left' : 'right';
+      styles.push(
+        addStyles(`
+          .mobile-drawer-theme-ios {
+            --_mobile-drawer-ios-inset-left: 20px;
+            --_mobile-drawer-ios-inset-right: 30px;
+          }
+          .mobile-drawer__content { padding-${side}: 20px; }
+        `),
+      );
+      await renderDrawer({ placement, tall: true, expanded: true });
+      const tray = el('[data-test-tray]');
+      tray.style.scrollbarWidth = 'none';
+      assert.strictEqual(
+        tray.scrollWidth,
+        tray.clientWidth,
+        'no horizontal overflow',
+      );
+      const strip = getComputedStyle(el('[data-test-grabber]'));
+      assert.deepEqual(
+        [strip.marginLeft, strip.marginRight],
+        ['0px', '0px'],
+        'no side margins',
+      );
+    });
+  }
+
+  test("bottom: with the README rule, content without side padding doesn't make the tray scroll sideways", async function (assert) {
+    styles.push(
+      addStyles(`
+        .mobile-drawer-theme-ios {
+          --_mobile-drawer-ios-inset-left: 20px;
+          --_mobile-drawer-ios-inset-right: 30px;
+        }
+        .mobile-drawer__content { padding-left: 0; padding-right: 0; }
+        .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber {
+          margin-left: 0;
+          margin-right: 0;
+          padding-left: 0;
+          padding-right: 0;
+        }
+      `),
+    );
+    await renderDrawer({ tall: true, expanded: true });
+    const tray = el('[data-test-tray]');
+    tray.style.scrollbarWidth = 'none';
+    assert.strictEqual(tray.scrollWidth, tray.clientWidth, 'no overflow');
+    const t = tray.getBoundingClientRect();
+    const g = el('[data-test-grabber]').getBoundingClientRect();
+    assert.true(
+      Math.abs(g.left - t.left) < 1 && Math.abs(t.right - g.right) < 1,
+      'the strip spans the tray',
+    );
+  });
 
   test('the rim over the strip is only drawn where the strip is opaque', function (assert) {
     // Without relative colours the expanded strip is translucent: the tray

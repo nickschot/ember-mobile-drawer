@@ -444,6 +444,18 @@ The glass rim (the light inner edge of the sheet, an inset shadow in `--mobile-d
   ```
 
   For a top drawer with `padding-bottom` on the tray, set `bottom` instead. Side padding on the tray makes the strip and its rim narrower than the sheet in the same way; pad your own elements instead.
+- **Changed side padding on the content.** In bottom and top drawers the strip moves out of the side padding that the base styles give `.mobile-drawer__content` (`env(safe-area-inset-left)` and `env(safe-area-inset-right)`), so it spans the full tray width. If your app changes that padding, change the strip to match: minus your padding as the side margins, and your padding as the strip's side padding. For example, for content without side padding:
+
+  ```css
+  .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber {
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  ```
+
+  If you don't, the strip doesn't match the content padding: with less padding the tray scrolls sideways by the difference, with more the strip and its rim are narrower than the sheet. Left and right drawers don't get the side margins.
 - **App content with a `z-index`.** The strip has `z-index: 1` in the tray. Positioned content in the tray with a `z-index` of 1 or more (for example a menu with `position: relative; z-index: 2`) paints above the strip when it scrolls under it. The theme can't put a stacking context around the content after the grabber without changing how that content stacks. Keep such content at `z-index: 0` or lower, put it in a wrapper with `isolation: isolate` (its children then stack inside the wrapper, under the strip), or give the strip a higher `z-index`.
 
 #### Page scale

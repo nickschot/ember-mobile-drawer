@@ -248,16 +248,32 @@
     position: sticky;
     top: 0;
     z-index: 1;
-    /* Across the full tray width: out of the content's side padding (the
-       safe areas, e.g. iPhone landscape), with the same padding inside, so
-       the bar stays clear of the safe areas. */
-    margin-right: calc(-1 * var(--_mobile-drawer-ios-inset-right));
-    margin-left: calc(-1 * var(--_mobile-drawer-ios-inset-left));
-    padding: 5px var(--_mobile-drawer-ios-inset-right) 5px
-      var(--_mobile-drawer-ios-inset-left);
+    padding: 5px 0;
     /* Clips the rim in ::after to the strip. */
     overflow: hidden;
     background: transparent;
+  }
+
+  /*
+   * Bottom and top sheets: across the full tray width, out of the content's
+   * side padding (the side safe areas, e.g. iPhone landscape), with the same
+   * padding inside, so the bar stays clear of the safe areas. The values are
+   * the base styles' content padding for these placements; an app that
+   * changes that padding must change these too (see the README). Not for
+   * left and right drawers: their content has no padding on one side, so
+   * the margins would make the tray scroll sideways.
+   */
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer:is([data-placement="bottom"], [data-placement="top"])
+      > .mobile-drawer__tray
+      > .mobile-drawer__content
+      > .mobile-drawer-theme-ios__grabber
+  ) {
+    margin-right: calc(-1 * var(--_mobile-drawer-ios-inset-right));
+    margin-left: calc(-1 * var(--_mobile-drawer-ios-inset-left));
+    padding-right: var(--_mobile-drawer-ios-inset-right);
+    padding-left: var(--_mobile-drawer-ios-inset-left);
   }
 
   :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::before {
