@@ -293,6 +293,111 @@ module('Integration | Component | mobile-drawer | keyboard', function (hooks) {
     assert.strictEqual(fills().length, 0);
   });
 
+  test('the fill takes the new tray colour when the drawer moves to its highest snap point', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+    await settle();
+    el('[data-test-field]').focus();
+    await openKeyboard(state);
+    const glass = getComputedStyle(fill()).backgroundColor;
+    assert.strictEqual(glass, getComputedStyle(tray()).backgroundColor);
+
+    state.active = 2;
+    await settle();
+    const opaque = getComputedStyle(tray()).backgroundColor;
+    assert.notStrictEqual(opaque, glass, 'the theme made the tray opaque');
+    assert.strictEqual(getComputedStyle(fill()).backgroundColor, opaque);
+    await closeKeyboard(state);
+  });
+
+  test('with a nested drawer only the drawer with the focused field shows a fill, and all fills go at once', async function (assert) {
+    const state = new State();
+    const nested = new State();
+    nested.active = 1;
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        {{#in-element destination insertBefore=null}}
+          <div class="mobile-drawer-theme-ios" style={{state.wrapperStyle}}>
+            <MobileDrawer
+              @snapPoints={{SNAP_POINTS}}
+              @activeSnapPoint={{state.active}}
+              @modal={{false}}
+              aria-label="Outer"
+              style={{state.rootStyle}}
+              data-test-drawer
+              as |drawer|
+            >
+              <input type="text" aria-label="Outer field" data-test-field />
+              <button type="button" data-test-button>Button</button>
+              <drawer.Nested>
+                <MobileDrawer
+                  @snapPoints={{SNAP_POINTS}}
+                  @activeSnapPoint={{nested.active}}
+                  @modal={{false}}
+                  aria-label="Inner"
+                  style={{nested.rootStyle}}
+                  data-test-inner
+                >
+                  <input
+                    type="text"
+                    aria-label="Inner field"
+                    data-test-inner-field
+                  />
+                </MobileDrawer>
+              </drawer.Nested>
+            </MobileDrawer>
+          </div>
+        {{/in-element}}
+      </template>,
+    );
+    await settle();
+    const outer = root();
+    const inner = el('[data-test-inner]');
+
+    el('[data-test-inner-field]').focus();
+    viewport.height = HEIGHT - 300;
+    state.shift = 250;
+    nested.shift = 250;
+    await settled();
+    viewport.dispatchEvent(new Event('resize'));
+    assert.strictEqual(fills().length, 1, 'one fill');
+    assert.dom(inner).hasAttribute(KEYBOARD_ATTRIBUTE, '', 'the inner one');
+    assert.dom(outer).doesNotHaveAttribute(KEYBOARD_ATTRIBUTE);
+
+    el('[data-test-field]').focus();
+    viewport.dispatchEvent(new Event('scroll'));
+    assert.strictEqual(fills().length, 1, 'still one fill');
+    assert.dom(outer).hasAttribute(KEYBOARD_ATTRIBUTE, '', 'now the outer one');
+    assert.dom(inner).doesNotHaveAttribute(KEYBOARD_ATTRIBUTE);
+
+    el('[data-test-inner-field]').focus();
+    viewport.dispatchEvent(new Event('scroll'));
+    assert.dom(inner).hasAttribute(KEYBOARD_ATTRIBUTE);
+
+    // The keyboard's Done button: focus leaves the inner drawer for nothing.
+    el('[data-test-inner-field]').blur();
+    assert.strictEqual(fills().length, 0, 'every fill goes at once');
+    assert.dom(outer).doesNotHaveAttribute(KEYBOARD_ATTRIBUTE);
+    assert.dom(inner).doesNotHaveAttribute(KEYBOARD_ATTRIBUTE);
+
+    // The inner drawer closes while the keyboard is open for the outer one.
+    el('[data-test-field]').focus();
+    viewport.dispatchEvent(new Event('resize'));
+    assert.dom(outer).hasAttribute(KEYBOARD_ATTRIBUTE);
+    nested.active = 0;
+    await settle();
+    assert.strictEqual(fills().length, 1);
+    assert.dom(outer).hasAttribute(KEYBOARD_ATTRIBUTE);
+
+    viewport.height = HEIGHT;
+    state.shift = 0;
+    nested.shift = 0;
+    await settled();
+    viewport.dispatchEvent(new Event('resize'));
+    assert.strictEqual(fills().length, 0);
+  });
+
   test('no fill where the root stays in place (other browsers), for a top drawer, an embedded drawer or a pinch zoom', async function (assert) {
     const state = new State();
     await renderDrawer(state);

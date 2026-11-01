@@ -40,6 +40,15 @@
  * `position: fixed` (an embedded drawer's root is in the page, and can be
  * above the viewport because the page is scrolled).
  *
+ * Only one drawer shows a fill at a time: with nested drawers (also those
+ * rendered with the yielded `Nested`), the outer drawer is an open bottom
+ * drawer too, and two fills would show at the same place. Of the drawers
+ * that can show one, the innermost drawer that contains the focused
+ * element shows it; if none contains it, the drawer that became active
+ * last. Every change (a viewport event, a drawer that opens or closes, a
+ * focusout) syncs all of them. A focusout in any drawer to an element that
+ * doesn't keep the keyboard open hides every fill at once.
+ *
  * @module
  * @internal
  */
@@ -68,19 +77,87 @@ export interface KeyboardFillOptions {
    * the user edits).
    */
   keepsKeyboard: (element: Element) => boolean;
+  /**
+   * Whether `node` belongs to `ancestor`, also through the portals of the
+   * yielded `Nested` (which are outside its DOM).
+   */
+  contains: (ancestor: Element, node: Node | null | undefined) => boolean;
 }
 
 /** Below this (px), the strip counts as none. */
 const MIN_STRIP = 1;
 
+interface Strip {
+  top: number;
+  height: number;
+}
+
+/** The fills of the mounted drawers. */
+const fills = new Set<KeyboardFill>();
+/** Counts activations, so the drawer that became active last is known. */
+let activations = 0;
+
+/** The focused element, also inside an open shadow root. */
+function focusedElement(): Element | null {
+  let element = document.activeElement;
+  while (element?.shadowRoot?.activeElement) {
+    element = element.shadowRoot.activeElement;
+  }
+  return element;
+}
+
+/**
+ * Shows the fill of the one drawer that should have it (see the module
+ * docs), where it needs one, and hides every other fill.
+ */
+function syncAll(): void {
+  const candidates: { fill: KeyboardFill; strip: Strip }[] = [];
+  for (const fill of fills) {
+    const strip = fill.strip();
+    if (strip) candidates.push({ fill, strip });
+    else fill.hide();
+  }
+  const focused = focusedElement();
+  const holding = candidates.filter(({ fill }) => fill.contains(focused));
+  // The innermost drawer that holds the focus: no other one is inside it.
+  let owner = holding.find(
+    ({ fill }) =>
+      !holding.some(
+        (other) => other.fill !== fill && fill.contains(other.fill.root),
+      ),
+  );
+  if (!owner) {
+    for (const candidate of candidates) {
+      if (!owner || candidate.fill.activation > owner.fill.activation) {
+        owner = candidate;
+      }
+    }
+  }
+  for (const { fill, strip } of candidates) {
+    if (owner?.fill === fill) fill.show(strip);
+    else fill.hide();
+  }
+}
+
+function hideAll(): void {
+  for (const fill of fills) fill.hide();
+}
+
 export class KeyboardFill {
   #options: KeyboardFillOptions;
   #element?: HTMLElement;
   #listening = false;
+  /** When it became active last, see `activations`. */
+  activation = 0;
 
   constructor(options: KeyboardFillOptions) {
     this.#options = options;
     options.root.addEventListener('focusout', this.#onFocusOut);
+    fills.add(this);
+  }
+
+  get root(): HTMLElement {
+    return this.#options.root;
   }
 
   /** Whether the fill shows. */
@@ -88,32 +165,35 @@ export class KeyboardFill {
     return this.#element?.isConnected ?? false;
   }
 
+  /** Whether `node` belongs to this drawer. */
+  contains(node: Node | null | undefined): boolean {
+    return this.#options.contains(this.#options.root, node);
+  }
+
   /**
    * Listens to the visual viewport while the drawer is active, and shows,
-   * moves or hides the fill. Call it when the drawer opens or closes; the
-   * viewport's own `resize` and `scroll` events call it too.
+   * moves or hides the fills of all drawers. Call it when the drawer opens
+   * or closes; the viewport's own `resize` and `scroll` events call it too.
    */
   sync = (): void => {
     const { viewport, active } = this.#options;
     const on = active();
     if (viewport && on !== this.#listening) {
       this.#listening = on;
+      if (on) this.activation = ++activations;
       const method = on ? 'addEventListener' : 'removeEventListener';
       viewport[method]('resize', this.sync);
       viewport[method]('scroll', this.sync);
     }
-    const strip = on && viewport ? this.#strip(viewport) : undefined;
-    if (strip) {
-      this.#show(strip.top, strip.height);
-    } else {
-      this.#hide();
-    }
+    syncAll();
   };
 
   /**
    * Copies the tray's colour to the fill again, e.g. after the drawer moved
    * to a snap point where a theme changes it. Does nothing while the fill
-   * is hidden.
+   * is hidden. It forces a style calculation, so the component only calls
+   * it when the colour can change: when the expand progress or
+   * `data-expanded` changes.
    */
   paint(): void {
     const element = this.#element;
@@ -138,30 +218,36 @@ export class KeyboardFill {
       viewport.removeEventListener('scroll', this.sync);
     }
     this.#listening = false;
-    this.#hide();
+    fills.delete(this);
+    this.hide();
+    // Another drawer may need its fill now.
+    if (fills.size > 0) syncAll();
   }
 
   /**
-   * Hides the fill at once when focus leaves a field in the drawer for an
+   * Hides every fill at once when focus leaves a field in the drawer for an
    * element that doesn't keep the keyboard open (or for nothing, e.g. the
    * keyboard's Done button). Safari moves the fixed root back down as the
-   * keyboard starts to close, before the visual viewport's events: the fill
-   * would then cover the bottom of the sheet until they come. Focus that
-   * moves to another field keeps it; the viewport's events move it.
+   * keyboard starts to close, before the visual viewport's events: a fill
+   * would then cover the bottom of the sheet until they come. Every fill,
+   * also that of a drawer around this one, which doesn't get this focusout
+   * (e.g. this drawer is rendered with its `Nested`). Focus that moves to
+   * another field keeps them; the viewport's events move them.
    */
   #onFocusOut = (event: FocusEvent): void => {
     const to = event.relatedTarget;
     if (to instanceof Element && this.#options.keepsKeyboard(to)) return;
-    this.#hide();
+    hideAll();
   };
 
   /**
    * The strip between the root's bottom and the screen's, in client px, or
-   * `undefined` if there is none.
+   * `undefined` if there is none or the drawer is not active.
    */
-  #strip(viewport: ViewportLike): { top: number; height: number } | undefined {
+  strip(): Strip | undefined {
+    const { viewport, root } = this.#options;
+    if (!viewport || !this.#listening) return undefined;
     if ((viewport.scale ?? 1) > 1.01) return undefined;
-    const { root } = this.#options;
     const rect = root.getBoundingClientRect();
     if (viewport.height >= rect.height - MIN_STRIP) return undefined;
     if (getComputedStyle(root).position !== 'fixed') return undefined;
@@ -170,7 +256,7 @@ export class KeyboardFill {
     return { top: rect.bottom, height };
   }
 
-  #show(top: number, height: number): void {
+  show({ top, height }: Strip): void {
     let element = this.#element;
     if (!element) {
       element = this.#element = document.createElement('div');
@@ -198,7 +284,7 @@ export class KeyboardFill {
     style.height = `${height}px`;
   }
 
-  #hide(): void {
+  hide(): void {
     if (!this.#element?.isConnected) return;
     this.#element.remove();
     this.#options.root.removeAttribute(KEYBOARD_ATTRIBUTE);

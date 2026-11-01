@@ -460,6 +460,7 @@ When a field gets focus, iOS Safari moves the visual viewport up in the page to 
 
 - It adds an empty, `aria-hidden` element `.mobile-drawer-keyboard-fill` to `<html>`, below the root of an open bottom drawer, from the bottom of the root to the bottom of the screen. It is not fixed, so Safari doesn't clip it. It has the tray's `background-color` and `backdrop-filter` and the root's `z-index`, and takes no pointer events. It follows the `visualViewport` `resize` and `scroll` events. It goes when focus leaves the fields (for example with the keyboard's Done button), when the keyboard closes and when the drawer closes.
 - The root gets `data-keyboard` for that time. The floating sheet (see [Floating sheet](#floating-sheet)) then goes to the edges and the bottom of the root, and the iOS theme gives it no bottom radius, so the sheet meets the fill, as a native sheet goes on behind the keyboard. The content and the field don't move.
+- Only one drawer shows a fill at a time. With nested drawers (also those rendered with the yielded `Nested`), the innermost drawer that contains the focused field shows it. When focus leaves the fields, every fill goes at once.
 - Only for a `position: fixed` root (not an embedded drawer), while the page isn't zoomed in. Other browsers keep fixed elements in the layout viewport's coordinates and don't get the fill.
 
 ### iOS theme

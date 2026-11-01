@@ -1166,6 +1166,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           this.placement === 'bottom' &&
           !root.hasAttribute('data-closed'),
         keepsKeyboard: isEditable,
+        contains: logicallyContains,
       });
       this.#keyboardFill.sync();
 
@@ -1374,10 +1375,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #markExpanded(target: number): void {
     const { maxOffset } = this.#layout!;
-    this.#root!.toggleAttribute(
-      'data-expanded',
-      maxOffset > 0 && target >= maxOffset - EPSILON,
-    );
+    const root = this.#root!;
+    const expanded = maxOffset > 0 && target >= maxOffset - EPSILON;
+    if (root.hasAttribute('data-expanded') === expanded) return;
+    root.toggleAttribute('data-expanded', expanded);
+    // A theme may change the tray's colour with it, see `KeyboardFill`.
+    this.#keyboardFill?.paint();
   }
 
   /**
@@ -1734,8 +1737,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         : 0,
     );
     this.#setClosed(open <= 0 && !this.#spring!.isAnimating && !this.#drag);
-    // A theme may change the tray's colour with the snap point.
-    this.#keyboardFill?.paint();
   }
 
   /**
@@ -1782,6 +1783,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const value = String(progress);
     this.#sheet?.style.setProperty('--mobile-drawer-expand-progress', value);
     this.#barTint?.style.setProperty('--mobile-drawer-expand-progress', value);
+    // A theme may change the tray's colour with it (e.g. the iOS theme's
+    // glass that becomes opaque), see `KeyboardFill`.
+    this.#keyboardFill?.paint();
   }
 
   /**
