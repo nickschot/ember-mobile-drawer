@@ -17,7 +17,8 @@
  * depend on load order, but load it after styles.css anyway. The real
  * properties it sets are `backdrop-filter` and `transition` on the tray and
  * the grabber's and `border-radius` on the sheet, which the base styles
- * don't set, and `background` on the tray, `box-shadow` on a nested tray,
+ * don't set, the shadow layer's boxes (see "The shadow"), and `background`
+ * on the tray, `box-shadow` on a bottom tray and on a nested tray,
  * `opacity` and `filter` on the backdrop, `background-color` on the bar
  * tint and `background-color` on the backdrop tint, which the base styles
  * also set: those rules have a specificity above zero (see "Overriding"),
@@ -95,6 +96,13 @@
  *                                       minus the inset (about 55px - 8px
  *                                       on current iPhones) for corners
  *                                       concentric with the display.
+ *   --mobile-drawer-ios-shadow          The outer shadow of a bottom sheet,
+ *                                       on the shadow layer (see "The
+ *                                       shadow"). A 0.5px edge line and
+ *                                       `0 7px 32px` black at 12% (light) or
+ *                                       18% (dark), measured on a native
+ *                                       sheet in the iOS 27.2 simulator.
+ *                                       `none` for no shadow.
  *   --mobile-drawer-ios-partial-dim     0 (default): no dim at and below the
  *                                       second-highest snap point, the dim
  *                                       comes in towards the highest. 1: the
@@ -126,13 +134,12 @@
  * expands, and a `content` snap point doesn't move. The theme pads the
  * content of a bottom sheet by the inset on both sides, at every snap
  * point, so the clipped sides hide nothing: at full height the content has
- * 8px more side padding than a native sheet. While the sheet floats, the
- * clips hide the tray's outer shadow on every side, also above the top
- * edge: the glass rim and the blur separate the sheet from the page, as
- * on iOS 27, where the floating sheet's shadow is hardly visible. At the
- * highest snap point the whole shadow shows. Top, left and right drawers
- * don't float. The top corners have the theme radius (36px) at every snap
- * point.
+ * 8px more side padding than a native sheet. The clips would cut the
+ * tray's outer shadow, so the tray of a bottom sheet has only the glass
+ * rim, and the theme draws the outer shadow on the shadow layer
+ * (`.mobile-drawer__shadow`, see "The shadow" below), at every snap point.
+ * Top, left and right drawers don't float. The top corners have the theme
+ * radius (36px) at every snap point.
  *
  * Full height: the sheet goes from glass to opaque (the sheet colour,
  * `--mobile-drawer-background`, the theme's or the app's, without its
@@ -236,7 +243,7 @@
  * Overriding: everything lives in the `ember-mobile-drawer` cascade layer
  * with :where() selectors (zero specificity), so unlayered app CSS always
  * wins. Exceptions: the rules for real properties that the base styles also
- * set (the tray `background` and a nested tray's `box-shadow`, the
+ * set (the tray `background`, a bottom and a nested tray's `box-shadow`, the
  * backdrop's `opacity` and `filter`, the bar tint's and the backdrop tint's
  * `background-color`) have the specificity of one class (0,1,0), so they
  * win over the base styles' rules in any load order.
@@ -282,6 +289,9 @@
       0 0 0 0.5px rgb(0 0 0 / 0.12), 0 0 32px rgb(0 0 0 / 0.12);
     --mobile-drawer-backdrop-color: rgb(0 0 0);
     --mobile-drawer-backdrop-opacity: 0.35;
+    /* The outer shadow of a bottom sheet (see "The shadow" below). */
+    --mobile-drawer-ios-shadow:
+      0 0 0 0.5px rgb(0 0 0 / 0.12), 0 7px 32px rgb(0 0 0 / 0.12);
     /* Private: the colour of the glass rim, which the grabber strip draws
        again over its own background (see the grabber). The solid sheet has
        no rim. */
@@ -299,6 +309,9 @@
       --mobile-drawer-shadow:
         0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
         0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+      --mobile-drawer-ios-shadow:
+        0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6)),
+        0 7px 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.18));
     }
   }
 
@@ -591,6 +604,187 @@
   }
 
   /*
+   * The shadow (bottom sheets): the sheet clips the tray, so the tray's own
+   * outer shadow can't show around the floating sheet (see styles.css). The
+   * theme draws it on the shadow layer (`.mobile-drawer__shadow`, before the
+   * sheet) instead, with `--mobile-drawer-ios-shadow`, in the shape of the
+   * sheet: the inset, the top radius, the bottom radius and the expand
+   * progress. The tray of a bottom sheet keeps only the glass rim. So the
+   * shadow shows at every snap point and while the sheet moves, and it
+   * doesn't come in suddenly at the highest snap point (#114, N1).
+   *
+   * The sheet's top edge moves with the tray, its bottom edge stays. The
+   * layer has two parts, so that each one only moves with a transform and
+   * its shadow isn't painted again while the drawer moves:
+   * - The edge (`.mobile-drawer__shadow-edge::before`): a box with the top
+   *   radius at the tray's top edge. The component moves the layer with the
+   *   tray (the same transform). The edge element clips it below the top
+   *   corners (at the top radius).
+   * - The body (`.mobile-drawer__shadow-body`): a box with the sheet's sides
+   *   and bottom edge, with the bottom radius. The clip element moves with
+   *   the layer and clips it above the same line; the component gives the
+   *   body the opposite transform, so it stays at the sheet's bottom edge.
+   * Both boxes have straight sides at that line and the same shadow, so the
+   * two parts meet without a line. The boxes go on for
+   * `--_mobile-drawer-ios-shadow-room` (120px) past the line and the clips
+   * leave as much room around the sheet, so a shadow with a blur, spread
+   * and offset up to about 100px in all fits.
+   *
+   * Cost: while the drawer moves between snap points below the highest,
+   * only transforms change (no paint). Towards the highest snap point the
+   * inset and the radius change, so the boxes are painted again, as the
+   * tray is (its clip changes too).
+   */
+  :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer:not(
+          [data-placement="top"],
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+    )
+    > .mobile-drawer__shadow {
+    /* Private: the room around the sheet for the shadow, see above. */
+    --_mobile-drawer-ios-shadow-room: 120px;
+    display: block;
+    inset: auto 0 0;
+    /* Closed until the component writes the tray's transform. */
+    transform: translate3d(0, 100%, 0);
+  }
+
+  :where(
+    .mobile-drawer-theme-ios .mobile-drawer__shadow-edge,
+    .mobile-drawer-theme-ios .mobile-drawer__shadow-clip,
+    .mobile-drawer-theme-ios .mobile-drawer__shadow-body
+  ) {
+    /* From the layer (registered as not inherited, see styles.css). */
+    --mobile-drawer-expand-progress: inherit;
+    position: absolute;
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-edge) {
+    top: calc(-1 * var(--_mobile-drawer-ios-shadow-room));
+    right: 0;
+    left: 0;
+    height: calc(
+      var(--_mobile-drawer-ios-shadow-room) + var(--mobile-drawer-radius, 0px)
+    );
+    overflow: hidden;
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-edge)::before {
+    --mobile-drawer-expand-progress: inherit;
+    content: "";
+    position: absolute;
+    top: var(--_mobile-drawer-ios-shadow-room);
+    right: calc(
+      var(--mobile-drawer-inset, 0px) *
+        (1 - var(--mobile-drawer-expand-progress))
+    );
+    left: calc(
+      var(--mobile-drawer-inset, 0px) *
+        (1 - var(--mobile-drawer-expand-progress))
+    );
+    height: calc(
+      var(--mobile-drawer-radius, 0px) + var(--_mobile-drawer-ios-shadow-room)
+    );
+    border-radius: var(--mobile-drawer-radius, 0px)
+      var(--mobile-drawer-radius, 0px) 0 0;
+    box-shadow: var(--mobile-drawer-ios-shadow, none);
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-clip) {
+    top: var(--mobile-drawer-radius, 0px);
+    right: 0;
+    bottom: calc(-1 * var(--_mobile-drawer-ios-shadow-room));
+    left: 0;
+    overflow: hidden;
+  }
+
+  /* Its bottom is the sheet's bottom edge: the clip ends the room below
+     the layer, and the layer ends at the root's bottom edge. */
+  :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-body) {
+    top: calc(-1 * var(--_mobile-drawer-ios-shadow-room));
+    right: calc(
+      var(--mobile-drawer-inset, 0px) *
+        (1 - var(--mobile-drawer-expand-progress))
+    );
+    bottom: calc(
+      var(--_mobile-drawer-ios-shadow-room) + var(--mobile-drawer-inset, 0px) *
+        (1 - var(--mobile-drawer-expand-progress))
+    );
+    left: calc(
+      var(--mobile-drawer-inset, 0px) *
+        (1 - var(--mobile-drawer-expand-progress))
+    );
+    /* The sheet's bottom radius, see "The floating sheet". */
+    border-radius: 0 0
+      min(
+        calc(
+          var(
+              --mobile-drawer-ios-bottom-radius,
+              var(--mobile-drawer-radius, 0px)
+            ) *
+            min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
+        ),
+        calc(var(--mobile-drawer-inset, 0px) * 1000)
+      )
+      min(
+        calc(
+          var(
+              --mobile-drawer-ios-bottom-radius,
+              var(--mobile-drawer-radius, 0px)
+            ) *
+            min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
+        ),
+        calc(var(--mobile-drawer-inset, 0px) * 1000)
+      );
+    box-shadow: var(--mobile-drawer-ios-shadow, none);
+  }
+
+  /* [data-keyboard]: the sheet fills the root (see styles.css). */
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-keyboard]
+      > .mobile-drawer__shadow
+      .mobile-drawer__shadow-edge
+  )::before {
+    right: 0;
+    left: 0;
+  }
+
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-keyboard]
+      > .mobile-drawer__shadow
+      .mobile-drawer__shadow-body
+  ) {
+    right: 0;
+    bottom: var(--_mobile-drawer-ios-shadow-room);
+    left: 0;
+    border-radius: 0;
+  }
+
+  /*
+   * The tray of a bottom sheet: only the glass rim, no outer shadow (the
+   * shadow layer draws it). Specificity 0,1,0, so it wins over the base
+   * tray shadow in either load order. Thus `--mobile-drawer-shadow` doesn't
+   * apply to a bottom sheet with this theme; see the README.
+   */
+  :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer:not(
+          [data-placement="top"],
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+    )
+    > .mobile-drawer__tray {
+    box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
+  }
+
+  /*
    * The dim: the backdrop, the backdrop tint (the status bar on iOS Safari)
    * and the bar tint follow the expand progress, not the drawer's progress:
    * no dim at and below the second-highest snap point, the full dim at the
@@ -849,6 +1043,23 @@
     > .mobile-drawer__tray {
     box-shadow:
       var(--mobile-drawer-shadow, 0 0 12px rgb(0 0 0 / 0.2)),
+      inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
+  }
+
+  /* A bottom sheet: the rim and the dim, without an outer shadow (the
+     shadow layer draws it, see "The shadow"). */
+  :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-nested]:not(
+          [data-placement="top"],
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+    )
+    > .mobile-drawer__tray {
+    box-shadow:
+      inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent),
       inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
   }
 
