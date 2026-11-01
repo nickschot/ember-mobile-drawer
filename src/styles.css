@@ -342,7 +342,11 @@
  * distance below that snap point) and the opposite one on the tray and the
  * glass layer, so the sheet keeps its shape (the inset and the bottom
  * radius) and goes off the bottom edge with the tray, as a native iOS
- * sheet does (#142). The inset area takes no pointer events. The
+ * sheet does (#142). Only while the inset isn't 0 (a sheet without an
+ * inset doesn't move, so its clip doesn't cut the tray's top shadow). So
+ * below that snap point an inline `translate` on the tray is replaced, and
+ * a CSS `translate` on the tray doesn't apply. The inset area takes no
+ * pointer events. The
  * clipped sides of the tray hide `inset` px of the content on each side
  * below the highest snap point: pad the content by the inset (the iOS
  * theme does). While the sheet floats, the clips hide the tray's outer

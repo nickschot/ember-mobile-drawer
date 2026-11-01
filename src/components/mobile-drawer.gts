@@ -934,6 +934,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
   #layout?: Layout;
+  /** Whether the tray is below the lowest open snap point, see `#paintSink`. */
+  #below = false;
+  /** Whether the sheet floats, read in `#paintSink`. */
+  #floats = false;
+  /** How far (px) `#paintSink` moved the sheet down. */
+  #moved = 0;
   #placement?: Placement;
   #destroyed = false;
   #pendingState?: PendingState;
@@ -1976,6 +1982,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const root = this.#root!;
     const changed = root.hasAttribute('data-closed') !== closed;
     root.toggleAttribute('data-closed', closed);
+    // The next open reads the inset again, see `#paintSink`.
+    if (closed) this.#below = false;
     for (const portal of this.#portals) {
       portal.toggleAttribute('data-closed', closed);
     }
@@ -1994,29 +2002,59 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * stays under the tray. Only for bottom drawers: the layers are only
    * used for a floating bottom sheet.
    *
-   * Below the lowest open snap point the sheet moves down by `sink` px
-   * (see `#sinkOf`) with an inline `translate`, and with it its clip (the
-   * bottom edge with a theme's inset and bottom radius) and the shadow
-   * body. The tray and the glass layer get the opposite `translate`, so
-   * they stay where their `transform` puts them. All are transforms, so a
-   * frame still doesn't lay out or paint again.
+   * Below the lowest open snap point a floating sheet moves down as one
+   * piece, see `#paintSink`; the shadow body moves with it.
    */
   #paintShadow(transform: string, distance: number, sink: number): void {
+    // Also for the other placements: that clears a move that a bottom
+    // drawer left before its placement changed.
+    const moved = this.#paintSink(sink);
     if (this.placement !== 'bottom') return;
-    const down = sink > 0 ? `0px ${sink}px` : '';
-    const up = sink > 0 ? `0px ${-sink}px` : '';
-    this.#sheet!.style.translate = down;
-    this.#tray!.style.translate = up;
-    if (this.#glass) {
-      this.#glass.style.transform = transform;
-      this.#glass.style.translate = up;
-    }
+    if (this.#glass) this.#glass.style.transform = transform;
     const shadow = this.#shadow;
     if (!shadow) return;
     shadow.style.transform = transform;
     if (this.#shadowBody) {
-      this.#shadowBody.style.transform = `translate3d(0, ${sink - distance}px, 0)`;
+      this.#shadowBody.style.transform = `translate3d(0, ${moved - distance}px, 0)`;
     }
+  }
+
+  /**
+   * Moves a floating bottom sheet down by `sink` px (see `#sinkOf`) with an
+   * inline `translate`, and with it its clip (the bottom edge with a
+   * theme's inset and bottom radius). The tray and the glass layer get the
+   * opposite `translate`, so they stay where their `transform` puts them.
+   * Transforms only, so a frame doesn't lay out or paint again. The
+   * properties are only written when the value changes, so at and above
+   * the lowest open snap point an inline `translate` of the app on the tray
+   * stays. A sheet without an inset (`--mobile-drawer-inset: 0px`, the
+   * default) doesn't move: its clip would cut the tray's top shadow. The
+   * inset is read once when the drawer goes below the lowest open snap
+   * point, and again after a close (a style read, no layout), so an inset
+   * that the app or the theme changes (e.g. the iOS page scale) applies to
+   * the next move. Returns the px the sheet is moved.
+   */
+  #paintSink(sink: number): number {
+    const below = sink > 0;
+    if (below && !this.#below) this.#floats = this.#isFloating();
+    this.#below = below;
+    const value = below && this.#floats ? sink : 0;
+    if (value === this.#moved) return value;
+    this.#moved = value;
+    const down = value > 0 ? `0px ${value}px` : '';
+    const up = value > 0 ? `0px ${-value}px` : '';
+    this.#sheet!.style.translate = down;
+    this.#tray!.style.translate = up;
+    if (this.#glass) this.#glass.style.translate = up;
+    return value;
+  }
+
+  /** Whether the sheet floats: a `--mobile-drawer-inset` that isn't 0. */
+  #isFloating(): boolean {
+    const inset = getComputedStyle(this.#sheet!)
+      .getPropertyValue('--mobile-drawer-inset')
+      .trim();
+    return inset !== '' && parseFloat(inset) !== 0;
   }
 
   /**
@@ -3474,7 +3512,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           : root.scrollLeft + sheet.scrollLeft)) *
       this.#screenScale();
     const sheetShift =
-      (this.#sinkOf(offset) - this.#sinkOf(this.#renderedOffset)) *
+      ((this.#isFloating() ? this.#sinkOf(offset) : 0) - this.#moved) *
       this.#screenScale();
     const visible = this.#visibleRange(shift, sheetShift);
     const rect = element.getBoundingClientRect();

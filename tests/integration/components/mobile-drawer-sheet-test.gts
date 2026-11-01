@@ -1,9 +1,10 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { find, render, settled } from '@ember/test-helpers';
+import { click, find, render, settled } from '@ember/test-helpers';
+import { on } from '@ember/modifier';
 import { tracked } from '@glimmer/tracking';
 import { htmlSafe } from '@ember/template';
-import { MobileDrawer, type SnapPoint } from '#src/index.ts';
+import { MobileDrawer, type Placement, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
@@ -73,6 +74,7 @@ class State {
   @tracked inset: string | undefined;
   @tracked snapPoints: SnapPoint[] = SNAP_POINTS;
   @tracked backdrop: boolean | undefined = false;
+  @tracked placement: Placement = 'bottom';
   /** Text that wraps, instead of the 80px block. */
   @tracked text = false;
 
@@ -92,6 +94,7 @@ async function renderDrawer(state: State) {
         <div style={{state.wrapperStyle}}>
           <MobileDrawer
             @snapPoints={{state.snapPoints}}
+            @placement={{state.placement}}
             @activeSnapPoint={{state.active}}
             @backdrop={{state.backdrop}}
             @modal={{false}}
@@ -448,6 +451,132 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     }
     await settled();
   });
+
+  test('with --mobile-drawer-inset the first open after the render, with the yielded open(), moves the sheet up as one piece', async function (assert) {
+    const insetStyle = htmlSafe('--mobile-drawer-inset: 8px');
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        <div style={{containerStyle}} data-test-container>
+          <div style={{insetStyle}}>
+            <MobileDrawer
+              @snapPoints={{SNAP_POINTS}}
+              @backdrop={{false}}
+              @modal={{false}}
+              aria-label="Drawer"
+              style="position: absolute"
+              data-test-drawer
+              as |drawer|
+            >
+              <div style="height: 80px" data-test-content>Content</div>
+              <button type="button" {{on "click" drawer.open}} data-test-open>
+                Open
+              </button>
+            </MobileDrawer>
+          </div>
+        </div>
+      </template>,
+    );
+    await settle();
+    assert.dom(root()).hasAttribute('data-closed');
+
+    await click('[data-test-open]');
+    let frames = 0;
+    let below = 0;
+    while (clock.pendingFrames > 0 && frames < 500) {
+      clock.frame();
+      frames++;
+      const open = openDistance();
+      const moved = /^0px ([\d.e-]+)px$/.exec(sheet().style.translate);
+      assert.true(
+        Math.abs((moved ? Number(moved[1]) : 0) - Math.max(0, 200 - open)) <
+          0.01,
+        `frame ${frames} (${open}px open): the sheet is moved by the distance below the lowest open snap point (${sheet().style.translate})`,
+      );
+      // Above the lowest open snap point the sheet grows from its bottom
+      // edge, as between any two open snap points.
+      if (open > 200) continue;
+      below++;
+      const visible =
+        (sheet().getBoundingClientRect().bottom -
+          tray().getBoundingClientRect().top) /
+        scale();
+      assert.true(
+        Math.abs(visible - 192) < 0.2,
+        `frame ${frames} (${open}px open): the sheet keeps its height (${visible})`,
+      );
+    }
+    await settled();
+    assert.true(below > 1, `frames below the snap point: ${below}`);
+    assert.strictEqual(openDistance(), 400, 'open() goes to the highest');
+    assert.strictEqual(sheet().style.translate, '');
+    assert.strictEqual(tray().style.translate, '');
+  });
+
+  test('without --mobile-drawer-inset the sheet does not move, so it does not cut the top shadow', async function (assert) {
+    const state = new State();
+    await renderDrawer(state);
+    await settle();
+    assert.strictEqual(sheet().style.translate, '', 'closed: no move');
+    for (const target of [1, 0, 1]) {
+      state.active = target;
+      await settled();
+      while (clock.pendingFrames > 0) {
+        clock.frame();
+        assert.strictEqual(sheet().style.translate, '', `to ${target}`);
+        assert.strictEqual(tray().style.translate, '');
+      }
+      await settled();
+    }
+  });
+
+  test('with --mobile-drawer-inset an inline translate of the app on the tray stays at the snap points', async function (assert) {
+    const state = new State();
+    state.inset = '8px';
+    await renderDrawer(state);
+    state.active = 2;
+    await settle();
+    tray().style.translate = '0px 1px';
+    state.active = 1;
+    await settle();
+    assert.strictEqual(tray().style.translate, '0px 1px');
+  });
+
+  for (const placement of ['top', 'left', 'right'] as Placement[]) {
+    test(`a closed floating bottom drawer that changes to ${placement} keeps no move of the sheet`, async function (assert) {
+      const state = new State();
+      state.inset = '8px';
+      await renderDrawer(state);
+      await settle();
+      assert.notStrictEqual(sheet().style.translate, '', 'bottom: moved');
+
+      state.placement = placement;
+      await settle();
+      state.active = 1;
+      await settle();
+      const glass = el(
+        '[data-test-drawer] > .mobile-drawer__sheet > .mobile-drawer__glass',
+      );
+      for (const element of [sheet(), tray(), glass]) {
+        assert.strictEqual(element.style.translate, '', 'no translate');
+      }
+      // The part of the tray in the sheet (and in the root).
+      const t = tray().getBoundingClientRect();
+      const s = sheet().getBoundingClientRect();
+      const r = root().getBoundingClientRect();
+      const vertical = placement === 'top';
+      const shown =
+        (vertical
+          ? Math.min(t.bottom, s.bottom, r.bottom) -
+            Math.max(t.top, s.top, r.top)
+          : Math.min(t.right, s.right, r.right) -
+            Math.max(t.left, s.left, r.left)) / scale();
+      assert.true(
+        Math.abs(shown - 200) < 0.5,
+        `${placement}: 200px of the tray show (${shown})`,
+      );
+    });
+  }
 
   for (const snapPoints of [
     [0, 'content'],
