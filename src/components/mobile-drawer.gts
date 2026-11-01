@@ -124,8 +124,10 @@ const TAP_SLOP = 10;
 const CLICK_MATCH = 2;
 
 /**
- * The open modal drawers, in the order they became modal. Only the last one
- * handles Escape and Tab on the document.
+ * The open modal drawers, in the order they became modal, except that a
+ * drawer always comes before the modal drawers inside it (see
+ * `#activateModal`). Only the last one handles Escape and Tab on the
+ * document.
  */
 const modalStack: object[] = [];
 
@@ -543,6 +545,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * behaviour and focus follow in a microtask, see `#applyOpen`.
    */
   #open = false;
+  /**
+   * Whether the active snap point is at 0, i.e. the drawer is closed or
+   * closing and `data-closed` hides it (or soon will). Unlike `!#open`, not
+   * set while the drawer rests at a peek: a smallest snap point above 0 keeps
+   * the drawer, and the drawers inside it, visible. Also set until the
+   * drawer is first measured. Updated with `#open` by `#syncOpen`, see
+   * `#insideClosedDrawer`.
+   */
+  #hidden = true;
   /**
    * `#open` as last reported through `@onOpen`/`@onClose`. The first value
    * `#syncOpen` computes (on insertion, or at the first successful measure
@@ -1466,8 +1477,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #syncOpen(): void {
     const layout = this.#layout;
     if (!layout || this.#destroyed) return;
-    const open =
-      this.#offsetOf(this.activeSnapPoint) > layout.resolved[0]!.offset;
+    const target = this.#offsetOf(this.activeSnapPoint);
+    const open = target > layout.resolved[0]!.offset;
+    this.#hidden = target <= 0;
     if (!this.#hasReportBaseline) {
       // The first open state the drawer knows (on insertion, or once a
       // drawer inserted while hidden is measured) is not a change.
@@ -1512,12 +1524,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #applyOpen(): void {
     if (this.#destroyed) return;
-    const modal = this.#open && this.isModal && !this.#insideClosedDrawer();
+    const insideClosed = this.#insideClosedDrawer();
+    const modal = this.#open && this.isModal && !insideClosed;
     const wasModal = this.#releaseModal !== undefined;
     if (modal && !wasModal) {
       this.#activateModal();
     } else if (!modal && wasModal) {
       this.#deactivateModal();
+      if (insideClosed && this.#open) this.#moveFocusOutOfClosedDrawer();
     }
     // Before focus returns: an open modal drawer inside this one would keep
     // the element to return to inert.
@@ -1552,7 +1566,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const tray = this.#tray!;
     const releaseInert = inertOutside(root);
     const releaseScroll = lockBodyScroll(tray);
-    modalStack.push(this);
+    // Below the modal drawers inside this one (e.g. a peeking drawer that
+    // opens under its open nested drawer): the nested drawer stays in front,
+    // so it keeps Escape and the Tab wrap.
+    const nested = modalStack.findIndex((other) =>
+      root.contains((other as MobileDrawer).#root ?? null),
+    );
+    modalStack.splice(nested === -1 ? modalStack.length : nested, 0, this);
     document.addEventListener('keydown', this.#onDocumentKeyDown);
     this.#releaseModal = () => {
       document.removeEventListener('keydown', this.#onDocumentKeyDown);
@@ -1646,17 +1666,46 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * Whether the drawer is inside another drawer that is closed or closing,
    * whose `data-closed` hides it (or soon will): its modal behaviour is then
    * off, so it never keeps the page inert and locked from inside a hidden
-   * drawer. It comes back when that drawer opens again.
+   * drawer. It comes back when that drawer opens again. A drawer that rests
+   * at a peek (a smallest snap point above 0) is visible, so it does not
+   * count, see `#hidden`.
    */
   #insideClosedDrawer(): boolean {
     const root = this.#root;
-    if (!root) return false;
+    return !!root && this.#hiddenByDrawer(root);
+  }
+
+  /**
+   * Whether `element` is inside a drawer (other than this one) that is
+   * closed or closing, see `#hidden`.
+   */
+  #hiddenByDrawer(element: Element): boolean {
     for (const other of mountedDrawers as Set<MobileDrawer>) {
-      if (other !== this && !other.#open && other.#root?.contains(root)) {
+      if (other !== this && other.#hidden && other.#root?.contains(element)) {
         return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Called when the modal behaviour turns off because a drawer around this
+   * one closes, while this drawer stays open. If focus is inside this
+   * drawer, which is now hidden (or soon will be), it moves to the element
+   * this drawer was opened from, if that is still on the page and not
+   * hidden too. Else focus leaves the drawer for `<body>`: the drawer
+   * around this one returns it from there if it was open (see
+   * `#returnFocusAfterClose`). `#returnFocus` is kept, for when this drawer
+   * closes after the drawer around it opens again.
+   */
+  #moveFocusOutOfClosedDrawer(): void {
+    if (!this.#hasFocus()) return;
+    const target = this.#returnFocus;
+    if (target?.isConnected && !this.#hiddenByDrawer(target)) {
+      target.focus();
+      if (!this.#hasFocus()) return;
+    }
+    (document.activeElement as HTMLElement | SVGElement | null)?.blur();
   }
 
   /** Re-applies the open state of the drawers inside this one. */
