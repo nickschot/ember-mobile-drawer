@@ -152,6 +152,12 @@ const EPSILON = 0.5;
 const TAP_SLOP = 10;
 
 /**
+ * How long (ms) after a pointer stopped the content's momentum its click is
+ * still cancelled, see `#swallowClick`.
+ */
+const SWALLOW_CLICK_TIME = 1000;
+
+/**
  * How far (px) a click may be from where the backdrop pointer lifted to
  * still be that pointer's click. Pointer and click coordinates can differ
  * by rounding.
@@ -950,6 +956,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * `#startMomentum`.
    */
   #momentum?: Momentum;
+  /** The click that a tap which stopped the momentum may not do. */
+  #clickSwallow?: {
+    click: (event: MouseEvent) => void;
+    release: () => void;
+    /** Whether the pointer lifted: a later pointer is a new tap. */
+    released: boolean;
+    timer: ReturnType<typeof setTimeout>;
+  };
   /** Offset written by the last `#render`, after clamping. */
   #renderedOffset = 0;
   /**
@@ -1419,6 +1433,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#spring?.stop();
       this.#stopScrollReset();
       this.#stopMomentum();
+      this.#endSwallowClick();
       this.#syncScrollLock();
       this.onTrayScrollEnd();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
@@ -2834,6 +2849,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * never sees a close and a reopen.
    */
   #onKeyDown = (event: KeyboardEvent): void => {
+    // A key (e.g. one that scrolls) stops the content's momentum.
+    this.#stopMomentum();
     if (
       event.key !== 'Escape' ||
       event.defaultPrevented ||
@@ -3193,9 +3210,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * on the tray itself, so it works with `@handleOnly` and any pointer type.
    */
   #onTrayInput = (event: Event): void => {
-    // A new touch or a wheel stops the content's momentum, as in a native
-    // scroll view.
-    if (event.type !== 'focusin') this.#stopMomentum();
+    // A new touch, a wheel or focus stops the content's momentum, as in a
+    // native scroll view.
+    this.#stopMomentumOnInput(event);
     const tray = this.#tray;
     const { target } = event;
     if (!tray || !this.#scrollLockProperty || !(target instanceof Element)) {
@@ -3473,7 +3490,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   #onTrayTouchStart = (event: TouchEvent): void => {
-    this.#stopMomentum();
+    this.#stopMomentumOnInput(event);
     const current = this.#lockedTouch;
     // A gesture whose touch is gone ended without its touchend reaching the
     // tray (e.g. its element was removed): start over.
@@ -3833,7 +3850,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Scrolls the content of a drag to `scrolled` (see `#splitDrag`): one
-   * write, no layout read. `behavior: 'instant'`, so an app's
+   * write, no layout read of its own. `behavior: 'instant'`, so an app's
    * `scroll-behavior: smooth` doesn't smooth it.
    */
   #writeContentScroll(drag: Drag, scrolled: number): void {
@@ -3857,8 +3874,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * release velocity and slows down like a native scroll view (see
    * `Momentum`), driven by animation frames. It stops at the content's end
    * or start, never moves the page or the tray, and stops when a pointer
-   * goes down on the tray (see `#onTrayInput`), a wheel turns on it, a drag
-   * starts or the tray leaves the highest snap point. None with reduced
+   * goes down on the tray (see `#onTrayInput`; that tap doesn't click, see
+   * `#swallowClick`), a wheel turns on it, focus moves into it, a key is
+   * pressed in the drawer, a drag starts or the tray leaves the highest
+   * snap point. None with reduced
    * motion: the content stays where the finger left it.
    */
   #startMomentum(drag: Drag, velocity: number): void {
@@ -3889,8 +3908,63 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#momentum = momentum;
   }
 
-  #stopMomentum(): void {
-    this.#momentum?.stop();
+  /** Stops the content's momentum; returns whether one was running. */
+  #stopMomentum(): boolean {
+    const momentum = this.#momentum;
+    momentum?.stop();
+    return momentum !== undefined;
+  }
+
+  /**
+   * A pointer that went down on the tray stopped the content's momentum:
+   * as in a native scroll view, that tap doesn't click. The next `click` in
+   * the tray is cancelled (capture phase, once), unless it comes later than
+   * `SWALLOW_CLICK_TIME` or after a pointer went down again once this one
+   * lifted.
+   */
+  #swallowClick(): void {
+    this.#endSwallowClick();
+    const tray = this.#tray;
+    if (!tray) return;
+    const click = (event: MouseEvent) => {
+      this.#endSwallowClick();
+      if (event.target instanceof Node && tray.contains(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const release = () => {
+      if (this.#clickSwallow) this.#clickSwallow.released = true;
+    };
+    const timer = setTimeout(() => this.#endSwallowClick(), SWALLOW_CLICK_TIME);
+    document.addEventListener('click', click, true);
+    document.addEventListener('pointerup', release, CAPTURE_PASSIVE);
+    document.addEventListener('touchend', release, CAPTURE_PASSIVE);
+    this.#clickSwallow = { click, release, released: false, timer };
+  }
+
+  #endSwallowClick(): void {
+    const swallow = this.#clickSwallow;
+    if (!swallow) return;
+    this.#clickSwallow = undefined;
+    clearTimeout(swallow.timer);
+    document.removeEventListener('click', swallow.click, true);
+    document.removeEventListener('pointerup', swallow.release, true);
+    document.removeEventListener('touchend', swallow.release, true);
+  }
+
+  /**
+   * Stops the content's momentum on input on the tray (see
+   * `#startMomentum`); a pointer that stopped it doesn't click.
+   */
+  #stopMomentumOnInput(event: Event): void {
+    if (event.type === 'pointerdown' || event.type === 'touchstart') {
+      // A new tap: a click after it is its own.
+      if (this.#clickSwallow?.released) this.#endSwallowClick();
+      if (this.#stopMomentum()) this.#swallowClick();
+    } else {
+      this.#stopMomentum();
+    }
   }
 
   #cancelCatchUp(drag: Drag | undefined): void {
@@ -3929,18 +4003,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!cancelled) this.onPan(data, source);
     const drag = this.#endDrag()!;
     const time = this.#timeOf(data.originalEvent);
-    const velocity = cancelled ? 0 : this.#velocity.velocity(time);
-    this.#release(drag.offset, velocity, drag.target);
     // Released while the content scrolls (the tray at the highest snap
-    // point): the content goes on, see `#startMomentum`.
+    // point): the content goes on (see `#startMomentum`), and the tray stays
+    // where it is. Its velocity from before the handoff (in the last
+    // samples) would carry it past the snap point while the content moves.
     const scroll = drag.scroll;
-    if (
-      !cancelled &&
+    const scrolling =
       scroll &&
       drag.scrollAt !== undefined &&
       drag.delta >= drag.scrollAt - scroll.back &&
-      drag.delta <= drag.scrollAt + scroll.room
-    ) {
+      drag.delta <= drag.scrollAt + scroll.room;
+    const velocity = cancelled || scrolling ? 0 : this.#velocity.velocity(time);
+    this.#release(drag.offset, velocity, drag.target);
+    if (!cancelled && scrolling) {
       this.#startMomentum(drag, this.#scrollVelocity.velocity(time));
     }
   };

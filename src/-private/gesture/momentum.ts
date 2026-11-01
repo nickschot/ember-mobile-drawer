@@ -47,7 +47,7 @@ export interface MomentumOptions {
   /** The range the position stays in: it stops at an end. */
   min: number;
   max: number;
-  /** Writes a position. Called once per frame; must not read layout. */
+  /** Writes a position. Called once per frame; no layout read of its own. */
   write: (position: number) => void;
   /** Called once when it stops, by itself or by `stop`. */
   onEnd?: () => void;

@@ -383,6 +383,100 @@ module(
       assert.strictEqual(clock.pendingFrames, 0, 'stopped');
     });
 
+    /** Starts a drag-to-scroll momentum and runs two of its frames. */
+    async function startMomentum(assert: Assert): Promise<number> {
+      const state = new State();
+      await renderDrawer(state);
+      const finger = new Finger(el('[data-test-content]'), 'bottom');
+      finger.moves('up', toTop('bottom') / STEP + 20, 8);
+      finger.pointer.up();
+      await settled();
+      clock.frame(16);
+      clock.frame(16);
+      const running = tray().scrollTop;
+      assert.true(running > 20 * STEP, 'the momentum runs');
+      return running;
+    }
+
+    test('a tap that stops the momentum does not click, a next tap does', async function (assert) {
+      await startMomentum(assert);
+      const content = el('[data-test-content]');
+      let clicks = 0;
+      content.addEventListener('click', () => clicks++);
+      const tap = () => {
+        const finger = new TouchPointer(content, 200, 300, { pointerId: 2 });
+        finger.down();
+        finger.up();
+        content.click();
+      };
+      tap();
+      const stopped = tray().scrollTop;
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, stopped, 'the content stops');
+      assert.strictEqual(clicks, 0, 'the tap that stopped it does not click');
+      tap();
+      assert.strictEqual(clicks, 1, 'the next tap clicks');
+    });
+
+    test('a tap without a momentum clicks', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      const content = el('[data-test-content]');
+      let clicks = 0;
+      content.addEventListener('click', () => clicks++);
+      const finger = new TouchPointer(content, 200, 300, { pointerId: 2 });
+      finger.down();
+      finger.up();
+      content.click();
+      assert.strictEqual(clicks, 1);
+    });
+
+    for (const how of ['focus', 'key'] as const) {
+      test(`${how === 'focus' ? 'focus in the tray' : 'a key press'} stops the momentum`, async function (assert) {
+        await startMomentum(assert);
+        const content = el('[data-test-content]');
+        if (how === 'focus') {
+          content.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        } else {
+          content.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+          );
+        }
+        const stopped = tray().scrollTop;
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, stopped, 'the content stops');
+      });
+    }
+
+    test('a fast flick just after the handoff does not move the tray past the highest snap point', async function (assert) {
+      const state = new State();
+      // The tray is longer than the highest snap point: a release velocity
+      // would carry it further open.
+      state.snapPoints = [0, 200, 400];
+      await renderDrawer(state);
+      const finger = new Finger(el('[data-test-content]'), 'bottom');
+      // 2 px/ms, released 5 moves after the tray reached the highest snap
+      // point: most of the velocity window is from the tray's part.
+      finger.moves('up', 200 / STEP + 5, 2);
+      const released = tray().scrollTop;
+      assert.true(released > 0, 'the content scrolls');
+      finger.pointer.up();
+      await settled();
+      const shifts: number[] = [];
+      for (let i = 0; i < 60; i++) {
+        clock.frame(16);
+        shifts.push(finger.sample().shift);
+      }
+      clock.runUntilIdle();
+      await settled();
+      assert.true(
+        shifts.every((shift) => Math.abs(shift - 200) <= 0.5),
+        `the tray stays at the highest snap point (${Math.max(...shifts)})`,
+      );
+      assert.true(tray().scrollTop > released, 'the content has momentum');
+      assert.deepEqual(state.changes, [2]);
+    });
+
     for (const how of ['touch', 'wheel'] as const) {
       test(`a new ${how} stops the momentum`, async function (assert) {
         const state = new State();
