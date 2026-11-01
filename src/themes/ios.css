@@ -4,8 +4,8 @@
  * An iOS 26/27 ("Liquid Glass") look: a translucent, blurred sheet with a
  * light rim and a darkened edge, large rounded corners on the page-facing
  * side and a grabber. A bottom sheet floats 8px from the left, right and
- * bottom edges at partial heights, with bottom corners that follow the
- * display corners, and doesn't dim the page there. Towards the highest snap
+ * bottom edges at partial heights, with round bottom corners, and doesn't
+ * dim the page there. Towards the highest snap
  * point it becomes edge-to-edge and opaque and the page dims, following the
  * finger (the expand progress, see styles.css), like an iOS 27 sheet.
  *
@@ -47,7 +47,7 @@
  *                                    doesn't show through and no band
  *                                    shows; otherwise it is transparent.
  *                                    Its ::before draws
- *                                    the 36x5px bar, in the tray's text
+ *                                    the 58x4px bar, in the tray's text
  *                                    colour. Don't wrap it in another
  *                                    element: a sticky element only sticks
  *                                    inside its parent. Give it
@@ -86,12 +86,15 @@
  *                                       edge-to-edge sheet at every snap
  *                                       point (see "iOS Safari 26 toolbar"
  *                                       below).
- *   --mobile-drawer-ios-display-radius  The display's corner radius: the
- *                                       floating sheet's bottom corners are
- *                                       this minus the inset. CSS can't read
- *                                       it. 55px, about the radius of
- *                                       current iPhones (CSS px are iOS
- *                                       points).
+ *   --mobile-drawer-ios-bottom-radius   The floating sheet's bottom corner
+ *                                       radius. Default: the top radius
+ *                                       (--mobile-drawer-radius, 36px). A
+ *                                       standalone web app (no Safari bars,
+ *                                       the sheet near the screen corners)
+ *                                       can set it to the display radius
+ *                                       minus the inset (about 55px - 8px
+ *                                       on current iPhones) for corners
+ *                                       concentric with the display.
  *   --mobile-drawer-ios-partial-dim     0 (default): no dim at and below the
  *                                       second-highest snap point, the dim
  *                                       comes in towards the highest. 1: the
@@ -408,12 +411,15 @@
   :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::before {
     content: "";
     display: block;
-    width: 36px;
-    height: 5px;
+    /* Measured on the native Maps sheet in the iOS 27.2 simulator: about
+       57-60pt wide, 4pt high, fully round, 5pt below the sheet's top edge,
+       black (light) or white (dark) at about 22-33%. */
+    width: 58px;
+    height: 4px;
     margin: 0 auto;
-    border-radius: 2.5px;
+    border-radius: 2px;
     background: rgb(128 128 128 / 0.4);
-    background: color-mix(in srgb, currentcolor 30%, transparent);
+    background: color-mix(in srgb, currentcolor 25%, transparent);
   }
 
   /*
@@ -525,12 +531,16 @@
    * `--mobile-drawer-inset` (8px here) from the left, right and bottom
    * edges below the second-highest snap point, and by less towards the
    * highest, where it is edge-to-edge (see styles.css). Its bottom corners
-   * are concentric with the display corners: the display radius minus the
-   * inset as it is now. Close to the highest snap point (the last tenth of
-   * the expand progress) the radius goes to 0, so a full-height sheet has
-   * square bottom corners on a screen without round corners. Where the
-   * inset is 0 (e.g. an app that sets `--mobile-drawer-inset: 0px`), the
-   * radius is 0 too (`min()` with the inset times 1000).
+   * have `--mobile-drawer-ios-bottom-radius`, by default the top radius
+   * (`--mobile-drawer-radius`, 36px). They don't follow the display
+   * corners: in iOS Safari the toolbar is between the sheet and the bottom
+   * of the screen. In the last tenth of the expand progress the radius goes
+   * to 0, so the full-height sheet has square bottom corners. That fade
+   * uses the progress, not the inset: the inset is then below 0.8px, so
+   * the sheet is at the screen edge, and the corners must be square before
+   * it touches the edge. Where the inset is 0 (e.g. an app that sets
+   * `--mobile-drawer-inset: 0px`), the radius is 0 too (`min()` with the
+   * inset times 1000).
    */
   :where(
     .mobile-drawer-theme-ios
@@ -544,11 +554,9 @@
     border-radius: 0 0
       min(
         calc(
-          max(
-              0px,
-              var(--mobile-drawer-ios-display-radius, 55px) -
-                var(--mobile-drawer-inset, 0px) *
-                (1 - var(--mobile-drawer-expand-progress))
+          var(
+              --mobile-drawer-ios-bottom-radius,
+              var(--mobile-drawer-radius, 0px)
             ) *
             min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
         ),
@@ -556,11 +564,9 @@
       )
       min(
         calc(
-          max(
-              0px,
-              var(--mobile-drawer-ios-display-radius, 55px) -
-                var(--mobile-drawer-inset, 0px) *
-                (1 - var(--mobile-drawer-expand-progress))
+          var(
+              --mobile-drawer-ios-bottom-radius,
+              var(--mobile-drawer-radius, 0px)
             ) *
             min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
         ),

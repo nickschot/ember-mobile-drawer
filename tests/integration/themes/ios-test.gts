@@ -436,13 +436,14 @@ module('Integration | themes/ios.css', function (hooks) {
 
     const grabber = el('[data-test-grabber]');
     const bar = getComputedStyle(grabber, '::before');
-    assert.strictEqual(bar.width, '36px');
-    assert.strictEqual(bar.height, '5px');
-    assert.strictEqual(bar.borderTopLeftRadius, '2.5px');
+    // As the native iOS 27.2 grabber: 58 x 4pt, fully round.
+    assert.strictEqual(bar.width, '58px');
+    assert.strictEqual(bar.height, '4px');
+    assert.strictEqual(bar.borderTopLeftRadius, '2px');
     assert.notStrictEqual(bar.backgroundColor, 'rgba(0, 0, 0, 0)');
     // 5px above and below the bar: the same space as before the strip.
     const strip = getComputedStyle(grabber);
-    assert.strictEqual(strip.height, '5px');
+    assert.strictEqual(strip.height, '4px');
     assert.strictEqual(strip.paddingTop, '5px');
     assert.strictEqual(strip.paddingBottom, '5px');
 
@@ -1088,32 +1089,40 @@ module('Integration | themes/ios.css', function (hooks) {
     });
   }
 
-  test('bottom: the bottom corners are concentric with the display corners', async function (assert) {
+  test('bottom: the bottom corners have the top radius, square at full height', async function (assert) {
     await renderDrawer();
     const radius = () =>
       corners(el('[data-test-sheet]'))['bottom-left'] +
       ' ' +
       corners(el('[data-test-sheet]'))['bottom-right'];
 
-    assert.strictEqual(radius(), '47px 47px', '0: 55px minus the 8px inset');
+    assert.strictEqual(radius(), '36px 36px', '0: the top radius');
     setProgress(0.5);
-    assert.strictEqual(radius(), '51px 51px', '0.5: 55px minus 4px');
+    assert.strictEqual(radius(), '36px 36px', '0.5: the top radius');
     setProgress(0.95);
     assert.strictEqual(
       radius(),
-      '27.3px 27.3px',
+      '18px 18px',
       'the last tenth: to square corners',
     );
     setProgress(1);
-    assert.strictEqual(radius(), '0px 0px', '1: square, the display clips it');
+    assert.strictEqual(radius(), '0px 0px', '1: square');
 
     setProgress(0);
     styles.push(
+      addStyles('[data-test-theme] { --mobile-drawer-radius: 20px; }'),
+    );
+    assert.strictEqual(radius(), '20px 20px', 'follows the top radius');
+    styles.push(
       addStyles(
-        '[data-test-theme] { --mobile-drawer-ios-display-radius: 40px; }',
+        '[data-test-theme] { --mobile-drawer-ios-bottom-radius: calc(55px - 8px); }',
       ),
     );
-    assert.strictEqual(radius(), '32px 32px', 'apps set the display radius');
+    assert.strictEqual(
+      radius(),
+      '47px 47px',
+      'a standalone app sets it to the display radius minus the inset',
+    );
 
     styles.push(addStyles('[data-test-theme] { --mobile-drawer-inset: 0px; }'));
     assert.strictEqual(radius(), '0px 0px', 'no inset: square corners');
