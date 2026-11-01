@@ -307,12 +307,13 @@
  *     Safari ignores them. Set the tray colour with
  *     `--mobile-drawer-background`: with an app `background` on the tray,
  *     also set the same `background-color` on `.mobile-drawer__bar-tint`.
- *   - while a bottom or top tray springs past fully open (after a fast
- *     swipe, up to 24px, see the tray), the gap between the sheet and its
- *     edge would show the page next to the bar. On iOS the tray's
- *     box-shadow has a first layer `0 32px 0 0 <sheet colour>` (`0 -32px`
- *     for top) before `--mobile-drawer-shadow`, so the sheet seems to go on
- *     into that gap. At rest the root clips it. The colour is
+ *   - as a safeguard, in case the tray ever leaves its edge (the component
+ *     keeps it there past fully open and bounces only the content, so this
+ *     does not happen now), a gap between the sheet and its edge would show
+ *     the page next to the bar. On iOS the tray's box-shadow has a first
+ *     layer `0 32px 0 0 <sheet colour>` (`0 -32px` for top) before
+ *     `--mobile-drawer-shadow`, so the sheet seems to go on into that gap.
+ *     At rest the root clips it. The colour is
  *     `--mobile-drawer-background`; a theme can set the private
  *     `--_mobile-drawer-fill` on the tray when its tray background differs.
  * Content can't paint under the bars (Safari clips fixed elements there,
@@ -525,9 +526,10 @@
    *   the page background, so that bar shows the dimmed page, also when the
    *   tray touches that edge at full height.
    * - The tray's box-shadow gets a copy of the sheet colour 32px towards
-   *   its edge (bottom and top drawers). After a fast swipe the spring
-   *   carries the tray past fully open (up to 24px); the copy fills the gap
-   *   between the sheet and the bar, which would otherwise show the page.
+   *   its edge (bottom and top drawers). The tray stays at its edge
+   *   past fully open (only the content bounces), so this is a safeguard:
+   *   if the tray ever leaves its edge, the copy fills the gap between the
+   *   sheet and the bar, which would otherwise show the page.
    * - Both strips stay `display: block` while the drawer is [data-closed]
    *   (the root's `visibility: hidden` hides them), so a theme transition
    *   on them also runs when the drawer opens.
@@ -553,10 +555,10 @@
       position: fixed;
     }
 
-    /* Fills the gap between the sheet and its edge while the tray springs
-       past fully open (under 24px): a copy of the sheet colour 32px towards
-       the edge, under the other shadows. At rest it is outside the root,
-       which clips it. `--_mobile-drawer-fill` is private, for themes whose
+    /* Safeguard for a gap between the sheet and its edge, in case the tray
+       leaves it (the component keeps the tray at its edge past fully open):
+       a copy of the sheet colour 32px towards the edge, under the other
+       shadows. At rest it is outside the root, which clips it. `--_mobile-drawer-fill` is private, for themes whose
        tray background is not `--mobile-drawer-background`. */
     :where(.mobile-drawer__tray),
     :where(.mobile-drawer[data-placement="bottom"] > .mobile-drawer__tray) {
