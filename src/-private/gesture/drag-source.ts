@@ -10,6 +10,11 @@ export interface PanData {
   originalEvent?: Event;
   /** Set on the `onPanStart` of a drag that took over a scroll. */
   handoff?: boolean;
+  /**
+   * Set on `onPanStart` with arbitration (`shouldDrag`): where the gesture
+   * started, the element the finger went down on.
+   */
+  target?: Element | null;
 }
 
 type PanCallback = (data: PanData, element: HTMLElement) => void;
@@ -294,7 +299,12 @@ class DragSourceModifier extends DidPan {
     gesture.panning = true;
     if (event.cancelable) event.preventDefault();
     named.onPanStart(
-      { ...this.#touchData(x, y, event), initial: { x, y }, handoff: true },
+      {
+        ...this.#touchData(x, y, event),
+        initial: { x, y },
+        handoff: true,
+        target: gesture.target,
+      },
       this.#element!,
     );
   };
@@ -398,8 +408,12 @@ class DragSourceModifier extends DidPan {
           ? this.#decide(data.current.x, data.current.y, true)
           : true;
         if (drags === false) return;
-        if (gesture) gesture.panning = true;
-        args.onPanStart(data, element);
+        if (!gesture) {
+          args.onPanStart(data, element);
+          return;
+        }
+        gesture.panning = true;
+        args.onPanStart({ ...data, target: gesture.target }, element);
       },
       // During a handoff the touch events drive the drag (see above).
       onPan: (data: PanData) => {

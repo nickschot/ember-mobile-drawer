@@ -799,7 +799,7 @@ module(
       assert.false(result.prevented.some(Boolean), 'left to the browser');
     });
 
-    test('a handed-off drag that turns towards open keeps dragging', async function (assert) {
+    test('a handed-off drag that turns towards open keeps dragging and scrolls the content past fully open', async function (assert) {
       const state = new State();
       await renderDrawer(state);
       scrollTo(tray(), 'bottom', 'middle');
@@ -810,11 +810,21 @@ module(
         then: { direction: 'up', steps: 15 },
       });
       assert.true(result.dragging, 'still dragging');
-      assert.true(
-        result.shift > 0,
-        `past fully open, the content bounces (${result.shift})`,
+      assert.strictEqual(result.shift, 0, 'the tray is back at the top');
+      assert.strictEqual(contentBounce('bottom'), 0, 'no bounce');
+      // The handoff is at move 6; 9 moves drag the tray down, 15 up: 9
+      // take the tray back, 6 scroll the content.
+      // The test container may be scaled: the finger moves screen px.
+      const scale = tray().getBoundingClientRect().height / tray().offsetHeight;
+      assert.strictEqual(
+        tray().scrollTop,
+        (6 * STEP) / scale,
+        'the content scrolls with the finger past fully open',
       );
-      assert.strictEqual(tray().scrollTop, 0, 'the content does not scroll');
+      assert.true(
+        result.prevented.slice(5).every(Boolean),
+        'touchmoves cancelled from the handoff on',
+      );
     });
 
     test('the content near its start gets overscroll-behavior none during a scroll', async function (assert) {

@@ -7,6 +7,7 @@ import {
   DEFAULT_SPRING_CONFIG,
   Spring,
   browserClock,
+  browserPrefersReducedMotion,
   type FrameClock,
   type SpringResult,
 } from '../-private/spring/spring.ts';
@@ -31,6 +32,10 @@ import {
 import { noop } from '../-private/noop-modifier.ts';
 import { VelocityTracker } from '../-private/gesture/velocity.ts';
 import { TURN_SLOP, catchUpLag } from '../-private/gesture/catch-up.ts';
+import {
+  MIN_MOMENTUM_VELOCITY,
+  Momentum,
+} from '../-private/gesture/momentum.ts';
 import { inertOutside } from '../-private/modal/inert.ts';
 import {
   lockBodyScroll,
@@ -358,6 +363,43 @@ interface Drag {
    * locked for the whole drag, see `#syncScrollLock`.
    */
   handoff?: boolean;
+  /**
+   * The `delta` at which the tray reaches the highest snap point, for a
+   * drag that may scroll the content past it (see `#splitDrag`);
+   * `undefined` for other drags.
+   */
+  scrollAt?: number;
+  /** Where the gesture started (the element the finger went down on). */
+  from: Element | null;
+  /**
+   * The content the drag scrolls past the highest snap point, once the
+   * tray got there (see `#reachContent`); `null` when nothing can scroll
+   * that way.
+   */
+  scroll?: ContentScroll | null;
+  /** How far (drawer px towards open) the content is scrolled, as written. */
+  written: number;
+}
+
+/**
+ * A scroll container that a drag scrolls from script past the highest snap
+ * point, see `#splitDrag`. Positions are `scrollTop` (vertical) or
+ * `scrollLeft`, read once when the drag reaches it.
+ */
+interface ContentScroll {
+  element: HTMLElement;
+  vertical: boolean;
+  /** The position when the drag reached it. */
+  start: number;
+  /** Which way the position moves as the finger moves towards open. */
+  sign: 1 | -1;
+  /** The scroll range: `-range` to `0` for a right-to-left `scrollLeft`. */
+  min: number;
+  max: number;
+  /** How far (px) it can scroll from `start` as the finger opens. */
+  room: number;
+  /** How far (px) it can scroll back from `start`, to its content start. */
+  back: number;
 }
 
 /** A scroll reset of the tray, see `#planScrollReset`. */
@@ -651,9 +693,10 @@ const clampIndex = (index: number, count: number) =>
  * The tray can be dragged with touch or pen input along the drawer's axis
  * (through `didPan` from ember-gesture-modifiers). It follows the finger 1:1,
  * with rubber-band resistance past the first and last snap point. Past the
- * last one the tray stays at its edge and its content bounces, like an iOS
- * sheet (see `OPEN_RUBBER_BAND_RATIO` and `#renderBounce`). On release the drawer's
- * velocity is handed to the spring and the snap point nearest to where the
+ * last one the tray stays at its edge; a drag from the content scrolls the
+ * content there when it can (see `#splitDrag`), else the content bounces,
+ * like an iOS sheet (see `OPEN_RUBBER_BAND_RATIO` and `#renderBounce`).
+ * On release the drawer's velocity is handed to the spring and the snap point nearest to where the
  * release would carry the drawer is picked; a release faster than
  * `FLING_VELOCITY` always moves at least one snap point its way. A touch
  * holds a running animation where it is, and a drag continues from there.
@@ -677,6 +720,12 @@ const clampIndex = (index: number, count: number) =>
  * sheet, see `onTrayScroll`). The drag starts where the tray is, locks the
  * content and stays a drag until the finger lifts. Momentum after the
  * finger lifted never moves the drawer.
+ * The other way, a drag from the content (not a handle) that reaches the
+ * highest snap point while the finger moves on towards open scrolls the
+ * content from script, 1:1 with the finger, and its release goes on with a
+ * momentum (see `#splitDrag` and `#startMomentum`). The gesture stays a
+ * drag: in iOS Safari a native scroll can't start after its touchmoves
+ * were cancelled.
  * A gesture that drags cancels its `touchmove` events at every snap point
  * (see `dragSource`), so the browser can't scroll the content or the page
  * under it. The tray also gets `touch-action: pan-x` (vertical drawers) or
@@ -891,6 +940,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #hold?: { pointerId: number; end: (event: PointerEvent) => void };
   #velocity = new VelocityTracker();
+  /**
+   * The velocity of the content part of a drag (see `#splitDrag`), for
+   * the momentum on release.
+   */
+  #scrollVelocity = new VelocityTracker();
+  /**
+   * The momentum of content that a drag scrolled, after its release, see
+   * `#startMomentum`.
+   */
+  #momentum?: Momentum;
   /** Offset written by the last `#render`, after clamping. */
   #renderedOffset = 0;
   /**
@@ -1310,6 +1369,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     update: () => {
       const placementChanged = this.placement !== this.#placement;
       this.#placement = this.placement;
+      if (placementChanged) this.#stopMomentum();
       this.#measure();
       // The axis may have changed.
       this.#syncScrollLock();
@@ -1358,6 +1418,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#resizeObserver?.disconnect();
       this.#spring?.stop();
       this.#stopScrollReset();
+      this.#stopMomentum();
       this.#syncScrollLock();
       this.onTrayScrollEnd();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
@@ -1854,6 +1915,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     root.toggleAttribute('data-at-highest', atTop && layout.maxOffset > 0);
     if (atTop !== this.#atTop) {
       this.#atTop = atTop;
+      // The content's momentum is for the highest snap point only.
+      if (!atTop) this.#stopMomentum();
       // Only while the tray is a drag source (not with @handleOnly).
       if (this.#tray!.style.touchAction) {
         this.#tray!.style.touchAction = this.trayTouchAction();
@@ -3130,6 +3193,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * on the tray itself, so it works with `@handleOnly` and any pointer type.
    */
   #onTrayInput = (event: Event): void => {
+    // A new touch or a wheel stops the content's momentum, as in a native
+    // scroll view.
+    if (event.type !== 'focusin') this.#stopMomentum();
     const tray = this.#tray;
     const { target } = event;
     if (!tray || !this.#scrollLockProperty || !(target instanceof Element)) {
@@ -3407,6 +3473,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   #onTrayTouchStart = (event: TouchEvent): void => {
+    this.#stopMomentum();
     const current = this.#lockedTouch;
     // A gesture whose touch is gone ended without its touchend reaching the
     // tray (e.g. its element was removed): start over.
@@ -3499,6 +3566,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // not the spring's value, which may be past an edge the render clamps.
     spring.stop();
     this.#stopScrollReset();
+    this.#stopMomentum();
     this.#endHold();
     const offset = this.#renderedOffset;
     // didPan recognises the pan once the finger has moved past its threshold.
@@ -3531,17 +3599,29 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       target: offset,
       offset,
       handoff: data.handoff === true,
+      from: data.target ?? null,
+      written: 0,
     };
+    const { maxOffset } = this.#layout;
+    if (
+      source === this.#tray &&
+      maxOffset > 0 &&
+      offset <= maxOffset + EPSILON &&
+      !this.#inNested(drag.from) &&
+      !this.#onHandle(drag.from)
+    ) {
+      drag.scrollAt = Math.max(0, maxOffset - offset);
+    }
     this.#drag = drag;
     this.#dragCount++;
     // The browser still scrolls a handed-off gesture: stop it at once.
     if (drag.handoff) this.#syncScrollLock();
-    drag.target = this.#dragOffset(drag, recognisedAt);
     this.#velocity.reset();
-    // The velocity of the finger (see `onPan`), not of the catch-up.
-    this.#velocity.add(this.#timeOf(data.originalEvent), drag.target);
+    this.#scrollVelocity.reset();
     this.#queueState({ isDragging: true });
     this.#follow(drag, drag.lagStart);
+    // The velocity of the finger (see `onPan`), not of the catch-up.
+    this.#addVelocity(drag, data);
     this.args.onDragStart?.({ snapPoint: this.activeSnapPoint, offset });
   };
 
@@ -3605,13 +3685,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     drag.moved = true;
     drag.delta = delta;
-    drag.target = this.#dragOffset(drag, delta);
-    // The velocity of the drawer where the finger puts it (after
-    // resistance), so a release past an end doesn't hand the spring more
-    // speed than the tray had, and the catch-up adds none.
-    this.#velocity.add(this.#timeOf(data.originalEvent), drag.target);
     this.#follow(drag, now);
+    this.#addVelocity(drag, data);
   };
+
+  /**
+   * Samples the release velocities: of the drawer where the finger puts it
+   * (after resistance), so a release past an end doesn't hand the spring
+   * more speed than the tray had, and the catch-up adds none; and of the
+   * content that the drag scrolls, for its momentum (see `#splitDrag`).
+   */
+  #addVelocity(drag: Drag, data: PanData): void {
+    const time = this.#timeOf(data.originalEvent);
+    this.#velocity.add(time, drag.target);
+    if (drag.scroll) {
+      this.#scrollVelocity.add(time, this.#splitDrag(drag, drag.delta)[1]);
+    }
+  }
 
   /** The time (ms) on the clock that runs the frames. */
   #now(): number {
@@ -3624,14 +3714,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * which eases from the distance moved before the pan was recognised to
    * `0`. While it lags it is also moved every frame, so it catches up when
    * the finger holds still. It is never past the finger: while the finger
-   * comes back towards it, it holds still (`holding`, see `onPan`).
+   * comes back towards it, it holds still (`holding`, see `onPan`). Past
+   * the highest snap point the content that the drag scrolls (see
+   * `#splitDrag`) lags the same way.
    */
   #follow(drag: Drag, time: number): void {
     const lag = drag.holding
       ? drag.lagFrom
       : catchUpLag(drag.lagFrom, time - drag.lagStart);
     drag.drawn = drag.delta - lag;
-    drag.offset = lag === 0 ? drag.target : this.#dragOffset(drag, drag.drawn);
+    this.#reachContent(drag);
+    drag.target = this.#dragOffset(drag, this.#splitDrag(drag, drag.delta)[0]);
+    const [tray, scrolled] = this.#splitDrag(drag, drag.drawn);
+    drag.offset = lag === 0 ? drag.target : this.#dragOffset(drag, tray);
+    this.#writeContentScroll(drag, scrolled);
     this.#render(drag.offset);
     if (lag === 0) {
       this.#cancelCatchUp(drag);
@@ -3640,6 +3736,161 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#catchUpFrame,
       );
     }
+  }
+
+  /**
+   * Splits `delta` (drawer px towards open, see `Drag`) into the part that
+   * moves the tray and the part that scrolls the content: `[tray, scroll]`.
+   *
+   * A drag from the tray (not a handle, not in a nested drawer) that
+   * reaches the highest snap point while the finger moves on towards open
+   * scrolls the content from script from there, like a native sheet. In
+   * iOS Safari a native scroll can't start in a gesture whose touchmoves
+   * were cancelled (see `onTrayScroll`), so the drag sets the scroll
+   * position itself, 1:1 with the finger. Once the content has reached its
+   * end, the rest moves the tray past fully open as before (the content
+   * bounces, see `#renderBounce`). Back towards close, the content scrolls
+   * back first, to its content start, and then the tray moves. So once the
+   * drag has reached the content (see `#reachContent`), the split only
+   * depends on `delta`: the tray stays at the highest snap point while the
+   * content scrolls.
+   */
+  #splitDrag(drag: Drag, delta: number): [number, number] {
+    const at = drag.scrollAt;
+    const scroll = drag.scroll;
+    if (at === undefined || !scroll) return [delta, 0];
+    const scrolled = clamp(delta - at, -scroll.back, scroll.room);
+    return [delta - scrolled, scrolled];
+  }
+
+  /**
+   * Looks up the content that a drag scrolls (see `#splitDrag`), once the
+   * tray it draws gets past the highest snap point: the innermost scroll
+   * container of the gesture (see `#scrollChain`) that can scroll the way
+   * the finger pushes the content. Reads layout once per drag.
+   */
+  #reachContent(drag: Drag): void {
+    if (
+      drag.scroll !== undefined ||
+      drag.scrollAt === undefined ||
+      !(drag.drawn > drag.scrollAt)
+    ) {
+      return;
+    }
+    drag.scroll = null;
+    const vertical = this.axis === 'vertical';
+    // A finger moving towards open moves the position this way.
+    const sign = -OPENING_DIRECTION[this.placement] as 1 | -1;
+    for (const element of this.#scrollChain(drag.from)) {
+      const range = vertical
+        ? element.scrollHeight - element.clientHeight
+        : element.scrollWidth - element.clientWidth;
+      if (!(range > EPSILON)) continue;
+      const style = this.#unlockedStyle(element);
+      const overflow = vertical ? style.overflowY : style.overflowX;
+      if (overflow !== 'auto' && overflow !== 'scroll') continue;
+      const rtl = !vertical && style.direction === 'rtl';
+      const min = rtl ? -range : 0;
+      const max = rtl ? 0 : range;
+      const start = clamp(
+        vertical ? element.scrollTop : element.scrollLeft,
+        min,
+        max,
+      );
+      const room = sign > 0 ? max - start : start - min;
+      if (!(room > EPSILON)) continue;
+      drag.scroll = {
+        element,
+        vertical,
+        start,
+        sign,
+        min,
+        max,
+        room,
+        back: sign > 0 ? start - min : max - start,
+      };
+      return;
+    }
+  }
+
+  /**
+   * The computed style `element` has without the scroll lock (see
+   * `#syncScrollLock`), which may still be on for this frame, or for a
+   * handed-off drag. Reads layout.
+   */
+  #unlockedStyle(element: HTMLElement): {
+    overflowX: string;
+    overflowY: string;
+    direction: string;
+  } {
+    const saved = this.#scrollLock.get(element);
+    const { style } = element;
+    if (saved) style.setProperty(saved.property, saved.value, saved.priority);
+    const { overflowX, overflowY, direction } = getComputedStyle(element);
+    if (saved) style.setProperty(saved.property, 'hidden');
+    return { overflowX, overflowY, direction };
+  }
+
+  /**
+   * Scrolls the content of a drag to `scrolled` (see `#splitDrag`): one
+   * write, no layout read. `behavior: 'instant'`, so an app's
+   * `scroll-behavior: smooth` doesn't smooth it.
+   */
+  #writeContentScroll(drag: Drag, scrolled: number): void {
+    const scroll = drag.scroll;
+    if (!scroll || scrolled === drag.written) return;
+    drag.written = scrolled;
+    this.#scrollContent(scroll, scroll.start + scroll.sign * scrolled);
+  }
+
+  #scrollContent(scroll: ContentScroll, position: number): void {
+    scroll.element.scrollTo(
+      scroll.vertical
+        ? { top: position, behavior: 'instant' }
+        : { left: position, behavior: 'instant' },
+    );
+  }
+
+  /**
+   * After the release of a drag that scrolled the content, while the tray
+   * stays at the highest snap point: the content goes on with the
+   * release velocity and slows down like a native scroll view (see
+   * `Momentum`), driven by animation frames. It stops at the content's end
+   * or start, never moves the page or the tray, and stops when a pointer
+   * goes down on the tray (see `#onTrayInput`), a wheel turns on it, a drag
+   * starts or the tray leaves the highest snap point. None with reduced
+   * motion: the content stays where the finger left it.
+   */
+  #startMomentum(drag: Drag, velocity: number): void {
+    const scroll = drag.scroll;
+    if (!scroll) return;
+    // px/s along the finger's opening direction to scroll px/ms.
+    const speed = (scroll.sign * velocity) / 1000;
+    if (
+      Math.abs(speed) < MIN_MOMENTUM_VELOCITY ||
+      (drawerEnvironment.prefersReducedMotion ?? browserPrefersReducedMotion)()
+    ) {
+      return;
+    }
+    this.#stopMomentum();
+    const token = this.#clock ? undefined : animationWaiter.beginAsync();
+    const momentum = new Momentum({
+      clock: this.#clock ?? browserClock,
+      from: scroll.start + scroll.sign * drag.written,
+      velocity: speed,
+      min: scroll.min,
+      max: scroll.max,
+      write: (position) => this.#scrollContent(scroll, position),
+      onEnd: () => {
+        if (this.#momentum === momentum) this.#momentum = undefined;
+        if (token) animationWaiter.endAsync(token);
+      },
+    });
+    this.#momentum = momentum;
+  }
+
+  #stopMomentum(): void {
+    this.#momentum?.stop();
   }
 
   #cancelCatchUp(drag: Drag | undefined): void {
@@ -3677,10 +3928,21 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const cancelled = type === 'pointercancel' || type === 'touchcancel';
     if (!cancelled) this.onPan(data, source);
     const drag = this.#endDrag()!;
-    const velocity = cancelled
-      ? 0
-      : this.#velocity.velocity(this.#timeOf(data.originalEvent));
+    const time = this.#timeOf(data.originalEvent);
+    const velocity = cancelled ? 0 : this.#velocity.velocity(time);
     this.#release(drag.offset, velocity, drag.target);
+    // Released while the content scrolls (the tray at the highest snap
+    // point): the content goes on, see `#startMomentum`.
+    const scroll = drag.scroll;
+    if (
+      !cancelled &&
+      scroll &&
+      drag.scrollAt !== undefined &&
+      drag.delta >= drag.scrollAt - scroll.back &&
+      drag.delta <= drag.scrollAt + scroll.room
+    ) {
+      this.#startMomentum(drag, this.#scrollVelocity.velocity(time));
+    }
   };
 
   /**
