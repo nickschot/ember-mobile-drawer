@@ -576,6 +576,20 @@
       );
   }
 
+  /* No bottom radius while the sheet meets the keyboard fill, see
+     [data-keyboard] in styles.css. */
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-keyboard]:not(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+  ) {
+    border-radius: 0;
+  }
+
   /*
    * The dim: the backdrop, the backdrop tint (the status bar on iOS Safari)
    * and the bar tint follow the expand progress, not the drawer's progress:

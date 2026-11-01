@@ -454,6 +454,14 @@ On iOS, set the backdrop's colour and max opacity only with `--mobile-drawer-bac
 
 Content stays between the bars, so the safe-area padding doesn't change. Other browsers don't get this rule.
 
+#### iOS Safari on-screen keyboard
+
+When a field gets focus, iOS Safari moves the visual viewport up in the page to show the field above the keyboard. The fixed drawer stays in the layout viewport, and Safari clips it there, so a bottom drawer ends at about the level of Safari's URL bar above the keyboard. Behind the translucent URL bar, the keyboard accessory bar and the keyboard, the page would show below the sheet. While that happens, the component fills the strip:
+
+- It adds an empty, `aria-hidden` element `.mobile-drawer-keyboard-fill` to `<html>`, below the root of an open bottom drawer, from the bottom of the root to the bottom of the screen. It is not fixed, so Safari doesn't clip it. It has the tray's `background-color` and `backdrop-filter` and the root's `z-index`, and takes no pointer events. It follows the `visualViewport` `resize` and `scroll` events. It goes when focus leaves the fields (for example with the keyboard's Done button), when the keyboard closes and when the drawer closes.
+- The root gets `data-keyboard` for that time. The floating sheet (see [Floating sheet](#floating-sheet)) then goes to the edges and the bottom of the root, and the iOS theme gives it no bottom radius, so the sheet meets the fill, as a native sheet goes on behind the keyboard. The content and the field don't move.
+- Only for a `position: fixed` root (not an embedded drawer), while the page isn't zoomed in. Other browsers keep fixed elements in the layout viewport's coordinates and don't get the fill.
+
 ### iOS theme
 
 An optional theme gives the drawer the look of an iOS 27 sheet ("Liquid Glass"): a translucent, blurred sheet with a light rim and a darkened edge, large rounded corners on the page-facing side and a grabber bar. At partial heights a bottom sheet floats 8px from the left, right and bottom edges of the screen, with bottom corners that follow the display corners, and the page behind it doesn't dim. Towards the highest snap point the sheet becomes edge-to-edge and opaque and the page dims, with the finger, as an iOS sheet does at full height. Import it after the base styles; it does not import them itself:

@@ -69,6 +69,34 @@
  *                           these base styles; for themes (e.g. the iOS
  *                           theme dims the sheet). A drawer rendered with
  *                           the yielded `Nested` counts as inside it.
+ * [data-keyboard]           On the root of a bottom drawer while iOS
+ *                           Safari shows an on-screen keyboard and clips
+ *                           the drawer above the bottom of the screen (see
+ *                           .mobile-drawer-keyboard-fill). The floating
+ *                           sheet (see `--mobile-drawer-inset`) then goes
+ *                           to the edges and the bottom of the root, with
+ *                           no bottom radius in the iOS theme, so it meets
+ *                           the fill. The content doesn't move.
+ * .mobile-drawer-keyboard-fill
+ *                           Not in the drawer: an empty element, a child of
+ *                           `<html>`, that the component adds below the
+ *                           root of an open bottom drawer while iOS Safari
+ *                           shows an on-screen keyboard. Safari then moves
+ *                           the visual viewport up in the layout viewport
+ *                           to show the focused field, and clips fixed
+ *                           elements (the drawer) to the layout viewport,
+ *                           above the bottom of the screen; behind its
+ *                           translucent URL bar, keyboard accessory bar and
+ *                           keyboard the page would show. The fill is not
+ *                           fixed, so Safari doesn't clip it: it goes from
+ *                           the bottom of the root to the bottom of the
+ *                           screen, with the tray's `background-color` and
+ *                           `backdrop-filter` and the root's `z-index`
+ *                           (inline styles), takes no pointer events and is
+ *                           `aria-hidden`. Removed when the keyboard closes
+ *                           or the drawer is closed. Other browsers keep
+ *                           fixed elements in the layout viewport's
+ *                           coordinates and don't get it.
  * .mobile-drawer-nested     Not in the drawer: the element the yielded
  *                           `Nested` renders a nested drawer in, outside
  *                           the tray (`display: contents`). It gets
@@ -789,6 +817,34 @@
     );
   }
 
+  /*
+   * [data-keyboard] (see the header): the sheet fills the root and the tray
+   * isn't clipped, as at the highest snap point, so the sheet meets the
+   * keyboard fill below the root. The tray keeps its width and its place,
+   * so the content doesn't move.
+   */
+  :where(
+    .mobile-drawer[data-keyboard]:not(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+  ) {
+    inset: 0;
+  }
+  :where(
+    .mobile-drawer[data-keyboard]:not(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
+    inset: auto 0 0;
+    clip-path: none;
+  }
   :where(.mobile-drawer__content),
   :where(
     .mobile-drawer[data-placement="bottom"]

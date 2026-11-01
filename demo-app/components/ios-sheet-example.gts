@@ -46,6 +46,9 @@ type Placement = 'bottom' | 'top';
  * `data-mobile-drawer-page`. The drawer must not be inside that element, so
  * it renders at the end of `<body>` with `in-element`.
  *
+ * The search field opens the on-screen keyboard, also at 40%: the sheet
+ * then goes on behind the keyboard, as a native sheet does.
+ *
  * A tap on a place opens a nested sheet with its details, also while the
  * sheet is at 40%. The nested sheet renders with the yielded `Nested`,
  * outside the sheet's tray (the tray would clip it), next to the sheet in
@@ -130,6 +133,12 @@ export default class IosSheetExample extends Component {
               <h3 id="example-ios-title">Find nearby</h3>
               <button type="button" {{on "click" drawer.close}}>Done</button>
             </div>
+            <input
+              type="search"
+              class="example-ios-search"
+              placeholder="Search"
+              aria-label="Search places"
+            />
             <ul class="example-ios-list">
               {{#each ITEMS as |item|}}
                 <li>
