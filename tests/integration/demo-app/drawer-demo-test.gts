@@ -1,6 +1,13 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import { click, fillIn, find, findAll, render } from '@ember/test-helpers';
+import {
+  click,
+  fillIn,
+  find,
+  findAll,
+  render,
+  typeIn,
+} from '@ember/test-helpers';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import DrawerDemo from '../../../demo-app/components/drawer-demo.gts';
 import '#src/styles.css';
@@ -199,6 +206,96 @@ module('Integration | demo-app | DrawerDemo controls', function (hooks) {
 
     await fillIn(select, 'ios');
     assert.true(code().includes('@spring={{this.spring}}'));
+    assert.true(code().includes('spring = springPresets.ios;'));
+  });
+
+  test('the spring fields show the preset and set a custom spring', async function (assert) {
+    await render(<template><DrawerDemo @search="?spring=ios" /></template>);
+    const select = findAll('.demo-controls label')
+      .find((element) => element.textContent?.includes('(@spring)'))!
+      .querySelector('select')!;
+    const field = (label: string) =>
+      findAll('.demo-spring-fields label')
+        .find((element) => element.textContent?.includes(label))!
+        .querySelector('input')!;
+    const code = () => find('.demo-code code')!.textContent!;
+
+    assert.strictEqual(field('Stiffness').value, '157.91');
+    assert.strictEqual(field('Damping').value, '25.13');
+    assert.strictEqual(field('Mass').value, '1');
+
+    await fillIn(field('Damping'), '10');
+    assert.strictEqual(select.value, 'custom');
+    assert.true(code().includes('@spring={{this.spring}}'));
+    assert.true(
+      code().includes(
+        'spring: MobileDrawerSpring = {\n  stiffness: 157.91,\n  damping: 10,\n  mass: 1,\n};',
+      ),
+    );
+
+    await fillIn(field('Mass'), '0');
+    assert.true(code().includes('mass: 1,'), 'below the minimum: ignored');
+    assert.strictEqual(field('Mass').value, '0', 'the text is kept');
+
+    await fillIn(field('Stiffness'), '1e308');
+    assert.true(
+      code().includes('stiffness: 157.91,'),
+      'above the max: ignored',
+    );
+    assert.false(code().includes('Infinity'));
+
+    await fillIn(select, 'default');
+    assert.strictEqual(field('Stiffness').value, '400');
+    assert.strictEqual(field('Damping').value, '40');
+    assert.notOk(code().includes('spring'), 'the default is not in the code');
+
+    await fillIn(field('Stiffness'), '300');
+    await fillIn(field('Stiffness'), '400');
+    assert.strictEqual(select.value, 'default', 'preset values match again');
+  });
+
+  test('a spring field keeps its element, focus and text while you type', async function (assert) {
+    await render(<template><DrawerDemo @search="" /></template>);
+    const input = findAll('.demo-spring-fields label')
+      .find((element) => element.textContent?.includes('Stiffness'))!
+      .querySelector('input')!;
+    const code = () => find('.demo-code code')!.textContent!;
+
+    // typeIn sends one input event per character, as a keyboard does.
+    input.focus();
+    input.value = '';
+    await typeIn(input, '300');
+    assert.true(input.isConnected, 'the same element is still rendered');
+    assert.strictEqual(document.activeElement, input, 'it keeps the focus');
+    assert.strictEqual(input.value, '300');
+    assert.true(code().includes('stiffness: 300,'), 'all digits apply');
+
+    // typeIn can't type a "." into a number field (the value is "" after it).
+    await fillIn(input, '157.916');
+    assert.true(input.isConnected);
+    assert.strictEqual(document.activeElement, input);
+    assert.strictEqual(input.value, '157.916', 'the text is not rounded');
+    assert.true(
+      code().includes('stiffness: 157.92,'),
+      'the drawer gets the full value (rounded in the code only)',
+    );
+  });
+
+  test('the rounded values of a preset select that preset again', async function (assert) {
+    await render(<template><DrawerDemo @search="?spring=ios" /></template>);
+    const select = findAll('.demo-controls label')
+      .find((element) => element.textContent?.includes('(@spring)'))!
+      .querySelector('select')!;
+    const damping = findAll('.demo-spring-fields label')
+      .find((element) => element.textContent?.includes('Damping'))!
+      .querySelector('input')!;
+    const code = () => find('.demo-code code')!.textContent!;
+
+    await fillIn(damping, '10');
+    assert.strictEqual(select.value, 'custom');
+
+    await fillIn(damping, '25.13');
+    assert.strictEqual(select.value, 'ios', 'the shown iOS values match');
     assert.true(code().includes('spring = springPresets.ios;'));
   });
 
