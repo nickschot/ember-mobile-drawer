@@ -1361,6 +1361,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       });
       tray.addEventListener('touchend', this.#onTrayTouchEnd);
       tray.addEventListener('touchcancel', this.#onTrayTouchEnd);
+      tray.addEventListener('scroll', this.#onTrayScrollEvent, {
+        passive: true,
+      });
       this.#keyboardFill = new KeyboardFill({
         root,
         tray,
@@ -1415,7 +1418,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // A new placement is a different layout: jump instead of animating
       // along the new axis from the old position.
       this.#moveToActive(!placementChanged);
-      if (placementChanged) this.#keyboardFill?.sync();
+      if (placementChanged) {
+        this.#keyboardFill?.sync();
+        // The axis (and the scroll start) may have changed.
+        this.#syncTrayOverscroll();
+      }
     },
 
     destroy: () => {
@@ -1429,6 +1436,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       tray?.removeEventListener('touchmove', this.#onTrayTouchMove);
       tray?.removeEventListener('touchend', this.#onTrayTouchEnd);
       tray?.removeEventListener('touchcancel', this.#onTrayTouchEnd);
+      tray?.removeEventListener('scroll', this.#onTrayScrollEvent);
       this.#lockedTouch = undefined;
       this.#reveal = undefined;
       this.#keyboardFill?.destroy();
@@ -1943,6 +1951,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#tray!.style.touchAction = this.trayTouchAction();
       }
       this.#syncScrollLock();
+      this.#syncTrayOverscroll();
     }
     if (!this.#drag) this.#applyScrollReset(open);
     this.#backdropProgress = this.#progressOf(open);
@@ -3142,10 +3151,46 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return !chain.some((element) => canScroll(element, vertical, step));
   };
 
-  /** The tray's `onScrollEnd`: puts back the overscroll behaviour. */
+  /**
+   * The tray's `onScrollEnd`: puts back the overscroll behaviour, except the
+   * tray's own while `#syncTrayOverscroll` keeps it.
+   */
   private onTrayScrollEnd = (): void => {
+    const tray = this.#tray;
     for (const element of [...this.#overscroll.keys()]) {
-      this.#setOverscroll(element, false);
+      if (element !== tray) this.#setOverscroll(element, false);
+    }
+    this.#syncTrayOverscroll();
+  };
+
+  /**
+   * At the highest snap point, the tray has no bounce at its scroll start:
+   * it keeps `overscroll-behavior: none` along the axis (see
+   * `#setOverscroll`) while it is nearer its scroll start than its end,
+   * also after the finger lifted. Otherwise momentum that reaches the start
+   * bounces the content, and iOS Safari moves a sticky grabber or header
+   * with that bounce: it doesn't stay at the tray's edge. Near the end the
+   * tray keeps its own value, so the content bounces at its end as before.
+   * Runs on the tray's `scroll` events, when a touch scroll ends, and when
+   * the drawer gets to or leaves the highest snap point. It reads the
+   * scroll position only; it writes only when the state changes.
+   */
+  #syncTrayOverscroll(): void {
+    const tray = this.#tray;
+    if (!tray) return;
+    const vertical = this.axis === 'vertical';
+    this.#setOverscroll(
+      tray,
+      !this.#destroyed &&
+        this.#atTop &&
+        nearEnd(tray, vertical, -OPENING_DIRECTION[this.placement]),
+    );
+  }
+
+  /** The tray's `scroll` listener, see `#syncTrayOverscroll`. */
+  #onTrayScrollEvent = (): void => {
+    if (this.#atTop || this.#overscroll.has(this.#tray!)) {
+      this.#syncTrayOverscroll();
     }
   };
 
@@ -3162,8 +3207,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const { style } = element;
     const saved = this.#overscroll.get(element);
     if (none) {
-      if (saved && saved.property === property) return;
-      if (saved) this.#setOverscroll(element, false);
+      if (saved && saved.property === property) {
+        if (style.getPropertyValue(property) === 'none') return;
+        // The app set its own value since: that is the one to put back.
+        this.#overscroll.delete(element);
+      } else if (saved) {
+        this.#setOverscroll(element, false);
+      }
       this.#overscroll.set(element, {
         property,
         value: style.getPropertyValue(property),
@@ -3172,7 +3222,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       style.setProperty(property, 'none');
     } else if (saved) {
       this.#overscroll.delete(element);
-      style.setProperty(saved.property, saved.value, saved.priority);
+      // Unless the app set its own value since: then that one stays.
+      if (style.getPropertyValue(saved.property) === 'none') {
+        style.setProperty(saved.property, saved.value, saved.priority);
+      }
     }
   }
 

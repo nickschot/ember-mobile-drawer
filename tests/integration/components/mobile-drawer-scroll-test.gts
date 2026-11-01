@@ -838,8 +838,15 @@ module(
       assert.strictEqual(values.at(-1), 'none', 'near the start');
       assert.strictEqual(
         tray().style.overscrollBehaviorY,
+        'none',
+        'the tray keeps it after the finger lifts, at the highest snap point (#145)',
+      );
+      scrollTo(tray(), 'bottom', 'end');
+      tray().dispatchEvent(new Event('scroll'));
+      assert.strictEqual(
+        tray().style.overscrollBehaviorY,
         '',
-        'put back when the finger lifts',
+        'put back once the tray scrolls nearer its end',
       );
 
       tray().style.overscrollBehaviorY = 'auto';
@@ -861,10 +868,107 @@ module(
         during: () => values.push(tray().style.overscrollBehaviorY),
       });
       assert.strictEqual(values.at(-1), 'none');
+      scrollTo(tray(), 'bottom', 'end');
+      tray().dispatchEvent(new Event('scroll'));
       assert.strictEqual(
         tray().style.overscrollBehaviorY,
         'auto',
         "the app's inline value is put back",
+      );
+    });
+
+    for (const placement of PLACEMENTS) {
+      const property = vertical(placement)
+        ? 'overscroll-behavior-y'
+        : 'overscroll-behavior-x';
+      const value = () => tray().style.getPropertyValue(property);
+      const scrolled = () => tray().dispatchEvent(new Event('scroll'));
+
+      test(`${placement}: at the highest snap point the tray does not bounce at its scroll start, also with momentum (#145)`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        tray().style.setProperty(property, 'auto');
+        const start = blockedEnd(CLOSING[placement]);
+        const end = start === 'start' ? 'end' : 'start';
+
+        // Momentum (no finger down) carries the content to its scroll
+        // start: a bounce there would move a sticky grabber with it.
+        scrollTo(tray(), placement, end);
+        scrolled();
+        assert.strictEqual(value(), 'auto', 'near the end it bounces');
+        scrollTo(tray(), placement, start);
+        scrolled();
+        assert.strictEqual(value(), 'none', 'near the start it does not');
+
+        // A scroll gesture near the start keeps it after the finger lifts.
+        const result = await gesture(
+          el('[data-test-content]'),
+          OPENING[placement],
+          4,
+        );
+        assert.false(result.dragging, 'the gesture scrolls');
+        assert.strictEqual(value(), 'none', 'kept after the finger lifts');
+
+        // Momentum towards the end gives the bounce back.
+        scrollTo(tray(), placement, end);
+        scrolled();
+        assert.strictEqual(value(), 'auto', "the app's value is back");
+      });
+
+      test(`${placement}: below the highest snap point the tray gets its own overscroll-behavior back (#145)`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        tray().style.setProperty(property, 'contain');
+        scrollTo(tray(), placement, blockedEnd(CLOSING[placement]));
+        scrolled();
+        assert.strictEqual(value(), 'none', 'at the highest snap point');
+
+        state.active = 1;
+        await settled();
+        clock.frame();
+        assert.strictEqual(value(), 'contain', 'from the first frame below it');
+        clock.runUntilIdle();
+        await settled();
+        assert.strictEqual(value(), 'contain', 'below it');
+
+        state.active = 2;
+        await settled();
+        clock.runUntilIdle();
+        await settled();
+        scrollTo(tray(), placement, blockedEnd(CLOSING[placement]));
+        scrolled();
+        assert.strictEqual(value(), 'none', 'back at the highest snap point');
+      });
+    }
+
+    test('the tray gets its own overscroll-behavior back when the drawer is destroyed (#145)', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      const element = tray();
+      element.style.overscrollBehaviorY = 'contain';
+      scrollTo(element, 'bottom', 'start');
+      element.dispatchEvent(new Event('scroll'));
+      assert.strictEqual(element.style.overscrollBehaviorY, 'none');
+      await render(<template></template>);
+      assert.strictEqual(element.style.overscrollBehaviorY, 'contain');
+    });
+
+    test('a placement change moves the hold to the new axis (#145)', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'start');
+      tray().dispatchEvent(new Event('scroll'));
+      assert.strictEqual(tray().style.overscrollBehaviorY, 'none');
+      state.placement = 'right';
+      await settled();
+      clock.runUntilIdle();
+      await settled();
+      assert.strictEqual(
+        tray().style.overscrollBehaviorY,
+        '',
+        'the vertical value is put back',
       );
     });
 
