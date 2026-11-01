@@ -506,6 +506,33 @@ module('Integration | themes/ios.css | page scale', function (hooks) {
     assert.true(bodyIsBlack(), 'black when open above the peek');
   });
 
+  test('iOS Safari 26: the backdrop tint is black while the page is scaled', async function (assert) {
+    added.push(applyMotion());
+    const state = new State();
+    await renderDrawer(state);
+    const tint = () =>
+      getComputedStyle(
+        document.querySelector(
+          '[data-test-drawer] > .mobile-drawer__backdrop-tint',
+        )!,
+      ).backgroundColor;
+
+    state.active = 2;
+    await settled();
+    assert.notStrictEqual(tint(), 'rgb(0, 0, 0)', 'without a page: not black');
+
+    const page = addPage();
+    added.push(page);
+    state.active = 1;
+    await settled();
+    assert.true(bodyIsBlack());
+    assert.strictEqual(tint(), 'rgb(0, 0, 0)', 'the black around the page');
+
+    state.active = 0;
+    await settled();
+    assert.notStrictEqual(tint(), 'rgb(0, 0, 0)', 'closed: not black');
+  });
+
   test('reduced motion: every page rule is in a prefers-reduced-motion: no-preference block', function (assert) {
     const rules = pageRules();
     assert.true(rules.length >= 2, 'the page rule and the <body> rule');

@@ -194,10 +194,43 @@ async function renderDrawer({
               {{/if}}
             </div>
           </div>
+          <div class="mobile-drawer__bar-tint" data-test-bar-tint></div>
         </div>
       </div>
     </template>,
   );
+}
+
+/**
+ * The rules of the base styles' iOS-only block (`-webkit-touch-callout`),
+ * without the condition, in the drawer layer. Adding them after the theme
+ * also loads them after it.
+ */
+function iosBaseRulesText(): string {
+  const visit = (rules: CSSRuleList): CSSSupportsRule | undefined => {
+    for (const rule of Array.from(rules)) {
+      if (
+        rule instanceof CSSSupportsRule &&
+        rule.conditionText.includes('-webkit-touch-callout: none')
+      ) {
+        return rule;
+      }
+      if (rule instanceof CSSGroupingRule) {
+        const found = visit(rule.cssRules);
+        if (found) return found;
+      }
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    const found = visit(sheet.cssRules);
+    if (found) {
+      const inner = Array.from(found.cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      return `@layer ember-mobile-drawer { ${inner} }`;
+    }
+  }
+  throw new Error('No iOS @supports rule in the base styles');
 }
 
 /**
@@ -875,6 +908,85 @@ module('Integration | themes/ios.css', function (hooks) {
       GLASS.light.background,
       'not expanded: glass',
     );
+  });
+
+  for (const scheme of SCHEMES) {
+    test(`${scheme}: the iOS Safari bar tint has the sheet colour, opaque while expanded, also with the base iOS rules after the theme`, async function (assert) {
+      await renderDrawer({ scheme, tall: true });
+      const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
+
+      // The iOS block only applies on iOS; force it, after the theme.
+      styles.push(addStyles(iosBaseRulesText()));
+      assert.strictEqual(tint().display, 'block');
+      assert.strictEqual(
+        tint().backgroundColor,
+        GLASS[scheme].background,
+        'below the top: the glass tint',
+      );
+
+      el('[data-test-root]').setAttribute('data-expanded', '');
+      finishTransitions();
+      assert.strictEqual(
+        rgb(tint().backgroundColor),
+        SOLID[scheme],
+        'expanded: the opaque sheet colour',
+      );
+      assert.strictEqual(
+        tint().backgroundColor,
+        getComputedStyle(el('[data-test-tray]')).backgroundColor,
+        'the same colour as the expanded tray',
+      );
+    });
+  }
+
+  for (const scheme of SCHEMES) {
+    test(`${scheme}: with the iOS base rules the spring gap fill is the opaque sheet colour while expanded`, async function (assert) {
+      await renderDrawer({ scheme, tall: true });
+      styles.push(addStyles(iosBaseRulesText()));
+      const tray = () => getComputedStyle(el('[data-test-tray]'));
+      const fill = () => tray().boxShadow.split(' 0px 32px 0px 0px')[0]!;
+
+      assert.strictEqual(
+        fill(),
+        GLASS[scheme].background,
+        'glass below the top',
+      );
+      el('[data-test-root]').setAttribute('data-expanded', '');
+      finishTransitions();
+      assert.strictEqual(rgb(fill()), SOLID[scheme], 'expanded: opaque');
+      assert.strictEqual(fill(), tray().backgroundColor, 'the tray colour');
+    });
+  }
+
+  test('with motion, the bar tint and the gap fill fade with the sheet', async function (assert) {
+    styles.push(applyMotion());
+    await renderDrawer({ tall: true });
+    const tint = () => getComputedStyle(el('[data-test-bar-tint]'));
+    const tray = () => getComputedStyle(el('[data-test-tray]'));
+    const duration = (style: CSSStyleDeclaration, property: string) => {
+      const properties = style.transitionProperty.split(', ');
+      return style.transitionDuration.split(', ')[properties.indexOf(property)];
+    };
+
+    for (const expanded of [false, true]) {
+      el('[data-test-root]').toggleAttribute('data-expanded', expanded);
+      assert.strictEqual(
+        duration(tint(), 'background-color'),
+        duration(tray(), 'background-color'),
+        `bar tint (expanded: ${expanded})`,
+      );
+      assert.strictEqual(
+        duration(tray(), 'box-shadow'),
+        duration(tray(), 'background-color'),
+        `gap fill (expanded: ${expanded})`,
+      );
+    }
+    styles.push(
+      addStyles(
+        '.mobile-drawer-theme-ios { --_mobile-drawer-ios-fade: 0.4s; }',
+      ),
+    );
+    assert.strictEqual(duration(tint(), 'background-color'), '0.4s');
   });
 
   test('unlayered app CSS still wins over the expanded tray background', async function (assert) {

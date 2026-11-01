@@ -80,6 +80,12 @@ function backdropProgress(): number {
   );
 }
 
+function backdropTintProgress(): string {
+  return el('.mobile-drawer__backdrop-tint').style.getPropertyValue(
+    '--mobile-drawer-progress',
+  );
+}
+
 const containerStyle = (height: number, hidden: boolean) =>
   htmlSafe(
     `position: relative; width: 400px; height: ${height}px${hidden ? '; display: none' : ''}`,
@@ -192,6 +198,24 @@ module('Integration | Component | mobile-drawer', function (hooks) {
         '[data-test-drawer] > .mobile-drawer__tray > .mobile-drawer__content > [data-test-block]',
       )
       .hasText('Drawer content');
+    assert
+      .dom(
+        '[data-test-drawer] > .mobile-drawer__backdrop + .mobile-drawer__backdrop-tint',
+      )
+      .exists({ count: 1 }, 'an empty backdrop tint after the backdrop');
+    assert
+      .dom('[data-test-drawer] > .mobile-drawer__backdrop-tint')
+      .hasAttribute('aria-hidden', 'true')
+      .hasNoText();
+    assert
+      .dom(
+        '[data-test-drawer] > .mobile-drawer__tray + .mobile-drawer__bar-tint',
+      )
+      .exists({ count: 1 }, 'an empty bar tint after the tray');
+    assert
+      .dom('[data-test-drawer] > .mobile-drawer__bar-tint')
+      .hasAttribute('aria-hidden', 'true')
+      .hasNoText();
   });
 
   test('it starts closed at index 0 without animating', async function (assert) {
@@ -234,6 +258,11 @@ module('Integration | Component | mobile-drawer', function (hooks) {
           backdropProgress(),
           offset / trayLength,
           `backdrop progress at ${index}`,
+        );
+        assert.strictEqual(
+          backdropTintProgress(),
+          String(backdropProgress()),
+          `backdrop tint progress at ${index}`,
         );
         if (index === 0) {
           assert.dom('[data-test-drawer]').hasAttribute('data-closed');
@@ -280,6 +309,11 @@ module('Integration | Component | mobile-drawer', function (hooks) {
     assert.true(
       backdropProgress() > 0 && backdropProgress() < 0.5,
       'backdrop follows every frame',
+    );
+    assert.strictEqual(
+      backdropTintProgress(),
+      String(backdropProgress()),
+      'the backdrop tint follows every frame too',
     );
     await settled();
     assert

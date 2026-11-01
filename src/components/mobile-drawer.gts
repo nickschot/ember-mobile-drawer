@@ -481,7 +481,10 @@ const clampIndex = (index: number, count: number) =>
  * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
  * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
  * `@backdrop={{false}}`) and a `.mobile-drawer__tray`, with the block inside
- * `.mobile-drawer__content`. Attributes are applied to the root element.
+ * `.mobile-drawer__content`, and an empty `.mobile-drawer__bar-tint` after
+ * the tray and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
+ * after the backdrop (for the iOS Safari 26 bars, see styles.css). Attributes are
+ * applied to the root element.
  *
  * Backdrop: its opacity follows the drawer frame by frame through
  * `--mobile-drawer-progress`, written in `#render` like the transform. A tap
@@ -542,6 +545,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #root?: HTMLElement;
   #tray?: HTMLElement;
   #backdrop?: HTMLElement;
+  /** The backdrop's `.mobile-drawer__backdrop-tint` sibling, if any. */
+  #backdropTint?: HTMLElement;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
   #layout?: Layout;
@@ -1476,7 +1481,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Writes the progress of the last render on the backdrop, if there is one:
-   * `--mobile-drawer-progress` for its opacity, and `pointer-events: none`
+   * `--mobile-drawer-progress` for its opacity (also on the backdrop tint,
+   * for the iOS Safari 26 bar colour), and `pointer-events: none`
    * at or below the smallest snap point. So an invisible backdrop (e.g.
    * while the drawer closes, before `data-closed` hides it) never blocks the
    * page, and neither does the backdrop of a "peek" drawer (smallest snap
@@ -1485,8 +1491,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #paintBackdrop(): void {
     const backdrop = this.#backdrop;
     if (!backdrop) return;
-    const progress = this.#backdropProgress;
-    backdrop.style.setProperty('--mobile-drawer-progress', String(progress));
+    const progress = String(this.#backdropProgress);
+    backdrop.style.setProperty('--mobile-drawer-progress', progress);
+    this.#backdropTint?.style.setProperty('--mobile-drawer-progress', progress);
     const pointerEvents = this.#backdropBlocks ? '' : 'none';
     if (backdrop.style.pointerEvents !== pointerEvents) {
       backdrop.style.pointerEvents = pointerEvents;
@@ -1502,6 +1509,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   backdropHooks: LifecycleHooks = {
     install: (backdrop) => {
       this.#backdrop = backdrop;
+      // Rendered in the same block, after the backdrop.
+      const tint = backdrop.nextElementSibling;
+      this.#backdropTint =
+        tint instanceof HTMLElement &&
+        tint.classList.contains('mobile-drawer__backdrop-tint')
+          ? tint
+          : undefined;
       backdrop.addEventListener('pointerdown', this.onBackdropPointerDown);
       backdrop.addEventListener('click', this.onBackdropClick);
       this.#paintBackdrop();
@@ -1512,6 +1526,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       backdrop?.removeEventListener('pointerdown', this.onBackdropPointerDown);
       backdrop?.removeEventListener('click', this.onBackdropClick);
       this.#backdrop = undefined;
+      this.#backdropTint = undefined;
       this.#endBackdropPointer();
     },
   };
@@ -2663,6 +2678,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           class="mobile-drawer__backdrop"
           {{lifecycle this.backdropHooks}}
         ></div>
+        <div class="mobile-drawer__backdrop-tint" aria-hidden="true"></div>
       {{/if}}
       <div
         class="mobile-drawer__tray"
@@ -2710,6 +2726,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           }}
         </div>
       </div>
+      <div class="mobile-drawer__bar-tint" aria-hidden="true"></div>
     </div>
   </template>
 }
