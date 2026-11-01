@@ -38,7 +38,7 @@
  *                                    with this class directly in the drawer
  *                                    content (first for a bottom sheet, last
  *                                    for a top sheet). The element is a
- *                                    15px strip across the tray, sticky at
+ *                                    14px strip across the tray, sticky at
  *                                    its page-facing edge so it stays in
  *                                    view while the content scrolls. While
  *                                    the drawer is at its highest snap point
