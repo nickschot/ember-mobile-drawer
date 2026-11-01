@@ -1297,4 +1297,46 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
     assert.strictEqual(clock.pendingFrames, 0);
     finger.up();
   });
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: a jittery finger is caught up with as fast as a still one`, async function (assert) {
+      /** Frames until the tray is under the finger, and the tray per frame. */
+      const catchUp = async (jitter: boolean) => {
+        const state = new State();
+        state.placement = placement;
+        state.active = 1;
+        await renderDrawer(state);
+        const { finger, move, read } = fingerOnGrip(placement);
+        finger.down();
+        for (let i = 0; i < 4; i++) {
+          clock.frame(FRAME);
+          move(4);
+        }
+        const seen: PanFrame[] = [];
+        let frames = 0;
+        for (; frames < 30; frames++) {
+          const now = read();
+          seen.push(now);
+          if (near(now.tray, now.finger)) break;
+          clock.frame(FRAME);
+          // 1 screen px back and forth, every frame.
+          if (jitter) move(frames % 2 === 0 ? -1 : 1);
+        }
+        finger.up();
+        clock.runUntilIdle();
+        await settled();
+        return { frames, seen };
+      };
+
+      const still = await catchUp(false);
+      const jittery = await catchUp(true);
+      assert.true(
+        jittery.frames <= still.frames + 1,
+        `under the finger after ${jittery.frames} frames, still: ${still.frames} (jittery: ${table(jittery.seen)}; still: ${table(still.seen)})`,
+      );
+      assert.true(
+        jittery.seen.every(({ finger: f, tray }) => tray <= f + 0.01),
+        'never past the finger',
+      );
+    });
+  }
 });

@@ -30,7 +30,7 @@ import {
 } from '../-private/lifecycle-modifier.ts';
 import { noop } from '../-private/noop-modifier.ts';
 import { VelocityTracker } from '../-private/gesture/velocity.ts';
-import { catchUpLag } from '../-private/gesture/catch-up.ts';
+import { TURN_SLOP, catchUpLag } from '../-private/gesture/catch-up.ts';
 import { inertOutside } from '../-private/modal/inert.ts';
 import { lockBodyScroll } from '../-private/modal/scroll-lock.ts';
 import {
@@ -201,6 +201,11 @@ interface Drag {
   holding: boolean;
   /** Whether the finger moved since the last catch-up frame. */
   moved: boolean;
+  /**
+   * The furthest `delta` the finger reached the way the tray catches up
+   * (the sign of `lagFrom`) since the catch-up (re)started, see `onPan`.
+   */
+  peak: number;
   /** How far (drawer px) the finger has moved from where it went down. */
   delta: number;
   /** The tray's `delta`: `delta` minus the lag, as last drawn. */
@@ -2662,6 +2667,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       lagStart: this.#now(),
       holding: false,
       moved: false,
+      peak: recognisedAt,
       delta: recognisedAt,
       drawn: 0,
       target: offset,
@@ -2699,20 +2705,41 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const now = this.#now();
     const lag = drag.delta - drag.drawn;
     const step = delta - drag.delta;
-    if (lag !== 0 && step * lag < 0) {
-      // Back towards the tray during the catch-up: the tray holds still
-      // until the finger reaches it, and then follows it. Easing on would
-      // take the tray past the finger, or against the finger's direction.
+    // The way the tray catches up: 1 or -1, 0 when it has caught up.
+    const way = Math.sign(drag.lagFrom);
+    if (drag.holding) {
+      if (lag === 0) {
+        // The finger reached the tray: 1:1 from here.
+        drag.holding = false;
+      } else if (step * lag > 0) {
+        // On again, away from the tray: ease the gap from here.
+        drag.lagFrom = lag;
+        drag.lagStart = now;
+        drag.holding = false;
+        drag.peak = delta;
+      } else {
+        // Holds until the finger reaches it.
+        const drawn =
+          way > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
+        drag.lagFrom = delta - drawn;
+      }
+    } else if (
+      lag !== 0 &&
+      (drag.peak - delta) * way > TURN_SLOP / drag.scale
+    ) {
+      // Back towards the tray during the catch-up, further than a jitter of
+      // the finger: the tray holds still until the finger reaches it, and
+      // then follows it. Easing on would take it against the finger, and
+      // past it. A jitter doesn't stop the easing: the tray then stays
+      // behind the finger by the lag.
       const drawn =
-        lag > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
+        way > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
       drag.lagFrom = delta - drawn;
       drag.lagStart = now;
       drag.holding = true;
-    } else if (drag.holding && step !== 0) {
-      // On again, away from the tray: ease the gap from here.
-      drag.lagFrom = lag;
-      drag.lagStart = now;
-      drag.holding = false;
+    } else if (way !== 0) {
+      drag.peak =
+        way > 0 ? Math.max(drag.peak, delta) : Math.min(drag.peak, delta);
     }
     drag.moved = true;
     drag.delta = delta;
@@ -2774,6 +2801,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       drag.holding = false;
       drag.lagFrom = drag.delta - drag.drawn;
       drag.lagStart = now;
+      drag.peak = drag.delta;
     }
     drag.moved = false;
     this.#follow(drag, now);

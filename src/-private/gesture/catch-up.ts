@@ -24,6 +24,14 @@ export const CATCH_UP_DURATION = 100;
 export const CATCH_UP_SPEED = 0.24;
 
 /**
+ * How far (screen px) the finger may move back towards the tray during the
+ * catch-up without stopping it: the jitter of a finger that holds still or
+ * moves slowly. A larger move back holds the tray until the finger reaches
+ * it, so it never moves against the finger or passes it.
+ */
+export const TURN_SLOP = 2;
+
+/**
  * How long (ms) catching up `distance` px takes: {@link CATCH_UP_DURATION},
  * or longer for a distance that would otherwise be faster than
  * {@link CATCH_UP_SPEED}. The easing (`smoothstep`) is at its fastest
