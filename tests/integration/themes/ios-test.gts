@@ -5,6 +5,7 @@ import { htmlSafe } from '@ember/template';
 import { tracked } from '@glimmer/tracking';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
+import { nextFrames } from '../../helpers/frames.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
 
@@ -974,9 +975,7 @@ const SHEET_SNAP_POINTS: SnapPoint[] = [0, '40%', '100%'];
 
 /** Waits a few animation frames, for the component's scroll reset. */
 async function frames(count = 3) {
-  for (let i = 0; i < count; i++) {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
+  await nextFrames(count);
   await settled();
 }
 
