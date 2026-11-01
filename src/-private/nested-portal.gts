@@ -30,8 +30,9 @@ export interface NestedPortalSignature {
 /**
  * The yielded `Nested` component of `<MobileDrawer>`: renders its block (a
  * nested drawer) outside the drawer's tray, at the end of `@destination`
- * (default: the parent element of the drawer's root, so the nested drawer
- * gets the same ancestors, such as a theme class), in a
+ * (default: the parent element of the drawer's root, or of the outermost
+ * drawer whose tray the drawer is in, see `#nestedDestination`, so the
+ * nested drawer gets the same ancestors, such as a theme class), in a
  * `.mobile-drawer-nested` element. The drawer registers that element as a
  * part of its tray (see `nesting.ts`), so the nesting relation stays the
  * same as for a drawer inside the tray.

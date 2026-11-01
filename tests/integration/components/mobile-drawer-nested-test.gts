@@ -39,6 +39,12 @@ class State {
   openInner = () => (this.inner = 1);
 }
 
+class ThreeLevels {
+  @tracked a = 1;
+  @tracked b = 1;
+  @tracked c = 0;
+}
+
 const containerStyle = htmlSafe(
   'position: relative; width: 400px; height: 600px; overflow: hidden',
 );
@@ -278,7 +284,7 @@ module('Integration | Component | mobile-drawer | Nested', function (hooks) {
     await closeAll(state);
   });
 
-  test('a closing outer drawer hides the nested drawer and frees the page', async function (assert) {
+  test('a closing outer drawer closes the nested drawer with it and frees the page', async function (assert) {
     const state = new State();
     await renderNested(state);
     await settle();
@@ -288,30 +294,137 @@ module('Integration | Component | mobile-drawer | Nested', function (hooks) {
 
     // E.g. app code resets the outer drawer only.
     state.outer = 0;
+    await settled();
+    assert.strictEqual(
+      state.inner,
+      0,
+      'the nested drawer closes when the outer drawer starts to close',
+    );
+    const top = () => tray('[data-test-inner]').getBoundingClientRect().top;
+    const start = top();
+    clock.frame();
+    clock.frame();
+    clock.frame();
+    assert.true(top() > start, 'it moves away with the outer drawer');
     await settle();
     assert.dom('[data-test-outer]').hasAttribute('data-closed');
+    assert.dom('[data-test-inner]').hasAttribute('data-closed');
     assert.dom('.mobile-drawer-nested').hasAttribute('data-closed');
-    assert.strictEqual(
-      getComputedStyle(el('[data-test-inner-button]')).visibility,
-      'hidden',
-      'the nested drawer hides with it',
-    );
     assert.dom('[data-test-inner]').doesNotHaveAttribute('aria-modal');
     assert.dom('[inert]').doesNotExist('nothing inert');
     assert.strictEqual(bodyScrollLocks(), 0, 'nothing locked');
     assert.notStrictEqual(
       active(),
       el('[data-test-inner-button]'),
-      'focus left the hidden drawer',
+      'focus left the closed drawer',
     );
 
-    // Opening the outer drawer again brings the nested drawer back.
+    // Opening the outer drawer again doesn't open the nested drawer.
     state.outer = 1;
     await settle();
     assert.dom('.mobile-drawer-nested').doesNotHaveAttribute('data-closed');
-    assert.dom('[data-test-inner]').hasAttribute('aria-modal', 'true');
-    assert.strictEqual(active(), el('[data-test-inner-button]'));
+    assert.dom('[data-test-inner]').hasAttribute('data-closed');
+    assert.strictEqual(state.inner, 0);
     await closeAll(state);
+  });
+
+  test('a controlled nested drawer that stays open hides with the outer drawer', async function (assert) {
+    const state = new State();
+    // The parent ignores the nested drawer's close.
+    state.setInner = () => state.inner;
+    await renderNested(state);
+    await settle();
+    state.inner = 1;
+    await settle();
+    state.outer = 0;
+    await settle();
+    assert.strictEqual(state.inner, 1, 'the app kept it open');
+    assert.dom('.mobile-drawer-nested').hasAttribute('data-closed');
+    assert.strictEqual(
+      getComputedStyle(el('[data-test-inner-button]')).visibility,
+      'hidden',
+      'hidden with the outer drawer',
+    );
+    assert.dom('[data-test-inner]').doesNotHaveAttribute('aria-modal');
+    // It comes back with the outer drawer, as a drawer in the tray.
+    state.outer = 1;
+    await settle();
+    assert.dom('[data-test-inner]').hasAttribute('aria-modal', 'true');
+    await closeAll(state);
+  });
+
+  test('three levels: Nested of a drawer inside another tray renders outside every tray', async function (assert) {
+    const levels = new ThreeLevels();
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        <div style={{containerStyle}} data-test-container>
+          <MobileDrawer
+            @snapPoints={{OUTER_SNAP_POINTS}}
+            @activeSnapPoint={{levels.a}}
+            aria-label="A"
+            style="position: absolute"
+            data-test-a
+          >
+            <div style={{innerContentStyle}}>
+              <MobileDrawer
+                @snapPoints={{INNER_SNAP_POINTS}}
+                @activeSnapPoint={{levels.b}}
+                @modal={{false}}
+                aria-label="B"
+                style="position: absolute"
+                data-test-b
+                as |b|
+              >
+                <div style={{innerContentStyle}}>B</div>
+                <b.Nested>
+                  <MobileDrawer
+                    @snapPoints={{INNER_SNAP_POINTS}}
+                    @activeSnapPoint={{levels.c}}
+                    aria-label="C"
+                    style="position: absolute"
+                    data-test-c
+                  >
+                    <div style={{innerContentStyle}}>
+                      <button type="button" data-test-c-button>C</button>
+                    </div>
+                  </MobileDrawer>
+                </b.Nested>
+              </MobileDrawer>
+            </div>
+          </MobileDrawer>
+        </div>
+      </template>,
+    );
+    await settle();
+    levels.c = 1;
+    await settle();
+
+    assert.strictEqual(
+      el('[data-test-c]').closest('.mobile-drawer-nested')!.parentElement,
+      el('[data-test-container]'),
+      'next to A, not in its tray',
+    );
+    const container = el('[data-test-container]').getBoundingClientRect();
+    const sheet = tray('[data-test-c]').getBoundingClientRect();
+    assert.true(
+      sheet.height > 0 &&
+        sheet.top >= container.top - 1 &&
+        sheet.bottom <= container.bottom + 1,
+      `C's sheet is on screen while A is at 40% (${sheet.top}-${sheet.bottom} in ${container.top}-${container.bottom})`,
+    );
+    const { x, y } = middleOf(el('[data-test-c-button]'));
+    assert.strictEqual(
+      document.elementFromPoint(x, y),
+      el('[data-test-c-button]'),
+    );
+    assert.dom('[data-test-c]').hasAttribute('aria-modal', 'true');
+    assert.dom('[data-test-a]').hasAttribute('data-nested');
+
+    levels.c = 0;
+    levels.b = 0;
+    levels.a = 0;
+    await settle();
   });
 
   test('@destination: a portal in an element that is inert already is not inert', async function (assert) {

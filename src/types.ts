@@ -76,12 +76,15 @@ export interface MobileDrawerApi {
    * so it can't show while this drawer is not fully open.
    *
    * The block renders with `in-element` at the end of `@destination`
-   * (default: the parent element of this drawer's root, once this drawer is
-   * in the DOM), in a `<div class="mobile-drawer-nested">`
+   * (default: the parent element of this drawer's root, or of the outermost
+   * drawer whose tray this drawer is in, once this drawer is in the DOM; so
+   * not in server-rendered HTML), in a `<div class="mobile-drawer-nested">`
    * (`display: contents`). For the drawers, that element is a part of this
    * drawer's tray, as if the nested drawer were inside it: the modal stack
    * order, `data-nested`, `inert`, focus return and the body scroll lock
-   * work the same, and it hides with this drawer (`data-closed`).
+   * work the same. When this drawer starts to close, it closes the open
+   * drawers in it (`close()`); one that stays open hides with this drawer
+   * (`data-closed`).
    *
    * ```gts
    * <MobileDrawer aria-label="List" as |drawer|>

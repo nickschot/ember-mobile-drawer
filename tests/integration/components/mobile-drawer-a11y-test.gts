@@ -621,16 +621,31 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
         await settle();
         assert.dom('[data-test-drawer]').hasAttribute('data-closed');
 
-        state.changes = [];
-        await triggerKeyEvent(document.body, 'keydown', 'Escape');
-        assert.strictEqual(state.nestedActive, 2, 'no hidden drawer on Escape');
+        if (portaled) {
+          // A drawer in `Nested` closes with the parent (it doesn't move
+          // with the parent's tray), so it doesn't come back.
+          assert.strictEqual(state.nestedActive, 0, 'closed with the parent');
+          state.active = 2;
+          await settle();
+          assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+          assert.strictEqual(bodyScrollLocks(), 1);
+        } else {
+          state.changes = [];
+          await triggerKeyEvent(document.body, 'keydown', 'Escape');
+          assert.strictEqual(
+            state.nestedActive,
+            2,
+            'no hidden drawer on Escape',
+          );
 
-        // Opening the parent again brings the nested drawer's modality back.
-        state.active = 2;
-        await settle();
-        assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
-        assert.strictEqual(bodyScrollLocks(), 2);
-        assert.strictEqual(active(), el('[data-test-nested-button]'));
+          // Opening the parent again brings the nested drawer's modality
+          // back.
+          state.active = 2;
+          await settle();
+          assert.dom('[data-test-nested]').hasAttribute('aria-modal', 'true');
+          assert.strictEqual(bodyScrollLocks(), 2);
+          assert.strictEqual(active(), el('[data-test-nested-button]'));
+        }
 
         state.nestedShown = false;
         state.active = 0;
@@ -794,6 +809,17 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
           el('[data-test-trigger]'),
           'focus moves to the element that opened the nested drawer',
         );
+
+        if (portaled) {
+          // A drawer in `Nested` closes with the parent.
+          assert.strictEqual(state.nestedActive, 0, 'closed with the parent');
+          state.snapPoints = PEEK_SNAP_POINTS;
+          await settle();
+          assert.dom('[data-test-nested]').doesNotHaveAttribute('aria-modal');
+          state.nestedShown = false;
+          await settle();
+          return;
+        }
 
         // At the peek again, the nested drawer is modal again.
         state.snapPoints = PEEK_SNAP_POINTS;

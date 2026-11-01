@@ -41,6 +41,7 @@ import {
 import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
 import {
   addPortal,
+  logicalParent,
   logicallyContains,
   portalsOf,
   removePortal,
@@ -660,7 +661,8 @@ const clampIndex = (index: number, count: number) =>
  * yielded `Nested` renders outside the tray (see `nesting.ts`), so the tray
  * doesn't clip it; its touches never reach this drawer. For the modal
  * stack, `data-nested`, `inert`, focus, the scroll lock and the hiding of
- * a closed drawer it still counts as inside this drawer.
+ * a closed drawer it still counts as inside this drawer. When this drawer
+ * starts to close, it closes such a drawer (see `#closePortaled`).
  *
  * With `@handleOnly` the content is locked below the highest snap point
  * too, so it only scrolls when the drawer is fully open, and swipes along
@@ -1104,10 +1106,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       mountedRoots.add(root);
       MobileDrawer.#syncNested();
       // Where the yielded `Nested` renders by default. Tracked state, so not
-      // during rendering.
+      // during rendering (and the drawers around this one are in the DOM
+      // by then).
       queueMicrotask(() => {
-        if (!this.#destroyed)
-          this.nestedParent = root.parentElement ?? undefined;
+        if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
       });
       this.#measure();
       // Appear at the initial snap point without animating in.
@@ -2076,6 +2078,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (hidden !== this.#hidden) {
       this.#hidden = hidden;
       MobileDrawer.#syncNested();
+      if (hidden) this.#closePortaled();
     }
     trackInput(this, !this.#hidden);
     if (!this.#hasReportBaseline) {
@@ -2233,6 +2236,77 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#initialFocused = undefined;
     release();
     if (!this.#destroyed) this.modalActive = false;
+  }
+
+  /**
+   * Where the yielded `Nested` renders by default: the parent element of
+   * the root, or, when this drawer is inside the tray of another drawer
+   * (also through a `Nested` of that drawer), the parent element of the
+   * outermost such drawer. A transformed tray is the containing block of the
+   * fixed drawers in it, so a nested drawer in the tray of any drawer
+   * around this one would be clipped by that tray again.
+   */
+  #nestedDestination(): Element | undefined {
+    let root = this.#root!;
+    for (;;) {
+      const inner = root;
+      const outer = [...(mountedDrawers as Set<MobileDrawer>)].find(
+        (other) =>
+          other.#root !== inner &&
+          !!other.#tray &&
+          logicallyContains(other.#tray, inner),
+      );
+      const outerRoot = outer ? outer.#root : undefined;
+      if (!outerRoot) break;
+      root = outerRoot;
+    }
+    return root.parentElement ?? undefined;
+  }
+
+  /**
+   * Called when this drawer starts to close (see `#hidden`): closes the
+   * drawers in the portals of its `Nested` that show, like `close()`, so
+   * they move away together with this drawer. A drawer inside the tray
+   * moves with the tray; one in a portal would else stay on the screen
+   * until this drawer has closed, and then disappear at once. In a
+   * microtask: `close()` can call `@onSnapPointChange`, which must not run
+   * during rendering. A controlled drawer whose parent doesn't take the new
+   * index hides with this drawer (`data-closed` on the portal).
+   */
+  #closePortaled(): void {
+    if (this.#portals.size === 0) return;
+    queueMicrotask(() => {
+      if (this.#destroyed || !this.#hidden) return;
+      const root = this.#root!;
+      for (const other of mountedDrawers as Set<MobileDrawer>) {
+        const otherRoot = other.#root;
+        if (
+          other === this ||
+          other.#hidden ||
+          !otherRoot ||
+          ![...this.#portals].some((portal) => portal.contains(otherRoot)) ||
+          other.#closestDrawerRoot() !== root
+        ) {
+          continue;
+        }
+        other.close();
+      }
+    });
+  }
+
+  /**
+   * The root of the nearest drawer around this one, also through portals
+   * (see `nesting.ts`).
+   */
+  #closestDrawerRoot(): Element | undefined {
+    for (
+      let node = this.#root ? logicalParent(this.#root) : null;
+      node;
+      node = logicalParent(node)
+    ) {
+      if (mountedRoots.has(node)) return node;
+    }
+    return undefined;
   }
 
   /**
