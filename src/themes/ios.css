@@ -15,7 +15,7 @@
  * depend on load order, but load it after styles.css anyway. The real
  * properties it sets are `backdrop-filter` and `transition` on the tray and
  * the grabber's, which the base styles don't set, `transition` on the bar
- * tint, the private `--_mobile-drawer-fill` on the expanded tray, and `background` on the expanded tray, `background-color` on its
+ * tint, and `background` on the expanded tray, `background-color` on its
  * bar tint and `background-color` on the backdrop tint with the page
  * scale, which the base styles also set: those three rules have a
  * specificity above zero (see "Overriding"), so they win over the base
@@ -112,10 +112,7 @@
  * drawer is [data-expanded] the theme gives the bar tint the opaque sheet
  * colour, and the toolbar area fades with the sheet (the same 0.25s), so
  * they become opaque together. Safari takes the new colour, also after a
- * drag to the top. While the sheet springs past the top after a fast
- * swipe, the base styles fill the gap below it with the sheet colour; the
- * theme gives that fill the opaque colour while expanded
- * (`--_mobile-drawer-fill`, private), with the same fade. With the page
+ * drag to the top. With the page
  * scale, the toolbar area has the sheet colour, not the black of `<body>`.
  * The status bar above a bottom sheet shows the page with the backdrop
  * over it (the base styles' `.mobile-drawer__backdrop-tint`), never the
@@ -487,11 +484,6 @@
     ) {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
-      /* iOS: the base styles fill the spring gap below the sheet with this
-         colour (see "iOS Safari 26 toolbar" in the header). */
-      --_mobile-drawer-fill: rgb(
-        from var(--mobile-drawer-background, Canvas) r g b / 1
-      );
     }
 
     /*
@@ -512,9 +504,7 @@
      */
     @media (prefers-reduced-motion: no-preference) {
       :where(.mobile-drawer-theme-ios .mobile-drawer__tray) {
-        transition:
-          background-color var(--_mobile-drawer-ios-fade) ease,
-          box-shadow var(--_mobile-drawer-ios-fade) ease;
+        transition: background-color var(--_mobile-drawer-ios-fade) ease;
       }
 
       :where(
@@ -525,8 +515,7 @@
         transition:
           background-color var(--_mobile-drawer-ios-fade) ease,
           -webkit-backdrop-filter 0s linear var(--_mobile-drawer-ios-fade),
-          backdrop-filter 0s linear var(--_mobile-drawer-ios-fade),
-          box-shadow var(--_mobile-drawer-ios-fade) ease;
+          backdrop-filter 0s linear var(--_mobile-drawer-ios-fade);
       }
 
       :where(
@@ -539,8 +528,7 @@
         transition: background-color 0s linear var(--_mobile-drawer-ios-fade);
       }
 
-      /* iOS Safari 26: the toolbar area (the bar tint) and the fill of the
-         spring gap below the sheet (the tray's box-shadow) fade with the
+      /* iOS Safari 26: the toolbar area (the bar tint) fades with the
          sheet, in both directions. */
       :where(.mobile-drawer-theme-ios .mobile-drawer__bar-tint) {
         transition: background-color var(--_mobile-drawer-ios-fade) ease;
