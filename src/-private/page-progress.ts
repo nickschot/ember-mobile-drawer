@@ -26,11 +26,11 @@
  *
  * The marked elements are looked up when the first drawer starts to open
  * and kept until no drawer is open, so the document isn't queried on every
- * frame. While a drawer is open, a `MutationObserver` marks that list as
- * out of date when elements are added or removed, or an element is marked
- * or unmarked (e.g. a route change replaces the page wrapper); it is looked
- * up again on the next update. An element that leaves the list gets its
- * properties removed.
+ * frame. While a drawer is open, a `MutationObserver` looks them up again
+ * when elements are added or removed, or an element is marked or unmarked
+ * (e.g. a route change replaces the page wrapper), and writes the current
+ * progress on them at once, also while the drawers are at rest. An element
+ * that leaves the list gets its properties and attribute removed.
  *
  * @module
  * @internal
@@ -89,10 +89,28 @@ function findPages(): Page[] {
   return found;
 }
 
+/** Writes the current progress of the drawers on every page element. */
+function writeAll(pages: Page[]): void {
+  for (const page of pages) {
+    let max = 0;
+    for (const [root, value] of sources) {
+      if (value > max && !page.element.contains(root)) max = value;
+    }
+    write(page, max);
+  }
+}
+
+/**
+ * Watches the DOM while a drawer is open: after a change, looks up the page
+ * elements again and writes the current progress on them at once, also
+ * while the drawers are at rest.
+ */
 function observe(): void {
   if (observer || typeof MutationObserver === 'undefined') return;
   observer = new MutationObserver(() => {
-    pages = undefined;
+    if (sources.size === 0) return;
+    pages = findPages();
+    writeAll(pages);
   });
   observer.observe(document, {
     subtree: true,
@@ -114,20 +132,12 @@ export function setPageProgress(source: Element, progress: number): void {
   }
 
   if (typeof document === 'undefined') return;
-  if (!pages) {
-    pages = findPages();
+  pages ??= findPages();
+  writeAll(pages);
+
+  if (sources.size > 0) {
     observe();
-  }
-
-  for (const page of pages) {
-    let max = 0;
-    for (const [root, value] of sources) {
-      if (value > max && !page.element.contains(root)) max = value;
-    }
-    write(page, max);
-  }
-
-  if (sources.size === 0) {
+  } else {
     pages = undefined;
     observer?.disconnect();
     observer = undefined;

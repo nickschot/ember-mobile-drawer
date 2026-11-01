@@ -197,8 +197,9 @@
  *                            drawer starts to open, and again after the DOM
  *                            changes while a drawer is open, so a page
  *                            element that is rendered while a drawer is open
- *                            (e.g. after a route change) follows from the
- *                            next frame of a drawer. These base styles don't
+ *                            (e.g. after a route change) follows at once,
+ *                            also while the drawers are at rest, and one
+ *                            that is removed is cleared. These base styles don't
  *                            use the properties or the attribute. Use the
  *                            properties without a fallback, so a rule only
  *                            applies while a drawer is open; and register

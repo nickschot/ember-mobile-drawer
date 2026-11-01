@@ -118,6 +118,13 @@ function progress(page: HTMLElement): string {
   return page.style.getPropertyValue('--mobile-drawer-page-progress');
 }
 
+function nextFrames(count: number): Promise<void> {
+  return new Promise((resolve) => {
+    const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
+    requestAnimationFrame(step);
+  });
+}
+
 function bodyIsBlack(): boolean {
   return getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)';
 }
@@ -407,6 +414,43 @@ module('Integration | themes/ios.css | page scale', function (hooks) {
     await settled();
     assert.strictEqual(progress(second), '');
     assert.strictEqual(progress(third), '');
+  });
+
+  test('a page element replaced while the drawer is open at rest follows at once', async function (assert) {
+    const first = addPage();
+    added.push(first);
+    const state = new State();
+    await renderDrawer(state);
+    state.active = 1;
+    await settled();
+    assert.strictEqual(progress(first), '0.5');
+    // Let the first ResizeObserver callbacks run (they render the drawer
+    // again), so nothing renders the drawer after this.
+    await nextFrames(2);
+
+    // The drawer doesn't move after this.
+    first.remove();
+    const second = addPage();
+    added.push(second);
+    await settled();
+
+    assert.strictEqual(progress(second), '0.5', 'the new element follows');
+    assert.true(second.hasAttribute('data-mobile-drawer-page-active'));
+    assert.notStrictEqual(
+      second.style.getPropertyValue('--mobile-drawer-page-viewport-top'),
+      '',
+    );
+    assert.strictEqual(progress(first), '', 'the old element is cleared');
+    assert.false(first.hasAttribute('data-mobile-drawer-page-active'));
+    assert.strictEqual(
+      first.style.getPropertyValue('--mobile-drawer-page-viewport-top'),
+      '',
+    );
+
+    state.active = 0;
+    await settled();
+    assert.strictEqual(progress(second), '');
+    assert.false(second.hasAttribute('data-mobile-drawer-page-active'));
   });
 
   test('destroying an open drawer leaves the page alone', async function (assert) {
