@@ -630,7 +630,9 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
 
   test('catching an overshoot past the band limit still follows the finger', async function (assert) {
     // The tray (~360px of content) is longer than the largest snap point,
-    // so a spring overshoot past 200 is shown in full, beyond the 24px band.
+    // so a spring overshoot past 200 moves the tray itself, in full. (Only
+    // past the tray's full length does the tray stay at its edge while its
+    // content bounces.) A catch there starts from the offset shown.
     const state = new State();
     state.snapPoints = [0, 100, 200];
     state.active = 1;
@@ -1337,6 +1339,70 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
         jittery.seen.every(({ finger: f, tray }) => tray <= f + 0.01),
         'never past the finger',
       );
+    });
+  }
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: past fully open the content catches up with the finger, the tray stays at its edge`, async function (assert) {
+      const state = new State();
+      state.placement = placement;
+      state.active = 2;
+      state.grip = LONG;
+      await renderDrawer(state);
+      const { finger, move, read } = fingerOnGrip(placement);
+      const band = (distance: number) =>
+        rubberBand(400 + distance, 0, 400, { dimension: 400 * 0.55 }) - 400;
+
+      // 4 screen px a frame, the pan is recognised at 12.
+      finger.down();
+      const seen: { finger: number; bounce: number; tray: number }[] = [];
+      for (let i = 0; i < 20; i++) {
+        clock.frame(FRAME);
+        move(4);
+        seen.push({
+          finger: read().finger,
+          bounce: bounce(placement),
+          tray: trayOffset(placement),
+        });
+      }
+      const log = seen
+        .map((s) => `${s.finger.toFixed(1)}/${s.bounce.toFixed(1)}`)
+        .join(' ');
+      const start = seen.findIndex(
+        ({ finger: f }) => f * containerScale() > 10,
+      );
+      assert.strictEqual(seen[start]!.bounce, 0, 'starts in place: no jump');
+      assert.true(
+        seen.every(({ tray }) => near(tray, 400)),
+        'the tray stays at its edge',
+      );
+      assert.true(
+        seen.every(
+          ({ finger: f, bounce: b }, i) =>
+            b <= band(f) + 0.01 && b >= (seen[i - 1]?.bounce ?? 0) - 0.01,
+        ),
+        `the content goes the finger's way, banded, never ahead (finger/bounce: ${log})`,
+      );
+      const caughtUp =
+        start + Math.ceil(catchUpDuration(seen[start]!.finger) / FRAME);
+      assert.true(caughtUp < seen.length, 'caught up before the release');
+      assert.true(
+        seen
+          .slice(caughtUp)
+          .every(({ finger: f, bounce: b }) => near(b, band(f))),
+        `then the band of the whole finger distance (finger/bounce: ${log})`,
+      );
+
+      finger.up();
+      const last = seen[seen.length - 1]!;
+      const [end] = state.dragEnds;
+      assert.true(
+        near(end!.offset, 400 + band(last.finger)),
+        `@onDragEnd: where the finger put it (${end?.offset})`,
+      );
+      clock.runUntilIdle();
+      await settled();
+      assert.strictEqual(trayOffset(placement), 400);
+      assert.strictEqual(bounce(placement), 0, 'the content springs back');
     });
   }
 });
