@@ -8,6 +8,7 @@ import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { closeDrawer, dragDrawer, openDrawer } from '#src/test-support.ts';
 import { hasPendingWaiters } from '@ember/test-waiters';
 import { drawerEnvironment } from '#src/-private/environment.ts';
+import { nextFrame, nextFrames } from '../helpers/frames.ts';
 import '#src/styles.css';
 
 type Placement = 'bottom' | 'top' | 'left' | 'right';
@@ -119,9 +120,6 @@ function within<T>(promise: Promise<T>, what: string): Promise<T> {
     }),
   ]).finally(() => clearTimeout(timer));
 }
-
-const nextFrame = () =>
-  new Promise((resolve) => requestAnimationFrame(resolve));
 
 const near = (actual: number, expected: number) =>
   Math.abs(actual - expected) <= 0.01;
@@ -247,8 +245,7 @@ module('Integration | test-support', function (hooks) {
     await renderDrawer(state);
 
     el('[data-test-open]').click();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await nextFrames(2);
     await dragDrawer('[data-test-outer]', { to: 1 });
     assert.dom('[data-test-active]').hasText('1');
     assert.true(near(openOffset('bottom'), 200));

@@ -19,6 +19,12 @@ if (typeof module !== 'undefined') {
           '--mute-audio',
           '--remote-debugging-port=0',
           '--window-size=1440,900',
+          // testem adds --disable-renderer-backgrounding and
+          // --disable-background-timer-throttling. Also keep rendering when
+          // Chrome counts the window as occluded: on macOS this occurs when
+          // the display sleeps or the screen locks. Then no animation frames
+          // come, but timers continue, so tests that wait for a frame hang.
+          '--disable-backgrounding-occluded-windows',
         ].filter(Boolean),
       },
     },
