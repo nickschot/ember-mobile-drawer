@@ -23,6 +23,7 @@ import { closeDrawer, dragDrawer, openDrawer } from '#src/test-support.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { TouchPointer } from '#src/-private/gesture/touch-pointer.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
+import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
 import '#src/styles.css';
 
 type Placement = 'bottom' | 'top' | 'left' | 'right';
@@ -217,8 +218,7 @@ module('Integration | Component | mobile-drawer | events', function (hooks) {
     state.hidden = false;
     await settled();
     // The resize observer measures the drawer once it has a size.
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await resizeObserversDelivered();
     await settle();
     assert
       .dom('.mobile-drawer')
