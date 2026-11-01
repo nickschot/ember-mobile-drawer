@@ -2717,11 +2717,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  #catchUpFrame = (time: number): void => {
+  /**
+   * A frame of the catch-up. At the time on the clock, not the frame's time
+   * stamp: input of the same frame is handled after that time stamp, and
+   * going back to it would move the tray back a little.
+   */
+  #catchUpFrame = (): void => {
     const drag = this.#drag;
     if (!drag || this.#destroyed) return;
     drag.frame = undefined;
-    this.#follow(drag, time);
+    this.#follow(drag, this.#now());
   };
 
   private onPanEnd = (data: PanData, source: HTMLElement): void => {
