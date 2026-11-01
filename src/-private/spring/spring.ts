@@ -122,7 +122,8 @@ export const browserClock: FrameClock = {
   cancelFrame: (handle) => cancelAnimationFrame(handle),
 };
 
-function browserPrefersReducedMotion(): boolean {
+/** Whether the `prefers-reduced-motion: reduce` media query matches. */
+export function browserPrefersReducedMotion(): boolean {
   return (
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
