@@ -647,28 +647,320 @@ module(
       });
     }
 
-    test('a gesture that scrolls never turns into a drag, even at the scroll start', async function (assert) {
+    for (const placement of PLACEMENTS) {
+      test(`${placement}: a scroll that reaches the content start hands off to a drag in the same gesture`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        await renderDrawer(state);
+        scrollTo(tray(), placement, 'middle');
+        const property = vertical(placement) ? 'overflowY' : 'overflowX';
+
+        const shifts: number[] = [];
+        const locks: string[] = [];
+        const bounces: number[] = [];
+        const before = tray().getBoundingClientRect();
+        const result = await gesture(
+          el('[data-test-content]'),
+          CLOSING[placement],
+          35,
+          {
+            during: (step) => {
+              // The browser scrolls the content to its start under the
+              // finger.
+              if (step === 5) {
+                scrollTo(tray(), placement, blockedEnd(CLOSING[placement]));
+              }
+              shifts.push(trayShift(placement, before));
+              locks.push(getComputedStyle(tray())[property]);
+              bounces.push(contentBounce(placement));
+            },
+          },
+        );
+        assert.deepEqual(
+          shifts.slice(0, 6),
+          [0, 0, 0, 0, 0, 0],
+          'the tray stays while the content scrolls, and at the handoff',
+        );
+        assert.strictEqual(
+          shifts[6],
+          -STEP,
+          'then it follows the finger 1:1, without a jump',
+        );
+        assert.strictEqual(result.shift, -STEP * 29, 'to the end');
+        assert.true(result.dragging, 'dragging');
+        assert.false(
+          result.prevented.slice(0, 5).some(Boolean),
+          'the scroll is left to the browser',
+        );
+        assert.strictEqual(locks[4], 'auto', 'the content scrolls');
+        assert.true(
+          locks.slice(5).every((lock) => lock === 'hidden'),
+          'locked from the handoff on, so the content does not move',
+        );
+        assert.true(
+          bounces.every((bounce) => bounce === 0),
+          'the content does not bounce',
+        );
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(state.changes, [1], 'the release settles lower');
+      });
+    }
+
+    for (const fast of [false, true]) {
+      test(`a handed-off drag uses the release velocity: ${fast ? 'a flick' : 'slow'}`, async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        scrollTo(tray(), 'bottom', 'middle');
+        const finger = new TouchPointer(el('[data-test-content]'), 200, 300);
+        finger.down();
+        for (let i = 0; i < 5; i++) {
+          finger.move(0, STEP);
+          clock.frame();
+        }
+        tray().scrollTop = 0;
+        for (let i = 0; i < 12; i++) {
+          finger.move(0, STEP);
+          clock.frame(fast ? 8 : 80);
+        }
+        await settled();
+        assert.strictEqual(
+          el('[data-test-dragging]').textContent,
+          'true',
+          'dragging',
+        );
+        finger.up();
+        clock.runUntilIdle();
+        await settled();
+        assert.deepEqual(
+          state.changes,
+          fast ? [1] : [],
+          fast
+            ? 'a flick of 44px moves to the next snap point'
+            : 'a slow pull of 44px springs back',
+        );
+      });
+    }
+
+    test('a cancelled handed-off drag settles from where the drawer is', async function (assert) {
       const state = new State();
       await renderDrawer(state);
       scrollTo(tray(), 'bottom', 'middle');
-
-      let dragging = false;
-      const result = await gesture(el('[data-test-content]'), 'down', 40, {
-        during: (step) => {
-          // The browser scrolls the content (with momentum) to the top.
-          if (step === 5) tray().scrollTop = 0;
-          dragging ||= el('[data-test-dragging]').textContent === 'true';
-        },
-      });
+      const finger = new TouchPointer(el('[data-test-content]'), 200, 300);
+      finger.down();
+      for (let i = 0; i < 5; i++) finger.move(0, STEP);
+      tray().scrollTop = 0;
+      for (let i = 0; i < 5; i++) finger.move(0, STEP);
       await settled();
-      assert.false(dragging || result.dragging, 'never dragged');
-      assert.strictEqual(result.shift, 0, 'the tray stayed');
-      assert.false(result.prevented.some(Boolean), 'left to the browser');
-      assert.strictEqual(tray().scrollTop, 0, 'at the scroll start now');
+      assert.strictEqual(el('[data-test-dragging]').textContent, 'true');
+      finger.cancel();
+      await settled();
+      assert.strictEqual(
+        el('[data-test-dragging]').textContent,
+        'false',
+        'the drag ends',
+      );
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, [], 'and springs back');
+      assert.strictEqual(getComputedStyle(tray()).overflowY, 'auto');
+    });
+
+    test('momentum that reaches the content start after the finger lifted does not move the drawer', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      const result = await gesture(el('[data-test-content]'), 'down', 10);
+      assert.false(result.dragging, 'the gesture scrolls');
+      const before = tray().getBoundingClientRect();
+      // Momentum carries the content to its start with no finger down.
+      tray().scrollTop = 0;
+      tray().dispatchEvent(new Event('scroll'));
+      clock.runUntilIdle();
+      await settled();
+      assert.strictEqual(trayShift('bottom', before), 0, 'the tray stays');
+      assert.deepEqual(state.changes, []);
 
       const next = await gesture(el('[data-test-content]'), 'down', 30);
       assert.true(next.dragging, 'the next gesture drags');
-      assert.true(next.shift < -80, `moves the drawer (${next.shift})`);
+    });
+
+    test('a scroll towards open at the content end does not hand off', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      const result = await gesture(el('[data-test-content]'), 'up', 20, {
+        during: (step) => {
+          if (step === 5) scrollTo(tray(), 'bottom', 'end');
+        },
+      });
+      assert.false(result.dragging, 'not dragging');
+      assert.strictEqual(result.shift, 0, 'the drawer stays');
+      assert.false(result.prevented.some(Boolean), 'left to the browser');
+    });
+
+    test('a handed-off drag that turns towards open keeps dragging', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      const result = await gesture(el('[data-test-content]'), 'down', 15, {
+        during: (step) => {
+          if (step === 5) tray().scrollTop = 0;
+        },
+        then: { direction: 'up', steps: 15 },
+      });
+      assert.true(result.dragging, 'still dragging');
+      assert.true(
+        result.shift > 0,
+        `past fully open, the content bounces (${result.shift})`,
+      );
+      assert.strictEqual(tray().scrollTop, 0, 'the content does not scroll');
+    });
+
+    test('the content near its start gets overscroll-behavior none during a scroll', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      const values: string[] = [];
+      tray().scrollTop = 100;
+      await gesture(el('[data-test-content]'), 'up', 6, {
+        during: () => values.push(tray().style.overscrollBehaviorY),
+      });
+      assert.strictEqual(values.at(-1), 'none', 'near the start');
+      assert.strictEqual(
+        tray().style.overscrollBehaviorY,
+        '',
+        'put back when the finger lifts',
+      );
+
+      tray().style.overscrollBehaviorY = 'auto';
+      scrollTo(tray(), 'bottom', 'end');
+      tray().scrollTop -= 100;
+      values.length = 0;
+      await gesture(el('[data-test-content]'), 'down', 6, {
+        during: () => values.push(tray().style.overscrollBehaviorY),
+      });
+      assert.strictEqual(
+        values.at(-1),
+        'auto',
+        'near the end it bounces as before',
+      );
+
+      tray().scrollTop = 100;
+      values.length = 0;
+      await gesture(el('[data-test-content]'), 'up', 6, {
+        during: () => values.push(tray().style.overscrollBehaviorY),
+      });
+      assert.strictEqual(values.at(-1), 'none');
+      assert.strictEqual(
+        tray().style.overscrollBehaviorY,
+        'auto',
+        "the app's inline value is put back",
+      );
+    });
+
+    test('a marked scroll container hands off once it and the tray are at their start', async function (assert) {
+      const state = new State();
+      state.nested = true;
+      state.filler = 1000;
+      await renderDrawer(state);
+      const nested = el('[data-test-nested]');
+      nested.scrollTop = 100;
+      scrollTo(tray(), 'bottom', 'middle');
+      // The drag locks the content from the handoff on.
+      const locks: string[] = [];
+      const result = await gesture(
+        el('[data-test-nested-content]'),
+        'down',
+        20,
+        {
+          during: (step) => {
+            if (step === 5) nested.scrollTop = 0;
+            if (step === 10) tray().scrollTop = 0;
+            locks.push(getComputedStyle(tray()).overflowY);
+          },
+        },
+      );
+      assert.strictEqual(locks[8], 'auto', 'the tray can still scroll');
+      assert.strictEqual(locks[10], 'hidden', 'both at their start');
+      assert.true(result.dragging, 'handed off');
+    });
+
+    test('a pan on the Grabber with scrolled content drags as a handle, not a scroll', async function (assert) {
+      const changes: number[] = [];
+      const onChange = (index: number) => changes.push(index);
+      const snapPoints: SnapPoint[] = [0, 200, '100%'];
+      await render(
+        <template>
+          {{! template-lint-disable no-inline-styles }}
+          <div style={{containerStyle}} data-test-container>
+            <MobileDrawer
+              @snapPoints={{snapPoints}}
+              @activeSnapPoint={{2}}
+              @onSnapPointChange={{onChange}}
+              aria-label="Sheet"
+              style="position: absolute"
+              as |drawer|
+            >
+              <drawer.Grabber />
+              <div style={{sizeStyle 1000}} data-test-content></div>
+              <output data-test-dragging>{{drawer.isDragging}}</output>
+            </MobileDrawer>
+          </div>
+        </template>,
+      );
+      clock.runUntilIdle();
+      await settled();
+      scrollTo(tray(), 'bottom', 'middle');
+      const scrolled = tray().scrollTop;
+      const result = await gesture(
+        el('[data-mobile-drawer-grabber]'),
+        'down',
+        30,
+      );
+      assert.true(result.dragging, 'drags from the first decided move');
+      assert.true(
+        result.prevented.length > 0 && result.prevented.every(Boolean),
+        'every touchmove is cancelled: never a scroll, so no handoff',
+      );
+      assert.strictEqual(
+        tray().scrollTop,
+        scrolled,
+        'the scroll position is kept during the drag',
+      );
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(changes, [1]);
+    });
+
+    test('with @handleOnly a scroll never hands off', async function (assert) {
+      const state = new State();
+      state.handleOnly = true;
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      const result = await gesture(el('[data-test-content]'), 'down', 20, {
+        during: (step) => {
+          if (step === 5) tray().scrollTop = 0;
+        },
+      });
+      assert.false(result.dragging);
+      assert.strictEqual(result.shift, 0);
+    });
+
+    test('a gesture in a nested drawer never hands off the outer drawer', async function (assert) {
+      const state = new State();
+      state.innerDrawer = true;
+      await renderDrawer(state);
+      scrollTo(tray(), 'bottom', 'middle');
+      const result = await gesture(el('[data-test-inner-handle]'), 'down', 20, {
+        during: (step) => {
+          if (step === 5) tray().scrollTop = 0;
+        },
+      });
+      assert.false(result.dragging, 'the outer drawer does not drag');
+      assert.strictEqual(result.shift, 0, 'the outer tray stays');
+      clock.runUntilIdle();
+      await settled();
+      assert.deepEqual(state.changes, []);
     });
 
     test('half open, a fast first touchmove from near the tray edge decides and is cancelled', async function (assert) {

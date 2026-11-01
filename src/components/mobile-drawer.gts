@@ -294,6 +294,24 @@ function canScroll(
   return movement > 0 ? position > min + EPSILON : position < max - EPSILON;
 }
 
+/**
+ * Whether `element` is nearer the end of its scroll range along the axis
+ * that a finger moving `way` (positive: down or right) pushes its content
+ * towards than the other end.
+ */
+function nearEnd(element: Element, vertical: boolean, way: number): boolean {
+  const range = vertical
+    ? element.scrollHeight - element.clientHeight
+    : element.scrollWidth - element.clientWidth;
+  if (!(range > EPSILON)) return true;
+  const rtl = !vertical && getComputedStyle(element).direction === 'rtl';
+  const min = rtl ? -range : 0;
+  const position = vertical ? element.scrollTop : element.scrollLeft;
+  const fromMin = position - min;
+  // A finger moving down (right) pushes the content towards `min`.
+  return way > 0 ? fromMin <= range / 2 : fromMin >= range / 2;
+}
+
 interface Drag {
   /** The element whose pan modifier started the drag. */
   source: HTMLElement;
@@ -334,6 +352,12 @@ interface Drag {
   offset: number;
   /** The scheduled catch-up frame, see `#catchUpFrame`. */
   frame?: number;
+  /**
+   * Whether the drag took over a gesture that scrolled the content (see
+   * `onTrayScroll`). Its touchmoves can't be cancelled, so the content stays
+   * locked for the whole drag, see `#syncScrollLock`.
+   */
+  handoff?: boolean;
 }
 
 /** A scroll reset of the tray, see `#planScrollReset`. */
@@ -647,6 +671,12 @@ const clampIndex = (index: number, count: number) =>
  *   between the touched element and the tray (inclusive) can scroll the way
  *   the finger pushes the content, and drags otherwise. So at the start of
  *   the content, pulling a bottom drawer down closes it.
+ * One exception to "keeps that decision": a gesture that scrolls the
+ * content and reaches its scroll start while the finger still pulls
+ * towards close is taken over by a drag (the scroll handoff of an iOS
+ * sheet, see `onTrayScroll`). The drag starts where the tray is, locks the
+ * content and stays a drag until the finger lifts. Momentum after the
+ * finger lifted never moves the drawer.
  * A gesture that drags cancels its `touchmove` events at every snap point
  * (see `dragSource`), so the browser can't scroll the content or the page
  * under it. The tray also gets `touch-action: pan-x` (vertical drawers) or
@@ -899,6 +929,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   >();
   /** The overflow property the lock sets, while locked. */
   #scrollLockProperty?: string;
+  /**
+   * The elements with an inline `overscroll-behavior` during a scroll, with
+   * the inline value they had before, see `#setOverscroll`.
+   */
+  #overscroll = new Map<
+    HTMLElement,
+    { property: string; value: string; priority: string }
+  >();
   /**
    * With `@handleOnly`, the touch on the tray that started while scrolling
    * was locked, see `#onTrayTouchMove`. `cancels` is `undefined` until the
@@ -1321,6 +1359,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#spring?.stop();
       this.#stopScrollReset();
       this.#syncScrollLock();
+      this.onTrayScrollEnd();
       this.#root?.removeEventListener('keydown', this.#onKeyDown);
       this.#root?.removeEventListener('scroll', this.#onRootScroll);
       this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
@@ -2013,7 +2052,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #syncScrollLock(): void {
     const tray = this.#tray;
     if (!tray) return;
-    const lock = !this.#destroyed && (!this.#atTop || this.#bouncing);
+    const lock =
+      !this.#destroyed &&
+      (!this.#atTop || this.#bouncing || this.#drag?.handoff === true);
     const property = this.axis === 'vertical' ? 'overflow-y' : 'overflow-x';
     this.#scrollLockProperty = lock ? property : undefined;
     for (const [element, saved] of this.#scrollLock) {
@@ -2890,22 +2931,103 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!layout || !tray) return true;
     if (this.#renderedOffset < layout.maxOffset - EPSILON) return true;
     if (this.#onHandle(target)) return true;
-    const vertical = this.axis === 'vertical';
+    return !this.#scrollChain(target).some((element) =>
+      canScroll(element, this.axis === 'vertical', movement),
+    );
+  };
+
+  /**
+   * The scroll containers that take part in a gesture that starts at
+   * `target`: the marked ones (`data-mobile-drawer-scroll`) between it and
+   * the tray, innermost first, and the tray.
+   */
+  #scrollChain(target: Element | null): HTMLElement[] {
+    const tray = this.#tray;
+    if (!tray) return [];
+    const chain: HTMLElement[] = [];
     for (
       let element = target instanceof Element ? target : tray;
       element && tray.contains(element);
       element = element.parentElement!
     ) {
       if (
-        (element === tray || element.hasAttribute(SCROLL_ATTRIBUTE)) &&
-        canScroll(element, vertical, movement)
+        element instanceof HTMLElement &&
+        (element === tray || element.hasAttribute(SCROLL_ATTRIBUTE))
       ) {
-        return false;
+        chain.push(element);
       }
       if (element === tray) break;
     }
-    return true;
+    return chain;
+  }
+
+  /**
+   * The tray's `onScroll`, for every `touchmove` of a gesture that scrolls
+   * the content (see `dragSource`): whether a drag takes it over, the scroll
+   * handoff of a native sheet. That is when the finger moves `step` px
+   * towards close and no scroll container of the gesture (see
+   * `#scrollChain`) can scroll that way any more: the content is at its
+   * scroll start (for a bottom drawer). The drag then follows the finger
+   * from where it is. Only while the finger is down: momentum that carries
+   * the content to its start after the finger lifted doesn't move the
+   * drawer. Not for a gesture in a nested drawer.
+   *
+   * Before that, so the content doesn't bounce at its start (iOS) and then
+   * jump back when the drag locks it, the scroll containers of the gesture
+   * that are nearer the end a pull towards close scrolls to than the other
+   * end get `overscroll-behavior: none` along the axis, see `#setOverscroll`.
+   */
+  private onTrayScroll = (step: number, target: Element | null): boolean => {
+    const layout = this.#layout;
+    if (!layout || this.#destroyed || this.#drag || this.#inNested(target)) {
+      return false;
+    }
+    const vertical = this.axis === 'vertical';
+    // The finger moving this way closes the drawer.
+    const closing = -OPENING_DIRECTION[this.placement];
+    const chain = this.#scrollChain(target);
+    for (const element of chain) {
+      this.#setOverscroll(element, nearEnd(element, vertical, closing));
+    }
+    if (Math.sign(step) !== closing || !this.#isHighest(this.#renderedOffset)) {
+      return false;
+    }
+    return !chain.some((element) => canScroll(element, vertical, step));
   };
+
+  /** The tray's `onScrollEnd`: puts back the overscroll behaviour. */
+  private onTrayScrollEnd = (): void => {
+    for (const element of [...this.#overscroll.keys()]) {
+      this.#setOverscroll(element, false);
+    }
+  };
+
+  /**
+   * Sets (`none`) an inline `overscroll-behavior-y` (`-x` for left and
+   * right) on `element`, or puts back the inline value it had before. iOS
+   * applies a change during a scroll.
+   */
+  #setOverscroll(element: HTMLElement, none: boolean): void {
+    const property =
+      this.axis === 'vertical'
+        ? 'overscroll-behavior-y'
+        : 'overscroll-behavior-x';
+    const { style } = element;
+    const saved = this.#overscroll.get(element);
+    if (none) {
+      if (saved && saved.property === property) return;
+      if (saved) this.#setOverscroll(element, false);
+      this.#overscroll.set(element, {
+        property,
+        value: style.getPropertyValue(property),
+        priority: style.getPropertyPriority(property),
+      });
+      style.setProperty(property, 'none');
+    } else if (saved) {
+      this.#overscroll.delete(element);
+      style.setProperty(saved.property, saved.value, saved.priority);
+    }
+  }
 
   /**
    * Whether `target` is in one of this drawer's handles (not a nested
@@ -3408,9 +3530,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       drawn: 0,
       target: offset,
       offset,
+      handoff: data.handoff === true,
     };
     this.#drag = drag;
     this.#dragCount++;
+    // The browser still scrolls a handed-off gesture: stop it at once.
+    if (drag.handoff) this.#syncScrollLock();
     drag.target = this.#dragOffset(drag, recognisedAt);
     this.#velocity.reset();
     // The velocity of the finger (see `onPan`), not of the catch-up.
@@ -3548,7 +3673,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (this.#drag?.source !== source) return;
     // A cancelled pointer (e.g. the browser took over the gesture) has no
     // meaningful position or velocity: settle from where the drawer is.
-    const cancelled = data.originalEvent?.type === 'pointercancel';
+    const type = data.originalEvent?.type;
+    const cancelled = type === 'pointercancel' || type === 'touchcancel';
     if (!cancelled) this.onPan(data, source);
     const drag = this.#endDrag()!;
     const velocity = cancelled
@@ -3578,6 +3704,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const drag = this.#drag;
     this.#drag = undefined;
     this.#cancelCatchUp(drag);
+    if (drag?.handoff) this.#syncScrollLock();
     this.#queueState({ isDragging: false });
     return drag;
   }
@@ -3702,6 +3829,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
               onTeardown=this.onDragSourceTeardown
               shouldDrag=this.shouldDrag
               touchAction=this.trayTouchAction
+              onScroll=this.onTrayScroll
+              onScrollEnd=this.onTrayScrollEnd
             )
           )}}
         >
