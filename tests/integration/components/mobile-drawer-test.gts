@@ -1,13 +1,6 @@
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
-import {
-  clearRender,
-  click,
-  find,
-  render,
-  settled,
-  waitUntil,
-} from '@ember/test-helpers';
+import { clearRender, click, find, render, settled } from '@ember/test-helpers';
 import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
@@ -17,6 +10,7 @@ import { MobileDrawer } from '#src/index.ts';
 import type { SnapPoint } from '#src/-private/snap-points/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
+import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
 import '#src/styles.css';
 
 type Placement = 'bottom' | 'top' | 'left' | 'right';
@@ -388,7 +382,7 @@ module('Integration | Component | mobile-drawer', function (hooks) {
 
     state.height = 800;
     await settled();
-    await waitUntil(() => translation() !== '0 300');
+    await resizeObserversDelivered();
 
     assert.strictEqual(translation(), '0 400', 'at 50% of 800');
     assert.strictEqual(clock.pendingFrames, 0, 'without animating');
@@ -405,7 +399,7 @@ module('Integration | Component | mobile-drawer', function (hooks) {
 
     state.contentHeight = 120;
     await settled();
-    await waitUntil(() => translation() !== '0 520');
+    await resizeObserversDelivered();
 
     assert.strictEqual(translation(), '0 480');
     assert.strictEqual(clock.pendingFrames, 0, 'without animating');
@@ -452,9 +446,8 @@ module('Integration | Component | mobile-drawer', function (hooks) {
       } else {
         el('[data-test-container]').style.width = '500px';
       }
-      const before = translation();
       await settled();
-      await waitUntil(() => translation() !== before);
+      await resizeObserversDelivered();
       const grown = placement === 'top' ? 800 : 500;
       assert.strictEqual(
         translation(),
@@ -465,10 +458,9 @@ module('Integration | Component | mobile-drawer', function (hooks) {
       assert.strictEqual(clock.pendingFrames, 0, 'without animating');
 
       // The content grows: the content snap point follows it.
-      const resized = translation();
       el('[data-test-content]').style[size] = '150px';
       await settled();
-      await waitUntil(() => translation() !== resized);
+      await resizeObserversDelivered();
       assert.strictEqual(
         translation(),
         expectedTranslation(placement, grown, 150),
@@ -490,7 +482,7 @@ module('Integration | Component | mobile-drawer', function (hooks) {
 
     state.height = 800;
     await settled();
-    await waitUntil(() => tray().style.height === '800px');
+    await resizeObserversDelivered();
 
     assert.strictEqual(
       openDistance('bottom', 800),
@@ -647,7 +639,7 @@ module('Integration | Component | mobile-drawer', function (hooks) {
 
     state.hidden = false;
     await settled();
-    await waitUntil(() => tray().style.transform !== '');
+    await resizeObserversDelivered();
 
     assert.strictEqual(translation(), '0 0');
     assert.strictEqual(tray().style.height, '600px');

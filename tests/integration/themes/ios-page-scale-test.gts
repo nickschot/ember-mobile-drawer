@@ -5,6 +5,7 @@ import { tracked } from '@glimmer/tracking';
 import { htmlSafe } from '@ember/template';
 import { MobileDrawer, type Placement, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
+import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
 
@@ -116,13 +117,6 @@ function matrix(page: HTMLElement): { scale: number; y: number } {
 
 function progress(page: HTMLElement): string {
   return page.style.getPropertyValue('--mobile-drawer-page-progress');
-}
-
-function nextFrames(count: number): Promise<void> {
-  return new Promise((resolve) => {
-    const step = () => (--count <= 0 ? resolve() : requestAnimationFrame(step));
-    requestAnimationFrame(step);
-  });
 }
 
 function bodyIsBlack(): boolean {
@@ -426,7 +420,7 @@ module('Integration | themes/ios.css | page scale', function (hooks) {
     assert.strictEqual(progress(first), '0.5');
     // Let the first ResizeObserver callbacks run (they render the drawer
     // again), so nothing renders the drawer after this.
-    await nextFrames(2);
+    await resizeObserversDelivered();
 
     // The drawer doesn't move after this.
     first.remove();

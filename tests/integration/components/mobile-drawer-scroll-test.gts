@@ -7,6 +7,7 @@ import { pan } from 'ember-gesture-modifiers/test-support';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
+import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
 import { DECISION_SLOP } from '#src/-private/gesture/drag-source.ts';
 import { TouchPointer } from '#src/-private/gesture/touch-pointer.ts';
 import '#src/styles.css';
@@ -1359,7 +1360,7 @@ module(
         const scrolled = scrollPosition(tray(), placement);
         state.contentSize = 1200;
         await settled();
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await resizeObserversDelivered();
         clock.runUntilIdle();
         assert.strictEqual(
           scrollPosition(tray(), placement),
@@ -1482,17 +1483,11 @@ module(
       assert.strictEqual(positions[positions.length - 1], end, 'at the end');
     });
 
-    /**
-     * Changes the content size and waits until the drawer saw the resize:
-     * the ResizeObserver runs after the animation frame callbacks of the
-     * frame that lays out the change, so wait for the next frame.
-     */
+    /** Changes the content size and waits until the drawer saw the resize. */
     const resize = async (state: State, size: number) => {
       state.contentSize = size;
       await settled();
-      for (let i = 0; i < 2; i++) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
+      await resizeObserversDelivered();
     };
 
     /** A field (or other element) in the tray, see `isEditable`. */
