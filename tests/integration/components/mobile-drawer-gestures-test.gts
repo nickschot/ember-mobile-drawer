@@ -426,6 +426,17 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
         first > 0 && first <= last,
         `the content springs back from where it was released (${first})`,
       );
+      // The release spring past the tray's length goes to the content too:
+      // the tray stays at its edge for the whole spring-back.
+      const springTrays: number[] = [];
+      for (let i = 0; i < 30 && clock.pendingFrames > 0; i++) {
+        clock.frame();
+        springTrays.push(trayOffset(placement));
+      }
+      assert.true(
+        springTrays.every((offset) => near(offset, 400)),
+        'the tray stays at its edge while the content springs back',
+      );
       clock.runUntilIdle();
       await settled();
       assert.strictEqual(bounce(placement), 0, 'back in place');
@@ -474,6 +485,34 @@ module('Integration | Component | mobile-drawer | gestures', function (hooks) {
       'pinned: no inline translate',
     );
     assert.strictEqual(content().style.transform, 'translateX(3px)');
+  });
+
+  test('the bounce puts back the inline translate of a pinned element', async function (assert) {
+    const state = new State();
+    state.grip = 340;
+    state.showHandle = false;
+    await renderDrawer(state);
+    const pinned = document.createElement('div');
+    pinned.setAttribute('data-mobile-drawer-pinned', '');
+    pinned.style.setProperty('translate', '5px 6px');
+    content().prepend(pinned);
+
+    let during = '';
+    await onEveryMove(
+      () => {
+        if (bounce('bottom') > 0) during = pinned.style.translate;
+      },
+      () => pan('[data-test-grip]', 'up'),
+    );
+    assert.notStrictEqual(during, '', `pinned during the bounce (${during})`);
+    assert.notStrictEqual(during, '5px 6px', 'the opposite translate applies');
+    clock.runUntilIdle();
+    await settled();
+    assert.strictEqual(
+      pinned.style.translate,
+      '5px 6px',
+      "the app's inline translate is back",
+    );
   });
 
   for (const [end, snapPoints, active, direction] of [

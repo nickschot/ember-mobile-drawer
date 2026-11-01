@@ -170,7 +170,9 @@
  *                           On an element in the content (e.g. a sticky
  *                           grabber or header): it stays at the tray's edge
  *                           while the content bounces. The component writes
- *                           the opposite inline `translate` on it.
+ *                           the opposite inline `translate` on it, and puts
+ *                           back the element's own inline `translate` after
+ *                           the bounce.
  *
  * Custom properties (set them on the root, any ancestor or :root)
  * ---------------------------------------------------------------

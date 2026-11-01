@@ -554,8 +554,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #content?: HTMLElement;
   /** Whether the content is moved past fully open, see `#renderBounce`. */
   #bouncing = false;
-  /** The pinned elements while bouncing, see `PINNED_ATTRIBUTE`. */
-  #pinned: HTMLElement[] = [];
+  /**
+   * The pinned elements while bouncing (see `PINNED_ATTRIBUTE`), with their
+   * inline `translate` from before the bounce, put back after.
+   */
+  #pinned = new Map<HTMLElement, { value: string; priority: string }>();
   /** The content's inline `will-change` before a bounce, put back after. */
   #contentWillChange?: { value: string; priority: string };
   #backdrop?: HTMLElement;
@@ -1385,7 +1388,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * with an inline `translate` on `.mobile-drawer__content` (the individual
    * property, so it composes with an app `transform` there). The tray stays
    * at its edge and clips the content. Pinned elements (`PINNED_ATTRIBUTE`)
-   * get the opposite `translate`, so they stay at the tray's edge. Runs every
+   * get the opposite `translate`, so they stay at the tray's edge; their own
+   * inline `translate` is put back after the bounce. Runs every
    * frame; it only writes inline styles. While the content is moved it gets
    * `will-change: translate` (its own layer, so a frame doesn't paint it
    * again) and scrolling along the axis is locked (`#syncScrollLock`): the
@@ -1414,17 +1418,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           priority: style.getPropertyPriority('will-change'),
         };
         style.setProperty('will-change', 'translate');
-        this.#pinned = Array.from(
-          content.querySelectorAll<HTMLElement>(`[${PINNED_ATTRIBUTE}]`),
-        ).filter(
-          (element) => element.closest('.mobile-drawer__content') === content,
-        );
+        for (const element of content.querySelectorAll<HTMLElement>(
+          `[${PINNED_ATTRIBUTE}]`,
+        )) {
+          if (element.closest('.mobile-drawer__content') !== content) continue;
+          this.#pinned.set(element, {
+            value: element.style.getPropertyValue('translate'),
+            priority: element.style.getPropertyPriority('translate'),
+          });
+        }
       } else {
         const saved = this.#contentWillChange;
         style.setProperty('will-change', saved?.value ?? '', saved?.priority);
         this.#contentWillChange = undefined;
-        for (const element of this.#pinned) element.style.translate = '';
-        this.#pinned = [];
+        for (const [element, saved] of this.#pinned) {
+          element.style.setProperty('translate', saved.value, saved.priority);
+        }
+        this.#pinned.clear();
       }
       this.#syncScrollLock();
     }
@@ -1434,7 +1444,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     if (bouncing) {
       const opposite = value(-bounce);
-      for (const element of this.#pinned) element.style.translate = opposite;
+      for (const element of this.#pinned.keys()) {
+        element.style.translate = opposite;
+      }
     }
   }
 
