@@ -10,6 +10,9 @@
  *   with a text field gets the fixed `<body>` also with `lock=overflow`.
  * - `?scroll=<id>` (with `debug=1`): scrolls to that element after load,
  *   e.g. `scroll=example-lock-spike`.
+ * - `?statusBar=transparent`: DRAFT (#113, design B) every demo drawer gets
+ *   `@transparentStatusBar`, so on iOS the status bar shows the dimmed page.
+ *   It implies the overflow lock for drawers without a text field.
  * - `?log=<url>` (with `debug=1`): sends the measurements to that URL, see
  *   `logSample`.
  *
@@ -24,6 +27,7 @@ export const lockSpike = {
   debug: params.get('debug') === '1',
   modal: params.get('modal') !== '0',
   field: params.get('field') !== '0',
+  statusBar: params.get('statusBar') === 'transparent',
 } as const;
 
 drawerEnvironment.iosScrollLock = lockSpike.lock;
@@ -138,7 +142,7 @@ function startDebugLabel(): void {
       `lock min/max=${show(min, max)}`,
       `touch min/max=${show(touchMin, touchMax)}`,
       `vv top=${Math.round(viewport?.offsetTop ?? 0)} h=${Math.round(viewport?.height ?? 0)} ih=${window.innerHeight}`,
-      `body=${document.body.style.position || 'static'}`,
+      `body=${document.body.style.position || 'static'} bar=${lockSpike.statusBar ? 'transparent' : 'default'}${document.querySelector('[data-status-bar]') ? ' ON' : ''}`,
     ].join('\n');
     requestAnimationFrame(tick);
   };

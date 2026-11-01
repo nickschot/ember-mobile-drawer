@@ -29,6 +29,7 @@ export default class LockSpikeExample extends Component {
     </button>
 
     <MobileDrawer
+      @transparentStatusBar={{lockSpike.statusBar}}
       @placement="bottom"
       @snapPoints={{this.snapPoints}}
       @activeSnapPoint={{this.active}}
@@ -67,6 +68,7 @@ export default class LockSpikeExample extends Component {
       </ul>
 
       <MobileDrawer
+        @transparentStatusBar={{lockSpike.statusBar}}
         @placement="bottom"
         @snapPoints={{this.nestedSnapPoints}}
         @activeSnapPoint={{this.nested}}

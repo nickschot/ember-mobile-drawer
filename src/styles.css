@@ -493,6 +493,24 @@
   }
 
   /*
+   * DRAFT (#113, design B): the dim layer of `@transparentStatusBar`. The
+   * component inserts it before the root while the iOS overflow lock is on,
+   * and makes it as large as the document. It is page content, not fixed,
+   * so Safari shows it (with its blur) in the status bar. Like the backdrop,
+   * it uses the backdrop colour, its max opacity and the progress. It takes
+   * no pointer events: the (transparent) backdrop still does.
+   */
+  :where(.mobile-drawer__dim) {
+    position: absolute;
+    background: var(--mobile-drawer-backdrop-color, rgb(0 0 0));
+    opacity: calc(
+      var(--mobile-drawer-backdrop-opacity, 0.4) *
+        var(--mobile-drawer-progress, 0)
+    );
+    pointer-events: none;
+  }
+
+  /*
    * The sheet: the tray's clip. It doesn't take pointer events, so the
    * page (or the backdrop) gets them where the sheet doesn't show the tray,
    * e.g. in the gaps around a floating sheet. `overflow: hidden`, not
@@ -996,6 +1014,36 @@
       inset: auto 0 0;
       padding-top: 16px;
       padding-bottom: 0;
+    }
+
+    /*
+     * DRAFT (#113, design B), `@transparentStatusBar`: the component sets
+     * [data-status-bar="transparent"] while the scroll lock doesn't fix
+     * `<body>` (bottom, left and right drawers). Safari then shows the page
+     * in the status bar if no fixed element is within 4px of the top clip
+     * line (measured in the iOS 27.2 simulator: 4px gives a solid bar, 5px
+     * the page). `env(safe-area-inset-top)` is 0 there, so it can't give the
+     * gap. Thus the root (with the backdrop and the sheet, and so the tray at
+     * full height) starts 5px down. The backdrop only takes the pointer
+     * events: the dim is `.mobile-drawer__dim`. The backdrop tint goes (it
+     * is a fixed strip at the top edge); the bar tint stays.
+     */
+    :where(.mobile-drawer[data-status-bar="transparent"]) {
+      top: 5px;
+    }
+
+    :where(
+      .mobile-drawer[data-status-bar="transparent"] > .mobile-drawer__backdrop
+    ) {
+      background: transparent;
+      filter: none;
+    }
+
+    :where(
+      .mobile-drawer[data-status-bar="transparent"]
+        > .mobile-drawer__backdrop-tint
+    ) {
+      display: none;
     }
   }
 }

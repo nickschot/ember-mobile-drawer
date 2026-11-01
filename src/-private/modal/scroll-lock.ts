@@ -40,6 +40,8 @@ import { drawerEnvironment } from '../environment.ts';
 interface Saved {
   htmlOverflow: string;
   bodyPaddingRight: string;
+  /** Whether the lock is for a transparent iOS status bar (#113, design B). */
+  statusBar?: boolean;
   /** Only with the iOS overflow lock (spike, #113). */
   overflow?: {
     bodyOverflow: string;
@@ -112,7 +114,7 @@ function typingFieldFocused(): boolean {
     (active instanceof HTMLTextAreaElement ||
       active instanceof HTMLInputElement ||
       active.isContentEditable) &&
-    allowed.some((element) => element.contains(active))
+    allowed.some((allows) => allows(active))
   );
 }
 
@@ -180,30 +182,27 @@ function canScroll(element: Element, dx: number, dy: number): boolean {
 
 /**
  * The overflow lock's touchmove filter: allowed only when an element from the
- * target up to (and including) the allowed element that contains it can
- * still scroll in the swipe's direction.
+ * target up through the allowed elements (see `allowed`) can still scroll in
+ * the swipe's direction.
  */
 const onTouchMoveOverflow = (event: TouchEvent): void => {
   if (event.touches.length > 1) return;
   const touch = event.touches[0];
   const target = event.target;
-  const container =
-    target instanceof Node
-      ? allowed.find((element) => element.contains(target))
-      : undefined;
+  const allows =
+    target instanceof Node ? allowed.find((check) => check(target)) : undefined;
   let allow = false;
-  if (container && touch && lastTouch) {
+  if (allows && touch && lastTouch) {
     const dx = touch.clientX - lastTouch.x;
     const dy = touch.clientY - lastTouch.y;
     if (dx === 0 && dy === 0) return;
     let element: Element | null =
       target instanceof Element ? target : (target as Node).parentElement;
-    while (element) {
+    while (element && allows(element)) {
       if (canScroll(element, dx, dy)) {
         allow = true;
         break;
       }
-      if (element === container) break;
       element = element.parentElement;
     }
   }
@@ -265,7 +264,7 @@ function hasTypingField(element: HTMLElement): boolean {
   return false;
 }
 
-function lock(allow: HTMLElement): Saved {
+function lock(options: LockOptions): Saved {
   const html = document.documentElement;
   const body = document.body;
   const ios = (drawerEnvironment.isIOS ?? detectIOS)();
@@ -283,9 +282,11 @@ function lock(allow: HTMLElement): Saved {
 
   if (
     ios &&
-    drawerEnvironment.iosScrollLock === 'overflow' &&
-    !hasTypingField(allow)
+    (options.transparentStatusBar ||
+      drawerEnvironment.iosScrollLock === 'overflow') &&
+    !options.fields?.some(hasTypingField)
   ) {
+    result.statusBar = options.transparentStatusBar === true;
     const { scrollX: x, scrollY: y } = window;
     result.overflow = {
       bodyOverflow: body.style.overflow,
@@ -357,14 +358,33 @@ function unlock(state: Saved): void {
   }
 }
 
+export interface LockOptions {
+  /**
+   * The elements to look for a text field in (iOS overflow lock only): with
+   * one, iOS gets the fixed `<body>` (see `hasTypingField`).
+   */
+  fields?: HTMLElement[];
+  /**
+   * DRAFT (#113, design B): iOS gets the overflow lock (no fixed `<body>`),
+   * so the status bar can show the page, unless a text field is in
+   * `fields`. Without it, `drawerEnvironment.iosScrollLock` decides. Only
+   * the first lock decides; later locks share it (see
+   * `transparentStatusBarLock`).
+   */
+  transparentStatusBar?: boolean;
+}
+
 /**
  * Locks body scrolling until the returned function is called. Touch scrolling
  * on the nodes `allow` returns `true` for keeps working on iOS (a drawer
  * allows its tray and the portals of the drawers nested in it). Calling the
  * returned function more than once does nothing.
  */
-export function lockBodyScroll(allow: (target: Node) => boolean): () => void {
-  if (allowed.length === 0) saved = lock(allow);
+export function lockBodyScroll(
+  allow: (target: Node) => boolean,
+  options: LockOptions = {},
+): () => void {
+  if (allowed.length === 0) saved = lock(options);
   allowed.push(allow);
   let released = false;
   return () => {
@@ -377,6 +397,15 @@ export function lockBodyScroll(allow: (target: Node) => boolean): () => void {
       unlock(state);
     }
   };
+}
+
+/**
+ * Whether the lock that is on is the iOS overflow lock for a transparent
+ * status bar (#113, design B): `<body>` isn't fixed, and the drawers move
+ * their fixed elements away from the top edge (`data-status-bar`).
+ */
+export function transparentStatusBarLock(): boolean {
+  return saved?.statusBar === true;
 }
 
 /** The number of active locks. @internal for tests */

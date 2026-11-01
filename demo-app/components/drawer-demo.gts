@@ -11,6 +11,7 @@ import {
   type Placement,
   type SnapPoint,
 } from '#src/index.ts';
+import { lockSpike } from '../lib/lock-spike.ts';
 import { formatSnapPoints, parseSnapPoints } from '../lib/parse-snap-points.ts';
 import {
   CUSTOM,
@@ -293,6 +294,7 @@ export default class DrawerDemo extends Component<{
   <template>
     <div class="demo-playground-drawer" style={{this.drawerStyle}}>
       <MobileDrawer
+        @transparentStatusBar={{lockSpike.statusBar}}
         @placement={{this.placement}}
         @snapPoints={{this.snapPoints}}
         @activeSnapPoint={{this.active}}

@@ -32,7 +32,11 @@ import { noop } from '../-private/noop-modifier.ts';
 import { VelocityTracker } from '../-private/gesture/velocity.ts';
 import { TURN_SLOP, catchUpLag } from '../-private/gesture/catch-up.ts';
 import { inertOutside } from '../-private/modal/inert.ts';
-import { lockBodyScroll } from '../-private/modal/scroll-lock.ts';
+import {
+  lockBodyScroll,
+  transparentStatusBarLock,
+} from '../-private/modal/scroll-lock.ts';
+import { PageDim } from '../-private/status-bar.ts';
 import {
   focusWithoutScrolling,
   initialFocus,
@@ -419,6 +423,18 @@ export interface MobileDrawerSignature {
      */
     modal?: boolean;
     /**
+     * DRAFT (#113, design B), iOS Safari 26+ only, for comparison: while this
+     * modal drawer is open, the status bar shows the dimmed page (with
+     * Safari's blur) instead of one solid colour. The drawer then uses a
+     * scroll lock that doesn't fix `<body>`, its root starts 5px below the
+     * top, and the dim is a separate layer as large as the document,
+     * inserted before the root. A drawer that contains a text field when it
+     * opens keeps the fixed `<body>` (the on-screen keyboard needs it, #116),
+     * and with it the solid status bar. Top drawers don't change. Other
+     * browsers don't change. Default `false`.
+     */
+    transparentStatusBar?: boolean;
+    /**
      * Called when the drawer opens: its active snap point moves from the
      * smallest snap point to a larger one (by any means: an action, a drag,
      * `@activeSnapPoint`). Called once per change, in a microtask after it,
@@ -795,6 +811,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #backdrop?: HTMLElement;
   /** The backdrop's `.mobile-drawer__backdrop-tint` sibling, if any. */
   #backdropTint?: HTMLElement;
+  /**
+   * Whether the root has `data-status-bar="transparent"` (#113, design B),
+   * see `#syncStatusBar`.
+   */
+  #statusBar = false;
+  /** The dim layer of design B (#113), while `#statusBar` with a backdrop. */
+  #pageDim?: PageDim;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
   #layout?: Layout;
@@ -1222,6 +1245,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
       this.#deactivateModal();
+      this.#endStatusBar();
       if (this.#open) {
         this.#open = false;
         const focusInside = this.#hasFocus();
@@ -1720,6 +1744,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   #setClosed(closed: boolean): void {
     this.#root!.toggleAttribute('data-closed', closed);
+    if (closed) this.#endStatusBar();
     for (const portal of this.#portals) {
       portal.toggleAttribute('data-closed', closed);
     }
@@ -1919,7 +1944,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const expand = String(
       Number.isNaN(this.#expandProgress) ? 0 : this.#expandProgress,
     );
-    for (const element of [backdrop, this.#backdropTint]) {
+    for (const element of [
+      backdrop,
+      this.#backdropTint,
+      this.#pageDim?.element,
+    ]) {
       element?.style.setProperty('--mobile-drawer-progress', progress);
       element?.style.setProperty('--mobile-drawer-expand-progress', expand);
     }
@@ -1956,6 +1985,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       backdrop?.removeEventListener('click', this.onBackdropClick);
       this.#backdrop = undefined;
       this.#backdropTint = undefined;
+      this.#pageDim?.destroy();
+      this.#pageDim = undefined;
       this.#endBackdropPointer();
     },
   };
@@ -2178,9 +2209,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const tray = this.#tray!;
     this.#makeOutsideInert();
     // The tray, with the portals of the drawers nested in it.
-    const releaseScroll = lockBodyScroll((target) =>
-      logicallyContains(tray, target),
+    const releaseScroll = lockBodyScroll(
+      (target) => logicallyContains(tray, target),
+      {
+        fields: [tray, ...this.#portals],
+        transparentStatusBar:
+          this.args.transparentStatusBar === true && this.placement !== 'top',
+      },
     );
+    this.#syncStatusBar();
     // Below the modal drawers inside this one (e.g. a peeking drawer that
     // opens under its open nested drawer, also one rendered outside the
     // tray with `Nested`): the nested drawer stays in front, so it keeps
@@ -2226,6 +2263,44 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#initialFocusing = false;
       }
     }
+  }
+
+  /**
+   * DRAFT (#113, design B): while the scroll lock is the one for a
+   * transparent status bar (the first modal drawer decides, so a drawer
+   * nested in it follows), the root gets `data-status-bar="transparent"`
+   * (styles.css moves it 5px down and makes the backdrop transparent on
+   * iOS), and a drawer with a backdrop gets the dim layer (`PageDim`). Both
+   * stay until `data-closed` hides the drawer, so the dim also fades out
+   * while it closes. Not for top drawers, and not for an embedded drawer
+   * (a root that isn't `position: fixed`).
+   */
+  #syncStatusBar(): void {
+    const root = this.#root;
+    if (
+      this.#statusBar ||
+      !root ||
+      !transparentStatusBarLock() ||
+      this.placement === 'top' ||
+      getComputedStyle(root).position !== 'fixed'
+    ) {
+      return;
+    }
+    this.#statusBar = true;
+    root.setAttribute('data-status-bar', 'transparent');
+    if (this.#backdrop) {
+      this.#pageDim = new PageDim(root);
+      this.#paintBackdrop();
+    }
+  }
+
+  /** Undoes `#syncStatusBar`. */
+  #endStatusBar(): void {
+    if (!this.#statusBar) return;
+    this.#statusBar = false;
+    this.#root?.removeAttribute('data-status-bar');
+    this.#pageDim?.destroy();
+    this.#pageDim = undefined;
   }
 
   /** Undoes `#activateModal`, if it is on. Leaves focus alone. */

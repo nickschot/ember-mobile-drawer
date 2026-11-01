@@ -588,7 +588,8 @@
   :where(
     .mobile-drawer-theme-ios .mobile-drawer__backdrop,
     .mobile-drawer-theme-ios .mobile-drawer__backdrop-tint,
-    .mobile-drawer-theme-ios .mobile-drawer__bar-tint
+    .mobile-drawer-theme-ios .mobile-drawer__bar-tint,
+    .mobile-drawer-theme-ios .mobile-drawer__dim
   ) {
     --_mobile-drawer-ios-dim: calc(
       var(--mobile-drawer-expand-progress, 0) +
@@ -600,8 +601,10 @@
     );
   }
 
-  /* Specificity 0,1,0, so it wins over the base backdrop in any order. */
-  :where(.mobile-drawer-theme-ios) .mobile-drawer__backdrop {
+  /* Specificity 0,1,0, so it wins over the base backdrop in any order. The
+     dim layer of `@transparentStatusBar` (DRAFT, #113) dims the same way. */
+  :where(.mobile-drawer-theme-ios) .mobile-drawer__backdrop,
+  :where(.mobile-drawer-theme-ios) .mobile-drawer__dim {
     opacity: calc(
       var(--mobile-drawer-backdrop-opacity, 0.4) *
         var(--_mobile-drawer-ios-dim, 0)

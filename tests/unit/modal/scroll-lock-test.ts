@@ -68,7 +68,9 @@ module(
     test('locks without fixing <body> and restores everything', function (assert) {
       const { body } = document;
       const html = document.documentElement;
-      const release = lockBodyScroll(tray);
+      const release = lockBodyScroll((node) => tray.contains(node), {
+        fields: [tray],
+      });
       assert.strictEqual(body.style.position, '', 'body not fixed');
       assert.strictEqual(body.style.top, '');
       assert.strictEqual(html.style.overflow, 'hidden');
@@ -84,7 +86,9 @@ module(
     });
 
     test('cancels touchmoves that would scroll the page', function (assert) {
-      const release = lockBodyScroll(tray);
+      const release = lockBodyScroll((node) => tray.contains(node), {
+        fields: [tray],
+      });
       scroller.scrollTop = 50;
       assert.true(swipe(fixture, -20), 'outside the allowed element');
       assert.true(swipe(tray.querySelector('.plain')!, -20), 'nothing scrolls');
@@ -114,7 +118,9 @@ module(
       const start = window.scrollY;
       window.scrollTo({ top: start + 100, behavior: 'instant' });
       const y = window.scrollY;
-      const release = lockBodyScroll(tray);
+      const release = lockBodyScroll((node) => tray.contains(node), {
+        fields: [tray],
+      });
       // Added after the lock: else the drawer gets the fixed <body>.
       tray.append(input);
       // The test page has `overflow: hidden` now; scripts can still scroll.
@@ -144,13 +150,17 @@ module(
     test('a drawer with a text field gets the fixed <body>', function (assert) {
       const field = document.createElement('textarea');
       tray.append(field);
-      let release = lockBodyScroll(tray);
+      let release = lockBodyScroll((node) => tray.contains(node), {
+        fields: [tray],
+      });
       assert.strictEqual(document.body.style.position, 'fixed');
       release();
       assert.strictEqual(document.body.style.position, '');
 
       field.readOnly = true;
-      release = lockBodyScroll(tray);
+      release = lockBodyScroll((node) => tray.contains(node), {
+        fields: [tray],
+      });
       assert.strictEqual(
         document.body.style.position,
         '',
@@ -161,7 +171,9 @@ module(
 
     test('the default iOS lock still fixes <body>', function (assert) {
       delete drawerEnvironment.iosScrollLock;
-      const release = lockBodyScroll(tray);
+      const release = lockBodyScroll((node) => tray.contains(node), {
+        fields: [tray],
+      });
       assert.strictEqual(document.body.style.position, 'fixed');
       release();
       assert.strictEqual(document.body.style.position, '');

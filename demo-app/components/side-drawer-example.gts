@@ -3,6 +3,7 @@ import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
+import { lockSpike } from '../lib/lock-spike.ts';
 
 const LINKS = ['Inbox', 'Starred', 'Sent', 'Drafts', 'Archive', 'Settings'];
 
@@ -29,6 +30,7 @@ export default class SideDrawerExample extends Component {
     <span class="demo-hint">Current: {{this.current}}</span>
 
     <MobileDrawer
+      @transparentStatusBar={{lockSpike.statusBar}}
       @placement="left"
       @snapPoints={{this.snapPoints}}
       @activeSnapPoint={{this.active}}
