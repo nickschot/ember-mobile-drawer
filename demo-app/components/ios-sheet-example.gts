@@ -45,6 +45,12 @@ type Placement = 'bottom' | 'top';
  * template's page element gets `mobile-drawer-theme-ios__page` and
  * `data-mobile-drawer-page`. The drawer must not be inside that element, so
  * it renders at the end of `<body>` with `in-element`.
+ *
+ * A tap on a place opens a nested sheet with its details, also while the
+ * sheet is at 40%. The nested sheet renders with the yielded `Nested`,
+ * outside the sheet's tray (the tray would clip it), next to the sheet in
+ * the theme wrapper, so it gets the theme too. The sheet behind dims while
+ * the nested sheet is open (`data-nested`).
  */
 export default class IosSheetExample extends Component {
   snapPoints: SnapPoint[] = [0, '40%', 'content'];
@@ -58,12 +64,24 @@ export default class IosSheetExample extends Component {
   destination = typeof document === 'undefined' ? undefined : document.body;
   @tracked active = 0;
   @tracked placement: Placement = 'bottom';
+  /** The place the nested sheet shows, if it is open. */
+  @tracked detail?: string;
+  /** The nested sheet's snap point: open while `detail` is set. */
+  @tracked detailActive = 0;
+  detailSnapPoints: SnapPoint[] = [0, 'content'];
 
   get isTop() {
     return this.placement === 'top';
   }
 
   setActive = (index: number) => (this.active = index);
+
+  showDetail = (item: string) => {
+    this.detail = item;
+    this.detailActive = 1;
+  };
+
+  setDetailActive = (index: number) => (this.detailActive = index);
 
   open = (placement: Placement) => {
     this.placement = placement;
@@ -114,9 +132,44 @@ export default class IosSheetExample extends Component {
             </div>
             <ul class="example-ios-list">
               {{#each ITEMS as |item|}}
-                <li>{{item}}</li>
+                <li>
+                  <button
+                    type="button"
+                    class="example-ios-item"
+                    {{on "click" (fn this.showDetail item)}}
+                  >{{item}}</button>
+                </li>
               {{/each}}
             </ul>
+            <drawer.Nested>
+              <MobileDrawer
+                @snapPoints={{this.detailSnapPoints}}
+                @activeSnapPoint={{this.detailActive}}
+                @onSnapPointChange={{this.setDetailActive}}
+                @spring={{this.spring}}
+                class="example-ios-sheet"
+                aria-labelledby="example-ios-detail-title"
+                as |detail|
+              >
+                <div
+                  class="mobile-drawer-theme-ios__grabber"
+                  data-mobile-drawer-pinned
+                  {{detail.handle}}
+                ></div>
+                <div class="example-ios-title">
+                  <h3 id="example-ios-detail-title">{{this.detail}}</h3>
+                  <button
+                    type="button"
+                    {{on "click" detail.close}}
+                  >Done</button>
+                </div>
+                <p class="example-ios-detail">
+                  A nested sheet, rendered outside the sheet behind it with the
+                  yielded Nested component, so it shows also while that sheet is
+                  at 40%.
+                </p>
+              </MobileDrawer>
+            </drawer.Nested>
             {{#if this.isTop}}
               <div
                 class="mobile-drawer-theme-ios__grabber"

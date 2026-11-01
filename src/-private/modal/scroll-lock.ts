@@ -14,8 +14,8 @@
  * - iOS Safari ignores `overflow: hidden` for touch scrolling, so there the
  *   body is also fixed in place at its current scroll position (restored on
  *   unlock), and `touchmove`s outside the allowed elements (the trays of the
- *   locked drawers) are cancelled, so the viewport doesn't rubber-band
- *   behind the drawer.
+ *   locked drawers and the portals of the drawers nested in them) are
+ *   cancelled, so the viewport doesn't rubber-band behind the drawer.
  *
  * @module
  * @internal
@@ -37,8 +37,11 @@ interface Saved {
   };
 }
 
-/** Elements inside which touchmoves aren't cancelled (iOS only). */
-const allowed: HTMLElement[] = [];
+/**
+ * Checks for the elements inside which touchmoves aren't cancelled (iOS
+ * only), one per lock.
+ */
+const allowed: ((target: Node) => boolean)[] = [];
 let saved: Saved | undefined;
 
 function detectIOS(): boolean {
@@ -55,10 +58,7 @@ const onTouchMove = (event: TouchEvent): void => {
   // Leave multi-touch gestures (pinch-zoom) alone.
   if (event.touches.length > 1) return;
   const target = event.target;
-  if (
-    target instanceof Node &&
-    allowed.some((element) => element.contains(target))
-  ) {
+  if (target instanceof Node && allowed.some((allows) => allows(target))) {
     return;
   }
   if (event.cancelable) event.preventDefault();
@@ -115,10 +115,11 @@ function unlock(state: Saved): void {
 
 /**
  * Locks body scrolling until the returned function is called. Touch scrolling
- * inside `allow` keeps working on iOS. Calling the returned function more
- * than once does nothing.
+ * on the nodes `allow` returns `true` for keeps working on iOS (a drawer
+ * allows its tray and the portals of the drawers nested in it). Calling the
+ * returned function more than once does nothing.
  */
-export function lockBodyScroll(allow: HTMLElement): () => void {
+export function lockBodyScroll(allow: (target: Node) => boolean): () => void {
   if (allowed.length === 0) saved = lock();
   allowed.push(allow);
   let released = false;

@@ -1,4 +1,4 @@
-import type { ModifierLike } from '@glint/template';
+import type { ComponentLike, ModifierLike } from '@glint/template';
 
 export type { SnapPoint } from './-private/snap-points/index.ts';
 
@@ -69,6 +69,38 @@ export interface MobileDrawerApi {
    * use `--mobile-drawer-progress` on `.mobile-drawer__backdrop`.
    */
   progress: number;
+  /**
+   * Renders a nested drawer outside this drawer's tray, as iOS shows a
+   * nested sheet over the whole screen. A drawer inside the tray is clipped
+   * by it (the moving tray is the containing block of its fixed elements),
+   * so it can't show while this drawer is not fully open.
+   *
+   * The block renders with `in-element` at the end of `@destination`
+   * (default: the parent element of this drawer's root, once this drawer is
+   * in the DOM), in a `<div class="mobile-drawer-nested">`
+   * (`display: contents`). For the drawers, that element is a part of this
+   * drawer's tray, as if the nested drawer were inside it: the modal stack
+   * order, `data-nested`, `inert`, focus return and the body scroll lock
+   * work the same, and it hides with this drawer (`data-closed`).
+   *
+   * ```gts
+   * <MobileDrawer aria-label="List" as |drawer|>
+   *   <drawer.Nested>
+   *     <MobileDrawer aria-label="Details">...</MobileDrawer>
+   *   </drawer.Nested>
+   * </MobileDrawer>
+   * ```
+   */
+  Nested: ComponentLike<{
+    Args: {
+      /**
+       * The element to render the block in, at its end. Default: the parent
+       * element of this drawer's root.
+       */
+      destination?: Element | null;
+    };
+    Blocks: { default: [] };
+  }>;
 }
 
 /** What `@onOpen` and `@onClose` are called with. */
