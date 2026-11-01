@@ -93,16 +93,32 @@ const scrollStart = (element: HTMLElement, placement: Placement) =>
  */
 function trayShift(placement: Placement, before: DOMRect): number {
   const now = tray().getBoundingClientRect();
-  return {
+  const moved = {
     bottom: before.top - now.top,
     top: now.bottom - before.bottom,
     left: now.right - before.right,
     right: before.left - now.left,
   }[placement];
+  return moved + contentBounce(placement) * (now.width / tray().offsetWidth);
+}
+
+/**
+ * How far the content is moved past fully open (its inline `translate`, in
+ * px, positive in the opening direction): the bounce at the open end.
+ */
+function contentBounce(placement: Placement): number {
+  const content = tray().querySelector<HTMLElement>('.mobile-drawer__content')!;
+  const [x = 0, y = 0] = content.style.translate
+    .split(' ')
+    .map((part) => parseFloat(part) || 0);
+  return { bottom: -y, top: y, left: x, right: -x }[placement];
 }
 
 interface GestureResult {
-  /** How far the tray moved by the last move (see `trayShift`). */
+  /**
+   * How far the drawer moved by the last move, in screen px: the tray, plus
+   * the content's bounce past fully open (see `trayShift`).
+   */
   shift: number;
   /** Whether the drawer said it was dragging at the last move. */
   dragging: boolean;
@@ -392,8 +408,13 @@ module(
         );
         assert.true(result.dragging, 'dragging');
         assert.true(
-          result.shift > 0 && result.shift < 24,
-          `pulled a little past fully open (${result.shift})`,
+          result.shift > 0 && result.shift < (30 * STEP) / 2,
+          `the content bounces past fully open, less than half the finger (${result.shift})`,
+        );
+        assert.strictEqual(
+          tray().style.transform,
+          'translate3d(0px, 0px, 0px)',
+          'the tray stays at its edge',
         );
         assert.true(result.prevented.every(Boolean), 'touchmoves cancelled');
         clock.runUntilIdle();
@@ -1230,8 +1251,8 @@ module(
         );
         assert.true(opening.dragging, 'the handle drags towards open');
         assert.true(
-          opening.shift > 0 && opening.shift < 24,
-          `rubber-bands (${opening.shift})`,
+          opening.shift > 0 && opening.shift < (30 * STEP) / 2,
+          `the content bounces: less than half the finger (${opening.shift})`,
         );
         assert.true(
           opening.prevented.length > 0 && opening.prevented.every(Boolean),
