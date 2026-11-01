@@ -635,13 +635,18 @@ module('Integration | themes/ios.css', function (hooks) {
     test(`${placement}: with side safe areas the strip and its rim span the full tray width`, async function (assert) {
       // env(safe-area-inset-*) can't be set in a test. Simulate side safe
       // areas: the content padding they give, and the theme's copies of them.
+      // A bottom sheet's content padding comes from the theme's copies (plus
+      // the floating inset); a top sheet's from the base styles.
       styles.push(
         addStyles(`
           .mobile-drawer-theme-ios {
             --_mobile-drawer-ios-inset-left: 20px;
             --_mobile-drawer-ios-inset-right: 30px;
           }
-          .mobile-drawer__content { padding-left: 20px; padding-right: 30px; }
+          .mobile-drawer[data-placement="top"] .mobile-drawer__content {
+            padding-left: 20px;
+            padding-right: 30px;
+          }
         `),
       );
       await renderDrawer({ placement, tall: true, expanded: true });
@@ -657,8 +662,18 @@ module('Integration | themes/ios.css', function (hooks) {
         `the strip is as wide as the tray (${g.left - t.left}, ${t.right - g.right})`,
       );
       const strip = getComputedStyle(grabber);
-      assert.strictEqual(strip.paddingLeft, '20px', 'bar clear of the left');
-      assert.strictEqual(strip.paddingRight, '30px', 'bar clear of the right');
+      // A bottom sheet's content is also padded by the floating inset.
+      const extra = placement === 'bottom' ? 8 : 0;
+      assert.strictEqual(
+        strip.paddingLeft,
+        `${20 + extra}px`,
+        'bar clear of the left',
+      );
+      assert.strictEqual(
+        strip.paddingRight,
+        `${30 + extra}px`,
+        'bar clear of the right',
+      );
       assert.strictEqual(
         parseFloat(getComputedStyle(grabber, '::after').width),
         tray.clientWidth,
@@ -1012,7 +1027,33 @@ module('Integration | themes/ios.css', function (hooks) {
       Math.round(root.getBoundingClientRect().bottom),
       'the tray stays at the root bottom; the sheet clips it',
     );
-    assert.strictEqual(tray.offsetWidth, root.offsetWidth - 16, 'the width');
+    assert.strictEqual(
+      tray.offsetWidth,
+      root.offsetWidth,
+      'the tray keeps the root width; its own clip cuts the sides',
+    );
+    assert.strictEqual(
+      getComputedStyle(tray).clipPath,
+      'inset(0px 8px round 36px 36px 0px 0px)',
+    );
+    const content = getComputedStyle(
+      el('[data-test-tray] > .mobile-drawer__content'),
+    );
+    assert.deepEqual(
+      [content.paddingLeft, content.paddingRight],
+      ['8px', '8px'],
+      'the content is padded by the inset, at every snap point',
+    );
+    setProgress(1);
+    assert.strictEqual(
+      getComputedStyle(tray).clipPath,
+      'inset(0px round 36px 36px 0px 0px)',
+    );
+    assert.deepEqual(
+      [content.paddingLeft, content.paddingRight],
+      ['8px', '8px'],
+      'also at full height',
+    );
   });
 
   for (const placement of ['top', 'left', 'right'] as const) {

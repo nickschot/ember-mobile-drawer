@@ -253,17 +253,20 @@
  * bottom edges of the root; between the two highest snap points by the
  * inset times (1 - the expand progress); at the highest snap point it is
  * edge-to-edge. The sheet moves up by as much, so its height stays the
- * root's height. The tray stays at the root's bottom edge: its length,
- * its transform, its snap points and its closed position don't change, and
- * the sheet clips its bottom. Its width is the sheet's width. So at a snap
- * point the tray's top is where it is without the inset, and the sheet
- * shows the tray from there to the inset above the bottom edge. When the
- * drawer is closed, no part of the tray is in the sheet. The inset area
- * takes no pointer events. The width changes on every frame between the
- * two highest snap points, so the content is laid out again on those
- * frames (not styled again); the component re-measures only when a size
- * along the axis changes. Themes round the sheet's bottom corners with
- * `border-radius` on the sheet.
+ * root's height. The tray stays as wide as the root and at the root's
+ * bottom edge: its width, its length, its transform, its snap points and
+ * its closed position don't change, so its content is not laid out again
+ * and a `content` snap point doesn't move. The sheet clips the tray's
+ * sides and bottom, and the tray's own `clip-path` cuts its sides at the
+ * inset with its top radius there. So at a snap point the tray's top is
+ * where it is without the inset, and the sheet shows the tray from there
+ * to the inset above the bottom edge. When the drawer is closed, no part
+ * of the tray is in the sheet. The inset area takes no pointer events. The
+ * clipped sides of the tray hide `inset` px of the content on each side
+ * below the highest snap point: pad the content by the inset (the iOS
+ * theme does). The clips also hide the tray's outer shadow while the inset
+ * is set. Themes round the sheet's bottom corners with `border-radius` on
+ * the sheet.
  *
  * Defaults are given as var() fallbacks rather than declared on the root, so
  * values set on any ancestor (including :root) take effect.
@@ -508,9 +511,15 @@
    * The floating sheet (`--mobile-drawer-inset`, 0 by default): the sheet
    * is inset by the inset times (1 - the expand progress) from the left,
    * right and bottom edges, and moves up by as much, so its height stays
-   * the root's height. The tray stays at the root's bottom edge: it keeps
-   * its length, its transform and its closed position. Its width follows
-   * the sheet. The sheet clips the tray's bottom with its bottom edge.
+   * the root's height. The sheet clips the tray (`overflow: hidden`, with
+   * the theme's bottom radius). The tray doesn't follow the sheet's box:
+   * it stays as wide as the root and at the root's bottom edge, so it
+   * keeps its width, its length, its transform and its closed position,
+   * and its content is never laid out again for the inset. Its own
+   * `clip-path` cuts its sides at the inset, with its top radius there.
+   * Not a `clip-path` on the sheet: an ancestor with a clip-path is a
+   * backdrop root, and the tray's `backdrop-filter` (a theme's glass) then
+   * shows nothing behind it (verified in iOS Safari 27).
    */
   :where(.mobile-drawer__sheet),
   :where(.mobile-drawer[data-placement="bottom"] > .mobile-drawer__sheet) {
@@ -547,7 +556,11 @@
       > .mobile-drawer__sheet
       > .mobile-drawer__tray
   ) {
-    inset: auto 0
+    inset: auto
+      calc(
+        -1 * var(--mobile-drawer-inset, 0px) *
+          (1 - var(--mobile-drawer-expand-progress))
+      )
       calc(
         -1 * var(--mobile-drawer-inset, 0px) *
           (1 - var(--mobile-drawer-expand-progress))
@@ -558,6 +571,40 @@
       0 0;
     transform: translate3d(0, 100%, 0);
     transform-origin: 50% 100%;
+  }
+
+  /*
+   * The tray's sides at the inset, with the top radius at its corners. The
+   * clip moves out by 100px when `--mobile-drawer-inset`
+   * is 0, so then it clips nothing and the tray keeps its shadow: `100px -
+   * min(inset * 1000, 100px)` is 100px for an inset of 0 and 0 for an inset
+   * of 0.1px or more.
+   */
+  :where(
+    .mobile-drawer:not(
+        [data-placement="top"],
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
+    clip-path: inset(
+      calc(-100px + min(var(--mobile-drawer-inset, 0px) * 1000, 100px))
+        calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) - 100px +
+            min(var(--mobile-drawer-inset, 0px) * 1000, 100px)
+        )
+        calc(-100px + min(var(--mobile-drawer-inset, 0px) * 1000, 100px))
+        calc(
+          var(--mobile-drawer-inset, 0px) *
+            (1 - var(--mobile-drawer-expand-progress)) - 100px +
+            min(var(--mobile-drawer-inset, 0px) * 1000, 100px)
+        )
+        round var(--mobile-drawer-radius, 0px) var(--mobile-drawer-radius, 0px)
+        0 0
+    );
   }
 
   :where(.mobile-drawer__content),

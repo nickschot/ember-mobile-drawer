@@ -6,6 +6,8 @@ import { htmlSafe } from '@ember/template';
 import { MobileDrawer, type SnapPoint } from '#src/index.ts';
 import { drawerEnvironment } from '#src/-private/environment.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
+import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
+import { drawerFor } from '#src/-private/registry.ts';
 import '#src/styles.css';
 
 // The drawer is embedded in a 400 x 600 px container with a page button
@@ -56,6 +58,11 @@ function hit(x: number, y: number): Element | null {
   );
 }
 
+/** About ten lines in 400px, so a narrower width wraps it again. */
+const TEXT = Array.from({ length: 40 }, (_, i) => `word${i} lorem ipsum`).join(
+  ' ',
+);
+
 const containerStyle = htmlSafe(
   'position: relative; width: 400px; height: 600px',
 );
@@ -66,6 +73,8 @@ class State {
   @tracked inset: string | undefined;
   @tracked snapPoints: SnapPoint[] = SNAP_POINTS;
   @tracked backdrop: boolean | undefined = false;
+  /** Text that wraps, instead of the 80px block. */
+  @tracked text = false;
 
   get wrapperStyle() {
     return htmlSafe(
@@ -90,7 +99,13 @@ async function renderDrawer(state: State) {
             style="position: absolute"
             data-test-drawer
           >
-            <div style="height: 80px" data-test-content>Content</div>
+            {{#if state.text}}
+              <p style="margin: 0; font: 16px/1.5 sans-serif" data-test-content>
+                {{TEXT}}
+              </p>
+            {{else}}
+              <div style="height: 80px" data-test-content>Content</div>
+            {{/if}}
           </MobileDrawer>
         </div>
       </div>
@@ -300,7 +315,11 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     await settle();
     assert.strictEqual(openDistance(), 200, 'the snap point is unchanged');
     assert.strictEqual(tray().offsetHeight, 400, 'the tray length too');
-    assert.strictEqual(tray().offsetWidth, 384, 'the width follows the sheet');
+    assert.strictEqual(
+      tray().offsetWidth,
+      400,
+      'the tray stays as wide as the root',
+    );
 
     // The last frame of a close, before data-closed hides the drawer.
     state.active = 0;
@@ -321,6 +340,59 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     await settled();
     assert.dom(root()).hasAttribute('data-closed');
   });
+
+  for (const snapPoints of [
+    [0, 'content'],
+    [0, 120, 'content'],
+  ] as SnapPoint[][]) {
+    test(`with --mobile-drawer-inset and wrapping text, a content snap point doesn't move while the sheet expands: ${JSON.stringify(snapPoints)}`, async function (assert) {
+      const state = new State();
+      state.inset = '40px';
+      state.text = true;
+      state.snapPoints = snapPoints;
+      await renderDrawer(state);
+      const last = snapPoints.length - 1;
+      if (last > 1) {
+        state.active = 1;
+        await settle();
+      }
+      const handle = drawerFor(root())!;
+      const highest = handle.offsetOf(last)!;
+      const width = content().getBoundingClientRect().width;
+      assert.true(highest > 100, `the content snap point: ${highest}px`);
+
+      state.active = last;
+      await settled();
+      let previous = handle.offset();
+      let frames = 0;
+      while (clock.pendingFrames > 0 && frames < 200) {
+        clock.frame();
+        // The content's resize observations of this frame, as a browser
+        // delivers them after layout.
+        await resizeObserversDelivered();
+        frames++;
+        const open = handle.offset();
+        assert.strictEqual(
+          handle.offsetOf(last),
+          highest,
+          `frame ${frames}: the highest snap point stays`,
+        );
+        assert.strictEqual(
+          content().getBoundingClientRect().width,
+          width,
+          `frame ${frames}: the content keeps its width`,
+        );
+        assert.true(
+          open >= previous - 0.5,
+          `frame ${frames}: no jump back (${previous} to ${open})`,
+        );
+        previous = open;
+      }
+      await settled();
+      assert.strictEqual(handle.offset(), highest, 'arrives at the snap point');
+      assert.strictEqual(written(), 1);
+    });
+  }
 
   module('data-nested', function () {
     class NestedState {

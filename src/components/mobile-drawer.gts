@@ -740,8 +740,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #backdropTint?: HTMLElement;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
-  /** The last observed sizes, see `#axisSizeChanged`. */
-  #observedSizes = new WeakMap<Element, { width: number; height: number }>();
   #layout?: Layout;
   #placement?: Placement;
   #destroyed = false;
@@ -1082,9 +1080,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       tray.addEventListener('touchcancel', this.#onTrayTouchEnd);
 
       if (typeof ResizeObserver !== 'undefined') {
-        this.#resizeObserver = new ResizeObserver((entries) => {
-          if (this.#axisSizeChanged(entries)) this.#onResize();
-        });
+        this.#resizeObserver = new ResizeObserver(() => this.#onResize());
         this.#resizeObserver.observe(root);
         this.#resizeObserver.observe(this.#content);
       }
@@ -1522,33 +1518,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #inputOf(element: Element): InputType {
     const focused = this.#focused;
     return focused?.element === element ? focused.input : focusInputOf(element);
-  }
-
-  /**
-   * Whether a resize observation changed the size of the root or the
-   * content along the drawer axis, the sizes that `#measure` depends on. A
-   * change across the axis alone doesn't change the layout: e.g. a theme
-   * that insets the sheet (`--mobile-drawer-inset`) changes the content's
-   * width on every frame between the two highest snap points. If that
-   * width changes the content's length (the text wraps again), the length
-   * change counts.
-   */
-  #axisSizeChanged(entries: ResizeObserverEntry[]): boolean {
-    let changed = false;
-    for (const { target, contentRect } of entries) {
-      const { width, height } = contentRect;
-      const last = this.#observedSizes.get(target);
-      this.#observedSizes.set(target, { width, height });
-      if (
-        !last ||
-        (this.axis === 'vertical'
-          ? last.height !== height
-          : last.width !== width)
-      ) {
-        changed = true;
-      }
-    }
-    return changed;
   }
 
   #onResize(): void {
