@@ -1729,8 +1729,11 @@ module(
         // At the start, where it shows: keyboard focus on a field off screen
         // would move the drawer to its highest snap point.
         el('.mobile-drawer__content').prepend(field);
-        field.focus();
+        // Without a focus ring, so that only `isEditable` holds the reset:
+        // Chrome gives a text field `:focus-visible` for every other focus.
+        focus(field, false);
         assert.strictEqual(document.activeElement, field, 'focused');
+        assert.false(field.matches(':focus-visible'), 'no keyboard focus');
         // As the browser does to show the focused field.
         tray().scrollTop = 100;
 
@@ -1819,6 +1822,37 @@ module(
       button.remove();
     });
 
+    for (const [name, create] of [
+      [
+        'a readonly text input',
+        () =>
+          Object.assign(document.createElement('input'), { readOnly: true }),
+      ],
+      [
+        'a readonly textarea',
+        () =>
+          Object.assign(document.createElement('textarea'), { readOnly: true }),
+      ],
+    ] as const) {
+      test(`${name} in the tray with :focus-visible does not hold the reset`, async function (assert) {
+        const state = new State();
+        state.active = 1;
+        await renderDrawer(state);
+        const element = create();
+        el('.mobile-drawer__content').prepend(element);
+        // As a mouse click on it does in Chrome: focus with a focus ring.
+        focus(element, true);
+        assert.strictEqual(document.activeElement, element, 'focused');
+        assert.true(element.matches(':focus-visible'), 'keyboard focus');
+        tray().scrollTop = 100;
+
+        await resize(state, 1100);
+        clock.runUntilIdle();
+        assert.strictEqual(tray().scrollTop, 0, 'reset');
+        element.remove();
+      });
+    }
+
     test('a disabled text input in the tray does not hold the reset', async function (assert) {
       const state = new State();
       state.active = 1;
@@ -1835,6 +1869,53 @@ module(
       clock.runUntilIdle();
       assert.strictEqual(tray().scrollTop, 0, 'reset');
       input.remove();
+    });
+
+    test("top: a modal drawer's own keyboard focus does not hold the reset until focus moves", async function (assert) {
+      const state = new State();
+      state.placement = 'top';
+      state.snapPoints = [0, '40%', '100%'];
+      state.active = 0;
+      await renderDrawer(state);
+      // At the content end, which shows at the leading edge: keyboard focus
+      // on a button off screen would move the drawer.
+      const first = document.createElement('button');
+      first.textContent = 'First';
+      const second = document.createElement('button');
+      second.textContent = 'Second';
+      el('.mobile-drawer__content').append(first, second);
+      // As a key press opens it: the drawer's own focus gets a focus ring.
+      const trigger = document.createElement('button');
+      el('[data-test-container]').append(trigger);
+      focus(trigger, true);
+      state.active = 1;
+      await settled();
+      clock.runUntilIdle();
+      assert.strictEqual(document.activeElement, first, 'initial focus');
+      assert.true(first.matches(':focus-visible'), 'keyboard focus');
+      assert.strictEqual(
+        tray().scrollTop,
+        scrollStart(tray(), 'top'),
+        'the content end is at the leading edge',
+      );
+
+      await resize(state, 1100);
+      clock.runUntilIdle();
+      assert.strictEqual(
+        tray().scrollTop,
+        scrollStart(tray(), 'top'),
+        'the content end stays at the leading edge',
+      );
+
+      // As Tab and Shift+Tab do: the user's own keyboard focus holds it.
+      focus(second, true);
+      focus(first, true);
+      assert.true(first.matches(':focus-visible'), 'keyboard focus again');
+      tray().scrollTop = 100;
+      await resize(state, 1200);
+      clock.runUntilIdle();
+      assert.strictEqual(tray().scrollTop, 100, 'kept after focus moved');
+      trigger.remove();
     });
 
     /**

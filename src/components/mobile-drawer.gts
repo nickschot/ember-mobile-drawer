@@ -442,6 +442,19 @@ function isEditable(element: Element): boolean {
 }
 
 /**
+ * Whether `element` is a text `<input>` or a `<textarea>` that is `readonly`
+ * or `disabled`: it opens no keyboard, see `isEditable`.
+ */
+function isInactiveTextField(element: Element): boolean {
+  return (
+    ((element instanceof HTMLInputElement &&
+      !NON_TEXT_INPUTS.has(element.type)) ||
+      element instanceof HTMLTextAreaElement) &&
+    (element.readOnly || element.disabled)
+  );
+}
+
+/**
  * Whether `element` is a field that takes text: a text `<input>` (not
  * `disabled`), a `<textarea>` or contenteditable content. Unlike
  * `isEditable`, `readonly` fields count: their text can still be selected.
@@ -732,6 +745,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #enteredFrom?: HTMLElement | SVGElement;
   /** Set while a modal drawer moves focus in, see `#activateModal`. */
   #initialFocusing = false;
+  /**
+   * The element a modal drawer focused when it opened (see
+   * `#activateModal`), until focus moves to another element. Its keyboard
+   * focus doesn't hold the scroll reset, see `#focusHoldsReset`.
+   */
+  #initialFocused?: Element;
   /**
    * Set when the drawer closed and `#applyOpen` has yet to return focus:
    * whether focus was inside the drawer when it closed.
@@ -1325,15 +1344,26 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * (`:focus-visible`) on any element in it, which the browser scrolled into
    * view. Not the tray itself, which a modal drawer focuses when it opens.
    * Also inside an open shadow root in the tray.
+   *
+   * Keyboard focus that the drawer gave itself (the initial focus of a
+   * modal drawer, see `#activateModal`) doesn't hold it: that focus doesn't
+   * scroll, so the content end of a top drawer stays at its leading edge.
+   * It holds it again when focus moves. An editable element always holds
+   * it: an on-screen keyboard can open for it. A `readonly` or `disabled`
+   * text field never does: Chrome gives it `:focus-visible` also after a
+   * mouse click.
    */
   #focusHoldsReset(): boolean {
     const tray = this.#tray!;
     let active = document.activeElement;
+    if (active !== this.#initialFocused) this.#initialFocused = undefined;
     if (!active || active === tray || !tray.contains(active)) return false;
+    const initial = active === this.#initialFocused;
     while (active.shadowRoot?.activeElement) {
       active = active.shadowRoot.activeElement;
     }
     if (isEditable(active)) return true;
+    if (initial || isInactiveTextField(active)) return false;
     try {
       return active.matches(':focus-visible');
     } catch {
@@ -1910,7 +1940,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       // app chose the snap point it opens at.
       this.#initialFocusing = true;
       try {
-        focusWithoutScrolling(initialFocus(tray, tray));
+        const element = initialFocus(tray, tray);
+        focusWithoutScrolling(element);
+        if (document.activeElement === element) this.#initialFocused = element;
       } finally {
         this.#initialFocusing = false;
       }
@@ -1922,6 +1954,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const release = this.#releaseModal;
     if (!release) return;
     this.#releaseModal = undefined;
+    this.#initialFocused = undefined;
     release();
     if (!this.#destroyed) this.modalActive = false;
   }
@@ -2404,10 +2437,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * what has focus. Not when focus goes nowhere (`relatedTarget` `null`,
    * e.g. the window loses focus or a click on something that can't take
    * focus), nor during a drag. Like `close`, so through
-   * `@onSnapPointChange` when controlled.
+   * `@onSnapPointChange` when controlled. Also forgets the initial focus of
+   * a modal drawer when focus moves on from it (see `#focusHoldsReset`).
    */
   #onRootFocusOut = (event: FocusEvent): void => {
     const to = event.relatedTarget;
+    // Focus moved on from the modal drawer's initial focus (not only the
+    // window that lost focus), see `#focusHoldsReset`.
+    if (to && event.target === this.#initialFocused) {
+      this.#initialFocused = undefined;
+    }
     if (
       !this.#openedByFocus ||
       !this.#open ||
