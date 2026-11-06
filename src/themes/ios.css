@@ -429,8 +429,9 @@
    * at every snap point. A constant padding keeps the content's width, so
    * it isn't laid out again while the sheet expands. At full height the
    * content thus has 8px more side padding than a native sheet. The grabber
-   * strip moves out of this padding too. Specificity 0,1,0 for the content,
-   * so it wins over the base padding in either load order.
+   * strip moves out of this padding too. The header (see "The header"
+   * below) has the same padding. Specificity 0,1,0 for the content and the
+   * header, so it wins over the base padding in either load order.
    */
   :where(
       .mobile-drawer-theme-ios
@@ -438,7 +439,7 @@
         > .mobile-drawer__sheet
         > .mobile-drawer__tray
     )
-    > .mobile-drawer__content {
+    > :is(.mobile-drawer__content, .mobile-drawer__header) {
     padding-right: calc(
       var(--_mobile-drawer-ios-inset-right) + var(--mobile-drawer-inset, 0px)
     );
@@ -1197,8 +1198,105 @@
       var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
   }
 
+  /*
+   * The header (the header mode, see "Header" in the README): a tray child
+   * outside the scroll container, so it doesn't move while the content
+   * bounces at its start, as in a native iOS sheet. Put the grabber in it
+   * (it then needs no `data-mobile-drawer-pinned`). Like the grabber strip
+   * in the content: transparent below the highest snap point, so it looks
+   * like the rest of the glass sheet, and at the highest snap point the
+   * opaque sheet colour, with the glass rim again over it (::after, along
+   * the leading edge and its rounded corners), so the content that goes
+   * under it (while it bounces past fully open) doesn't show through. The
+   * grabber strip in the header has no background of its own. Specificity
+   * 0,1,0, so it wins over the base header background in either load
+   * order.
+   */
+  :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-header]
+        > .mobile-drawer__sheet
+    )
+    > .mobile-drawer__tray
+    > .mobile-drawer__header {
+    background: transparent;
+  }
+
+  :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-header][data-at-highest]
+        > .mobile-drawer__sheet
+    )
+    > .mobile-drawer__tray
+    > .mobile-drawer__header {
+    background: var(--mobile-drawer-background, Canvas);
+  }
+
+  @supports (color: rgb(from light-dark(red, red) r g b / 1)) {
+    :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-header][data-at-highest]
+          > .mobile-drawer__sheet
+      )
+      > .mobile-drawer__tray
+      > .mobile-drawer__header {
+      background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
+    }
+
+    /* The rim over the opaque header: a box with the tray's radius on the
+       leading corners, taller than the header by the radius (so the radius
+       isn't scaled down), clipped to the header. Bottom and top sheets
+       only, as the grabber strip. */
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-header][data-at-highest]:is(
+          [data-placement="bottom"],
+          [data-placement="top"]
+        )
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray
+        > .mobile-drawer__header
+    )::after {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: calc(100% + var(--mobile-drawer-radius, 0px));
+      border-radius: var(--mobile-drawer-radius, 0px)
+        var(--mobile-drawer-radius, 0px) 0 0;
+      box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
+      clip-path: inset(0 0 var(--mobile-drawer-radius, 0px) 0);
+      pointer-events: none;
+    }
+
+    :where(
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-header][data-at-highest][data-placement="top"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray
+        > .mobile-drawer__header
+    )::after {
+      inset: auto 0 0;
+      border-radius: 0 0 var(--mobile-drawer-radius, 0px)
+        var(--mobile-drawer-radius, 0px);
+      clip-path: inset(var(--mobile-drawer-radius, 0px) 0 0 0);
+    }
+  }
+
+  /* The nested dim on the opaque header, as on the grabber strip. */
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-header][data-nested][data-at-highest]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
+  ) {
+    box-shadow: inset 0 0 0 100vmax
+      var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
+  }
+
   @media (prefers-reduced-motion: no-preference) {
     :where(.mobile-drawer-theme-ios .mobile-drawer__tray),
+    :where(.mobile-drawer-theme-ios .mobile-drawer__header),
     :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber) {
       transition: box-shadow 0.3s ease;
     }
