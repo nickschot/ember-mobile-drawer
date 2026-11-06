@@ -11,6 +11,7 @@ import {
   KEYBOARD_FILL_CLASS,
 } from '#src/-private/keyboard-fill.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
+import { resizeObserversDelivered } from '../../helpers/resize-observers.ts';
 import '#src/styles.css';
 import '#src/themes/ios.css';
 
@@ -376,6 +377,70 @@ module('Integration | Component | mobile-drawer | header', function (hooks) {
       ['mobile-drawer__header', 'mobile-drawer__content'],
       'and back',
     );
+  });
+
+  test('after a placement change the drawer measures the new header when it changes size', async function (assert) {
+    class SizeState {
+      @tracked placement: Placement = 'bottom';
+      @tracked headerHeight = 80;
+      get headerStyle() {
+        return htmlSafe(`height: ${this.headerHeight}px`);
+      }
+    }
+    const state = new SizeState();
+    // The `content` snap point is the header plus 100px of content.
+    const snapPoints: SnapPoint[] = [0, 'content', '100%'];
+    const rootStyle = htmlSafe('position: absolute; inset: 0');
+    const blockStyle = htmlSafe('height: 100px');
+    await render(
+      <template>
+        {{! template-lint-disable no-inline-styles }}
+        <div style={{containerStyle}}>
+          <MobileDrawer
+            @placement={{state.placement}}
+            @snapPoints={{snapPoints}}
+            @activeSnapPoint={{1}}
+            @modal={{false}}
+            style={{rootStyle}}
+            data-test-drawer
+          >
+            <:header><div style={{state.headerStyle}}></div></:header>
+            <:default><div style={{blockStyle}}></div></:default>
+          </MobileDrawer>
+        </div>
+      </template>,
+    );
+    await settle();
+    /** How much of the tray shows, in layout px. */
+    const shown = () => {
+      const box = tray().getBoundingClientRect();
+      const rootBox = root().getBoundingClientRect();
+      return Math.round(
+        (Math.min(box.bottom, rootBox.bottom) -
+          Math.max(box.top, rootBox.top)) /
+          screenScale(),
+      );
+    };
+    assert.strictEqual(shown(), 180, 'bottom: 80px header + 100px content');
+
+    state.placement = 'top';
+    await settle();
+    // Let the resize observations of the placement change (the old header
+    // leaves the DOM) come first, so only the observation of the new
+    // header can measure the drawer again below.
+    await resizeObserversDelivered();
+    await settle();
+    await resizeObserversDelivered();
+    await settle();
+    assert.strictEqual(shown(), 180, 'top: the same');
+
+    // The header after the placement change is a new element: the drawer
+    // observes it, so it measures again when it gets smaller.
+    state.headerHeight = 40;
+    await settled();
+    await resizeObserversDelivered();
+    await settle();
+    assert.strictEqual(shown(), 140, 'top: 40px header + 100px content');
   });
 
   for (const placement of PLACEMENTS) {

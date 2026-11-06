@@ -1174,15 +1174,17 @@
 
   /* A row runs from right to left in a right-to-left tray: reverse it, so
      the header stays at the physical leading edge (the right of a left
-     drawer, the left of a right drawer). */
+     drawer, the left of a right drawer). `:dir()` follows the `dir`
+     attribute, not the CSS `direction`. Specificity 0,1,0, as the other
+     tray rules (`:dir()` is inside `:where()`); it comes after them. */
   :where(
-      .mobile-drawer[data-header]:is(
-          [data-placement="left"],
-          [data-placement="right"]
-        )
-        > .mobile-drawer__sheet
-    )
-    > .mobile-drawer__tray:dir(rtl) {
+    .mobile-drawer[data-header]:is(
+        [data-placement="left"],
+        [data-placement="right"]
+      )
+      > .mobile-drawer__sheet
+      > :dir(rtl)
+  ).mobile-drawer__tray {
     flex-direction: row-reverse;
   }
 
