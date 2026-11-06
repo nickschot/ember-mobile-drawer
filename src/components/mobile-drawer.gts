@@ -790,7 +790,8 @@ const clampIndex = (index: number, count: number) =>
  * `@backdrop={{false}}`) and a `.mobile-drawer__sheet` with the
  * `.mobile-drawer__tray` in it, with the block inside
  * `.mobile-drawer__content` (and the `header` block, if given, in a
- * `.mobile-drawer__header` before it, see `#scroller`), and an empty
+ * `.mobile-drawer__header` at its leading side, see `headerFirst` and
+ * `#scroller`), and an empty
  * `.mobile-drawer__bar-tint` after
  * the sheet and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
  * after the backdrop (for the iOS Safari 26 bars, see styles.css), and a
@@ -922,6 +923,31 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    */
   get #scroller(): HTMLElement | undefined {
     return this.#header ? this.#content : this.#tray;
+  }
+
+  /**
+   * Whether the header goes before the content in the DOM: for bottom and
+   * right drawers, whose leading edge is the start of the tray along the
+   * axis. For top and left drawers it goes after the content. So the DOM
+   * order (the tab order and the reading order) is the order on screen.
+   */
+  get headerFirst(): boolean {
+    return this.placement === 'bottom' || this.placement === 'right';
+  }
+
+  /**
+   * Looks up the header again: a placement change can render it on the
+   * other side of the content (see `headerFirst`), as a new element.
+   */
+  #syncHeader(): void {
+    const header =
+      this.#tray?.querySelector<HTMLElement>(
+        ':scope > .mobile-drawer__header',
+      ) ?? undefined;
+    if (header === this.#header) return;
+    if (this.#header) this.#resizeObserver?.unobserve(this.#header);
+    this.#header = header;
+    if (header) this.#resizeObserver?.observe(header);
   }
   /** The root's `.mobile-drawer__bar-tint` child, if any. */
   #barTint?: HTMLElement;
@@ -1420,7 +1446,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     update: () => {
       const placementChanged = this.placement !== this.#placement;
       this.#placement = this.placement;
-      if (placementChanged) this.#stopMomentum();
+      if (placementChanged) {
+        this.#stopMomentum();
+        this.#syncHeader();
+      }
       this.#measure();
       // The axis may have changed.
       this.#syncScrollLock();
@@ -4332,14 +4361,26 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
               )
               as |drawer|
             }}
+              {{! The header is at the leading edge, in the DOM order too:
+                  before the content of bottom and right drawers, after it
+                  for top and left drawers. }}
               {{#if (has-block "header")}}
-                <div class="mobile-drawer__header">
-                  {{yield drawer to="header"}}
-                </div>
+                {{#if this.headerFirst}}
+                  <div class="mobile-drawer__header">
+                    {{yield drawer to="header"}}
+                  </div>
+                {{/if}}
               {{/if}}
               <div class="mobile-drawer__content">
                 {{yield drawer}}
               </div>
+              {{#if (has-block "header")}}
+                {{#unless this.headerFirst}}
+                  <div class="mobile-drawer__header">
+                    {{yield drawer to="header"}}
+                  </div>
+                {{/unless}}
+              {{/if}}
             {{/let}}
           {{/let}}
         </div>

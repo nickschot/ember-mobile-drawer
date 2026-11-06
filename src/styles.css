@@ -277,8 +277,10 @@
  *                           use it.
  * .mobile-drawer__header    Only with a `header` block (the root then has
  *                           `data-header`): the header block, a tray child
- *                           before the content, at the tray's leading edge
- *                           (with `order`). The content is then the scroll
+ *                           at the tray's leading edge: before the content
+ *                           of bottom and right drawers, after it for top
+ *                           and left drawers, so the DOM order is the order
+ *                           on screen. The content is then the scroll
  *                           container, and the tray doesn't scroll; the
  *                           component's scroll lock, scroll reset and
  *                           scroll handoff use the content. See "The header
@@ -1106,7 +1108,9 @@
    * as the tray's does. The header is above the content, so the content
    * goes under it while it bounces past fully open, and has the tray's
    * background for that. It has the content's safe-area padding across
-   * the axis.
+   * the axis. The component renders the header on the leading side of the
+   * content in the DOM (after it for top and left drawers), so no `order`
+   * is needed and the DOM order is the order on screen.
    */
   :where(.mobile-drawer[data-header] > .mobile-drawer__sheet)
     > .mobile-drawer__tray {
@@ -1142,16 +1146,6 @@
     background: inherit;
   }
 
-  /* A top drawer's leading edge is its bottom: the header goes last. */
-  :where(
-    .mobile-drawer[data-header][data-placement="top"]
-      > .mobile-drawer__sheet
-      > .mobile-drawer__tray
-      > .mobile-drawer__header
-  ) {
-    order: 1;
-  }
-
   /* Left and right drawers: a column at the leading edge (the right of a
      left drawer, the left of a right drawer), the content at full height. */
   :where(
@@ -1178,13 +1172,18 @@
     padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
   }
 
+  /* A row runs from right to left in a right-to-left tray: reverse it, so
+     the header stays at the physical leading edge (the right of a left
+     drawer, the left of a right drawer). */
   :where(
-    .mobile-drawer[data-header][data-placement="left"]
-      > .mobile-drawer__sheet
-      > .mobile-drawer__tray
-      > .mobile-drawer__header
-  ) {
-    order: 1;
+      .mobile-drawer[data-header]:is(
+          [data-placement="left"],
+          [data-placement="right"]
+        )
+        > .mobile-drawer__sheet
+    )
+    > .mobile-drawer__tray:dir(rtl) {
+    flex-direction: row-reverse;
   }
 
   /*

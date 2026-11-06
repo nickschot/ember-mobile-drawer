@@ -487,13 +487,13 @@ The `header` block puts content at the tray's leading edge, outside the scroll c
 
 With a named block, Ember needs the other content in `<:default>`. Both blocks get the same [yielded values](#yielded-values).
 
-- **Markup:** the header renders in `.mobile-drawer__header`, a tray child before `.mobile-drawer__content`, and the root gets `data-header`. The header is always first in the DOM, so it is first in the tab order and for screen readers; the base styles show it at the tray's leading edge with `order`: at the top of a bottom drawer, at the bottom of a top drawer (after the content), at the right of a left drawer and at the left of a right drawer (a column there).
+- **Markup:** the header renders in `.mobile-drawer__header`, a tray child at the tray's leading edge, and the root gets `data-header`. The DOM order is the order on screen, so the tab order and the reading order of a screen reader match what shows: the header comes before `.mobile-drawer__content` in a bottom drawer (at the top) and a right drawer (at the left), and after it in a top drawer (at the bottom) and a left drawer (at the right). In left and right drawers the header is a column. A placement change renders the header again on the other side, as a new element, so state in it (such as the text in a field) doesn't carry over. In a right-to-left page a side drawer's header stays at the same physical edge, so there its reading order is the other way round.
 - **Scroll container:** `.mobile-drawer__content` (`overflow: auto`, `overscroll-behavior: contain`), not the tray (`overflow: hidden`). Everything in [Scrolling content](#scrolling-content) applies to the content instead of the tray: the scroll lock below the highest snap point, the scroll reset to the scroll start, the scroll-to-drag handoff and the drag-to-scroll. Code that reads or sets the scroll position must use the content: `scrollTop` of the tray is always `0`. The content doesn't grow: it sits against the leading edge (next to the header) and shrinks to the space the header leaves, and then it scrolls.
 - **Gestures:** a gesture on the header drags the drawer at every snap point (there is nothing to scroll there), also without the `handle` modifier, like the grabber area of a native sheet. Towards open at the highest snap point it bounces the content past fully open. A drag on the header never scrolls the content. Put the `handle` modifier (or the `Grabber`) in the header anyway for `@handleOnly`.
-- **Bounce past fully open:** the content moves under the header, which stays at the tray's edge. The header is above the content (`position: relative; z-index: 1`) and has the tray's background (`background: inherit`). Elements in the header need no `data-mobile-drawer-pinned`.
+- **Bounce past fully open:** the content moves under the header, which stays at the tray's edge. The header is above the content (`position: relative; z-index: 1`) and has the tray's background (`background: inherit`). Elements in the header need no `data-mobile-drawer-pinned`. Without the iOS theme, a translucent tray background (`--mobile-drawer-background`) shows the header as a separate band, because the header paints the same translucent colour again over the tray: give the tray an opaque background, or set the header's background yourself (for example `background: transparent`, if you accept that the bouncing content shows through it).
 - **Padding:** the header has the content's safe-area padding across the axis (left and right for bottom and top drawers, top and bottom for left and right drawers), no padding along the axis.
 - **Size:** the tray's natural size (for a `content` snap point) is the header plus the content. The component measures the header again when it changes size.
-- **Focus:** when keyboard focus on an element off screen moves the drawer to its highest snap point (see [Keyboard focus and content off screen](#keyboard-focus-and-content-off-screen)), the component scrolls the content (not the tray) so the element shows next to the header, not under it. A modal drawer focuses the tray (`tabindex="-1"`) or its first focusable element, as before; the header is in the focus trap. For a top drawer the DOM order (header first) differs from the visual order (header last).
+- **Focus:** when keyboard focus on an element off screen moves the drawer to its highest snap point (see [Keyboard focus and content off screen](#keyboard-focus-and-content-off-screen)), the component scrolls the content (not the tray) so the element shows next to the header, not under it. A modal drawer focuses the tray (`tabindex="-1"`) or its first focusable element, as before; the header is in the focus trap.
 - **iOS theme:** see [iOS theme](#ios-theme).
 
 ### Scrolling content
@@ -771,7 +771,7 @@ The theme only applies under the `mobile-drawer-theme-ios` class. Put it on an a
 
 The grabber class also styles the yielded [`Grabber`](#grabber) button the same way, with a focus ring around the bar for keyboard focus: `<drawer.Grabber class="mobile-drawer-theme-ios__grabber" data-mobile-drawer-pinned />`.
 
-**With a header (recommended, the native behaviour).** Put the grabber in the `header` block (see [Header](#header)). It then doesn't move when the content bounces at its start, as in a native iOS sheet, and it needs no `data-mobile-drawer-pinned`. The same markup works for a top drawer: the header goes to the bottom edge by itself.
+**With a header (recommended, the native behaviour).** Put the grabber in the `header` block (see [Header](#header)). It then doesn't move when the content bounces at its start, as in a native iOS sheet, and it needs no `data-mobile-drawer-pinned`. The same markup works for a top drawer: the header goes after the content, at the bottom edge, by itself.
 
 ```hbs
 <div class="mobile-drawer-theme-ios">
@@ -1062,7 +1062,7 @@ See [State attributes](#state-attributes) for details.
   <div class="mobile-drawer__sheet">
     <div class="mobile-drawer__glass" aria-hidden="true"></div>
     <div class="mobile-drawer__tray" tabindex="-1">                   <!-- tabindex: modal drawers -->
-      <div class="mobile-drawer__header">...your header block...</div> <!-- with a header block -->
+      <div class="mobile-drawer__header">...your header block...</div> <!-- with a header block; after the content for top and left -->
       <div class="mobile-drawer__content">...your block...</div>
     </div>
   </div>

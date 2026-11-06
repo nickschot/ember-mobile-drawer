@@ -297,6 +297,87 @@ module('Integration | Component | mobile-drawer | header', function (hooks) {
     assert.deepEqual(state.changes, [1], 'the Grabber works in the header');
   });
 
+  const HEADER_FIRST: Record<Placement, boolean> = {
+    bottom: true,
+    top: false,
+    left: false,
+    right: true,
+  };
+
+  for (const placement of PLACEMENTS) {
+    for (const rtl of vertical(placement) ? [false] : [false, true]) {
+      test(`${placement}${rtl ? ' (rtl)' : ''}: the DOM order is the order on screen`, async function (assert) {
+        const state = new State();
+        state.placement = placement;
+        if (rtl) state.dir = 'rtl';
+        await renderDrawer(state, clock);
+        const first = HEADER_FIRST[placement];
+        assert.deepEqual(
+          [...tray().children].map((child) => child.className),
+          first
+            ? ['mobile-drawer__header', 'mobile-drawer__content']
+            : ['mobile-drawer__content', 'mobile-drawer__header'],
+          first ? 'the header before the content' : 'the content first',
+        );
+        // On screen: the header at the physical leading edge, also in a
+        // right-to-left page (the side drawers keep their physical edge).
+        const rect = header().getBoundingClientRect();
+        const box = content().getBoundingClientRect();
+        const onScreen = {
+          bottom: rect.bottom <= box.top + 0.5,
+          top: rect.top >= box.bottom - 0.5,
+          left: rect.left >= box.right - 0.5,
+          right: rect.right <= box.left + 0.5,
+        }[placement];
+        assert.true(onScreen, 'at the leading edge, next to the content');
+        if (!rtl) {
+          const alongY = vertical(placement);
+          const headerBefore = alongY
+            ? rect.top < box.top
+            : rect.left < box.left;
+          assert.strictEqual(
+            headerBefore,
+            first,
+            'the DOM order is the order on screen (top to bottom, left to right)',
+          );
+        }
+      });
+    }
+  }
+
+  test('a placement change renders the header on the other side of the content, and the drawer uses the new header', async function (assert) {
+    const state = new State();
+    await renderDrawer(state, clock);
+    const before = header();
+    state.placement = 'top';
+    await settle();
+    assert.deepEqual(
+      [...tray().children].map((child) => child.className),
+      ['mobile-drawer__content', 'mobile-drawer__header'],
+    );
+    assert.notStrictEqual(header(), before, 'a new header element');
+    assert.true(
+      header().getBoundingClientRect().top >=
+        content().getBoundingClientRect().bottom - 0.5,
+      'at the bottom edge',
+    );
+    // The header mode still works: a gesture on the new header drags.
+    const result = await gesture(el('[data-test-header]'), 'up', 30, clock, {
+      lift: false,
+    });
+    assert.true(result.dragging, 'a gesture on the new header drags');
+    result.finger.up();
+    await settle();
+
+    state.placement = 'bottom';
+    await settle();
+    assert.deepEqual(
+      [...tray().children].map((child) => child.className),
+      ['mobile-drawer__header', 'mobile-drawer__content'],
+      'and back',
+    );
+  });
+
   for (const placement of PLACEMENTS) {
     test(`${placement}: the header is at the leading edge, outside the scroll container`, async function (assert) {
       const state = new State();
@@ -493,6 +574,11 @@ module('Integration | Component | mobile-drawer | header', function (hooks) {
       await renderDrawer(state, clock);
       assert.strictEqual(content().scrollTop, 0, 'opens at scrollTop 0');
       scrollTo(content(), placement, 'middle');
+      const scrolled = content().scrollTop;
+      assert.true(
+        scrolled > 0 && scrolled < range(content(), placement),
+        `the content is scrolled before the reset (${scrolled}), away from both ends`,
+      );
       state.active = 1;
       await settle();
       assert.strictEqual(
