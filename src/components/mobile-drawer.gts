@@ -691,6 +691,31 @@ function isTextField(element: Element): boolean {
   return element instanceof HTMLElement && element.isContentEditable;
 }
 
+/**
+ * Whether `element` handles its own touch gestures, so a swipe that starts
+ * on it in a nested drawer is never cancelled (see `#onNestedTouchMove`):
+ * an enabled form control (a range slider, a text field, a select), an
+ * editable element, a media element with controls, an element the app
+ * made `draggable="true"`, or one with `touch-action: none` (e.g. a
+ * drawing canvas or a map, which handles every gesture on it in script).
+ */
+function handlesOwnGesture(
+  element: Element,
+  style: CSSStyleDeclaration,
+): boolean {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    return !element.disabled;
+  }
+  if (element instanceof HTMLMediaElement) return element.controls;
+  if (element instanceof HTMLElement && element.isContentEditable) return true;
+  if (element.getAttribute('draggable') === 'true') return true;
+  return style.touchAction === 'none';
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
@@ -1089,15 +1114,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
   /**
    * The touch that started in a drawer nested in this one, see
-   * `#onNestedTouchMove`: the finger's last position, and the root of the
-   * nested drawer.
+   * `#onNestedTouchMove`: where it started, the elements between its
+   * target and the nested drawer's root that may scroll, whether it
+   * started on an element that handles its own gestures (`own`), and
+   * whether its touchmoves are cancelled (`undefined` until decided).
    */
   #nestedTouch?: {
     id: number;
     x: number;
     y: number;
-    target: Element;
-    root: Element;
+    scrollers: Element[];
+    own: boolean;
+    cancels?: boolean;
   };
   /**
    * The elements with the yielded `handle` modifier, see `#onHandle`.
@@ -3787,29 +3815,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Whether a swipe (or wheel) at `target` that moved `dx`/`dy` (finger
-   * movement, client px) can scroll something in the nested drawer `root`:
-   * an element from `target` up to `root` that can scroll the way the
-   * finger pushes its content, along the main direction of the movement.
-   * A text field counts, so text selection in it keeps working.
+   * The elements a touch or wheel `event` in the nested drawer `root` went
+   * through, from its target up to `root`. From `composedPath()`, so the
+   * elements in an open shadow root count too (the target outside it is
+   * the host).
    */
-  #nestedCanScroll(
-    target: Element,
-    root: Element,
-    dx: number,
-    dy: number,
-  ): boolean {
-    const vertical = Math.abs(dy) >= Math.abs(dx);
-    for (
-      let element: Element | null = target;
-      element;
-      element = element.parentElement
-    ) {
-      if (isTextField(element)) return true;
-      if (canScroll(element, vertical, vertical ? dy : dx)) return true;
-      if (element === root) break;
+  #nestedPath(event: Event, root: Element): Element[] {
+    const path: Element[] = [];
+    for (const node of event.composedPath()) {
+      if (!(node instanceof Element)) continue;
+      path.push(node);
+      if (node === root) break;
     }
-    return false;
+    return path;
   }
 
   #onNestedTouchStart = (event: TouchEvent): void => {
@@ -3826,46 +3844,68 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const touch = event.changedTouches[0];
     const root = this.#nestedRoot(event.target);
     if (!touch || !root) return;
+    const scrollers: Element[] = [];
+    let own = false;
+    for (const element of this.#nestedPath(event, root)) {
+      const style = getComputedStyle(element);
+      if (handlesOwnGesture(element, style)) {
+        own = true;
+        break;
+      }
+      // `hidden` too: a locked scroll container can be unlocked during the
+      // gesture. `canScroll` reads the live style.
+      if (
+        /auto|scroll|hidden/.test(style.overflowX) ||
+        /auto|scroll|hidden/.test(style.overflowY)
+      ) {
+        scrollers.push(element);
+      }
+    }
     this.#nestedTouch = {
       id: touch.identifier,
       x: touch.clientX,
       y: touch.clientY,
-      target: event.target as Element,
-      root,
+      scrollers,
+      own,
     };
   };
 
   /**
    * A gesture that starts in a drawer nested in this one never scrolls this
    * drawer (or the page): its touchmoves are cancelled unless something in
-   * the nested drawer can scroll the way the finger moves (see
-   * `#nestedCanScroll`). Else iOS Safari scrolls the nearest ancestor that
-   * can scroll, also past `overscroll-behavior: contain` on a nested
-   * element that has nothing to scroll or is locked (`overflow: hidden`),
-   * e.g. on the nested drawer's backdrop, or across the nested drawer's
-   * axis (#119). The nested drawer's own drag sources still cancel the
-   * touchmoves of its drags. Listens on the tray and on the portals of
-   * `Nested`, so it also covers a nested drawer rendered with it.
+   * the nested drawer can scroll the way the finger moves. Else iOS Safari
+   * scrolls the nearest ancestor that can scroll, also past
+   * `overscroll-behavior: contain` on a nested element that has nothing to
+   * scroll or is locked (`overflow: hidden`), e.g. on the nested drawer's
+   * backdrop, or across the nested drawer's axis (#119).
+   *
+   * Decided once per gesture, as in `dragSource`: when the finger has moved
+   * `DECISION_SLOP` px from where it went down, along the main direction of
+   * that movement. Touchmoves before that are never cancelled. A gesture
+   * that starts on an element that handles its own gestures (see
+   * `handlesOwnGesture`: a range slider, a text field, `touch-action:
+   * none`, ...) is left alone. Multi-touch (pinch-zoom) too. The nested
+   * drawer's own drag sources still cancel the touchmoves of its drags.
+   * Listens on the tray and on the portals of `Nested`, so it also covers
+   * a nested drawer rendered with it.
    */
   #onNestedTouchMove = (event: TouchEvent): void => {
     const gesture = this.#nestedTouch;
-    // Leave multi-touch gestures (pinch-zoom) alone.
-    if (!gesture || event.touches.length > 1) return;
+    if (!gesture || gesture.own || event.touches.length > 1) return;
     const touch = Array.from(event.changedTouches).find(
       (changed) => changed.identifier === gesture.id,
     );
     if (!touch) return;
-    const dx = touch.clientX - gesture.x;
-    const dy = touch.clientY - gesture.y;
-    if (dx === 0 && dy === 0) return;
-    gesture.x = touch.clientX;
-    gesture.y = touch.clientY;
-    if (
-      event.cancelable &&
-      !this.#nestedCanScroll(gesture.target, gesture.root, dx, dy)
-    ) {
-      event.preventDefault();
+    if (gesture.cancels === undefined) {
+      const dx = touch.clientX - gesture.x;
+      const dy = touch.clientY - gesture.y;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < DECISION_SLOP) return;
+      const vertical = Math.abs(dy) >= Math.abs(dx);
+      gesture.cancels = !gesture.scrollers.some((element) =>
+        canScroll(element, vertical, vertical ? dy : dx),
+      );
     }
+    if (gesture.cancels && event.cancelable) event.preventDefault();
   };
 
   #onNestedTouchEnd = (event: TouchEvent): void => {
@@ -3882,19 +3922,25 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * As `#onNestedTouchMove` for a wheel: a wheel in a nested drawer that
-   * can't scroll anything in it doesn't scroll this drawer either (e.g. on
-   * the nested drawer's backdrop). Not a pinch-zoom (`ctrlKey`).
+   * can't scroll anything in it (e.g. on the nested drawer's backdrop, or
+   * on a list at its end) is cancelled, so it doesn't scroll this drawer
+   * either. Not a pinch-zoom (`ctrlKey`).
    */
   #onNestedWheel = (event: WheelEvent): void => {
     if (event.ctrlKey || !event.cancelable) return;
     const root = this.#nestedRoot(event.target);
-    if (!root || !(event.target instanceof Element)) return;
+    if (!root) return;
     // A wheel scrolls the content down (`deltaY` > 0) as a finger moving up
     // does.
     const dx = -event.deltaX;
     const dy = -event.deltaY;
     if (dx === 0 && dy === 0) return;
-    if (!this.#nestedCanScroll(event.target, root, dx, dy)) {
+    const vertical = Math.abs(dy) >= Math.abs(dx);
+    if (
+      !this.#nestedPath(event, root).some((element) =>
+        canScroll(element, vertical, vertical ? dy : dx),
+      )
+    ) {
       event.preventDefault();
     }
   };

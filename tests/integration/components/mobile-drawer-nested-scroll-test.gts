@@ -38,6 +38,8 @@ class State {
   @tracked inner = 1;
   @tracked outerHandleOnly = false;
   @tracked innerHandleOnly = false;
+  /** Whether the nested drawer is rendered (in `Nested` mode). */
+  @tracked nestedShown = true;
   outerSnapPoints: SnapPoint[] = [0, 200, 400];
   innerSnapPoints: SnapPoint[] = [0, 150];
 
@@ -55,6 +57,52 @@ const wrapperStyle = htmlSafe(
 const outerContentStyle = htmlSafe('height: 1200px');
 const boxStyle = htmlSafe('height: 100px; overflow-y: auto');
 const boxContentStyle = htmlSafe('height: 400px');
+const rowStyle = htmlSafe(
+  'display: flex; width: 150px; height: 24px; overflow: hidden',
+);
+const wideStyle = htmlSafe('flex: none; width: 100px; overflow-x: auto');
+const wideContentStyle = htmlSafe('width: 400px; height: 20px');
+const noTouchStyle = htmlSafe('flex: none; height: 20px; touch-action: none');
+
+/**
+ * A web component with a horizontal scroller in its open shadow root
+ * (review N2 of #148).
+ */
+class ShadowScroller extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: 'open' });
+    root.innerHTML =
+      '<div style="width: 60px; overflow-x: auto"><div style="width: 400px; height: 20px">Wide</div></div>';
+  }
+}
+if (!customElements.get('nested-shadow-scroller')) {
+  customElements.define('nested-shadow-scroller', ShadowScroller);
+}
+
+/** The content of each nested drawer. */
+const InnerContent = <template>
+  {{! template-lint-disable no-inline-styles }}
+  <p data-test-inner-static>Inner</p>
+  <div style={{boxStyle}} data-mobile-drawer-scroll data-test-inner-box>
+    <div style={{boxContentStyle}}>List</div>
+  </div>
+  {{! One clipped row, so the nested tray itself has nothing to scroll. }}
+  <div style={{rowStyle}}>
+    <div style={{wideStyle}} data-test-inner-wide>
+      <div style={{wideContentStyle}}>Wide</div>
+    </div>
+    <nested-shadow-scroller data-test-inner-shadow />
+    <input type="range" aria-label="Volume" data-test-control="range" />
+    <select aria-label="Size" data-test-control="select">
+      <option>S</option>
+    </select>
+    <textarea aria-label="Note" data-test-control="textarea"></textarea>
+    <div contenteditable="true" data-test-control="contenteditable">Edit</div>
+    <div draggable="true" data-test-control="draggable">Drag</div>
+    <div style={{noTouchStyle}} data-test-control="touch-action-none">Draw</div>
+  </div>
+</template>;
 
 async function renderNested(state: State) {
   await render(
@@ -85,17 +133,10 @@ async function renderNested(state: State) {
                 style="position: absolute"
                 data-test-inner
               >
-                <p data-test-inner-static>Inner</p>
-                <div
-                  style={{boxStyle}}
-                  data-mobile-drawer-scroll
-                  data-test-inner-box
-                >
-                  <div style={{boxContentStyle}}>List</div>
-                </div>
+                <InnerContent />
               </MobileDrawer>
             </div>
-          {{else}}
+          {{else if state.nestedShown}}
             <outer.Nested>
               <MobileDrawer
                 @placement={{state.placement}}
@@ -108,14 +149,7 @@ async function renderNested(state: State) {
                 style="position: absolute"
                 data-test-inner
               >
-                <p data-test-inner-static>Inner</p>
-                <div
-                  style={{boxStyle}}
-                  data-mobile-drawer-scroll
-                  data-test-inner-box
-                >
-                  <div style={{boxContentStyle}}>List</div>
-                </div>
+                <InnerContent />
               </MobileDrawer>
             </outer.Nested>
           {{/if}}
@@ -127,6 +161,87 @@ async function renderNested(state: State) {
 }
 
 const isDom = (mode: Mode) => mode === 'dom';
+
+class ThreeLevels {
+  @tracked mode: Mode = 'dom';
+  snapPoints: SnapPoint[] = [0, 150];
+  outerSnapPoints: SnapPoint[] = [0, 400];
+}
+
+async function renderThreeLevels(state: ThreeLevels) {
+  await render(
+    <template>
+      {{! template-lint-disable no-inline-styles }}
+      <div style={{containerStyle}} data-test-container>
+        <MobileDrawer
+          @snapPoints={{state.outerSnapPoints}}
+          @activeSnapPoint={{1}}
+          aria-label="A"
+          style="position: absolute"
+          as |a|
+        >
+          {{#if (isDom state.mode)}}
+            <div style={{wrapperStyle}}>
+              <MobileDrawer
+                @snapPoints={{state.snapPoints}}
+                @activeSnapPoint={{1}}
+                aria-label="B"
+                style="position: absolute"
+              >
+                <div style={{wrapperStyle}}>
+                  <MobileDrawer
+                    @snapPoints={{state.snapPoints}}
+                    @activeSnapPoint={{1}}
+                    aria-label="C"
+                    style="position: absolute"
+                    data-test-c
+                  >
+                    <div
+                      style={{boxStyle}}
+                      data-mobile-drawer-scroll
+                      data-test-c-box
+                    >
+                      <div style={{boxContentStyle}}>List</div>
+                    </div>
+                  </MobileDrawer>
+                </div>
+              </MobileDrawer>
+            </div>
+          {{else}}
+            <a.Nested>
+              <MobileDrawer
+                @snapPoints={{state.snapPoints}}
+                @activeSnapPoint={{1}}
+                aria-label="B"
+                style="position: absolute"
+                as |b|
+              >
+                <b.Nested>
+                  <MobileDrawer
+                    @snapPoints={{state.snapPoints}}
+                    @activeSnapPoint={{1}}
+                    aria-label="C"
+                    style="position: absolute"
+                    data-test-c
+                  >
+                    <div
+                      style={{boxStyle}}
+                      data-mobile-drawer-scroll
+                      data-test-c-box
+                    >
+                      <div style={{boxContentStyle}}>List</div>
+                    </div>
+                  </MobileDrawer>
+                </b.Nested>
+              </MobileDrawer>
+            </a.Nested>
+          {{/if}}
+          <div style={{outerContentStyle}}>A</div>
+        </MobileDrawer>
+      </div>
+    </template>,
+  );
+}
 
 function el(selector: string): HTMLElement {
   const element = find(selector);
@@ -163,12 +278,81 @@ function swipe(
   return cancelled;
 }
 
+/**
+ * One finger on `target` that moves by each of `steps` (client px). Returns
+ * whether each touchmove was cancelled. `resting`: a second finger that
+ * rests on `target` the whole time.
+ */
+function moves(
+  target: HTMLElement,
+  steps: [number, number][],
+  { resting = false } = {},
+): boolean[] {
+  const rect = target.getBoundingClientRect();
+  const x = (rect.left + rect.right) / 2;
+  const y = (rect.top + rect.bottom) / 2;
+  const finger = new TouchPointer(target, x, y, {
+    resting: resting ? [{ identifier: 9, target, x: x + 20, y }] : [],
+  });
+  finger.down();
+  const cancelled = steps.map(([dx, dy]) => finger.move(dx, dy));
+  finger.up();
+  return cancelled;
+}
+
+/**
+ * As `swipe`, with composed touch events (as the browser sends them), on
+ * an element in a shadow root.
+ */
+function composedSwipe(
+  target: Element,
+  [dx, dy]: [number, number],
+  steps = 6,
+): boolean[] {
+  const rect = target.getBoundingClientRect();
+  let x = (rect.left + rect.right) / 2;
+  let y = (rect.top + rect.bottom) / 2;
+  const send = (type: string) => {
+    const touch = new Touch({
+      identifier: 1,
+      target,
+      clientX: x,
+      clientY: y,
+    });
+    const down = type !== 'touchend';
+    const event = new TouchEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      touches: down ? [touch] : [],
+      targetTouches: down ? [touch] : [],
+      changedTouches: [touch],
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  send('touchstart');
+  const cancelled: boolean[] = [];
+  for (let i = 0; i < steps; i++) {
+    x += dx * STEP;
+    y += dy * STEP;
+    cancelled.push(send('touchmove'));
+  }
+  send('touchend');
+  return cancelled;
+}
+
 /** A wheel on `target`; returns whether it was cancelled. */
-function wheel(target: HTMLElement, deltaY: number): boolean {
+function wheel(
+  target: HTMLElement,
+  deltaY: number,
+  options: WheelEventInit = {},
+): boolean {
   const event = new WheelEvent('wheel', {
     bubbles: true,
     cancelable: true,
     deltaY,
+    ...options,
   });
   target.dispatchEvent(event);
   return event.defaultPrevented;
@@ -176,6 +360,18 @@ function wheel(target: HTMLElement, deltaY: number): boolean {
 
 const UP: [number, number] = [0, -1];
 const DOWN: [number, number] = [0, 1];
+const LEFT: [number, number] = [-1, 0];
+const RIGHT: [number, number] = [1, 0];
+
+/** The elements that handle their own touch gestures (review B1 of #148). */
+const CONTROLS = [
+  'range',
+  'select',
+  'textarea',
+  'contenteditable',
+  'draggable',
+  'touch-action-none',
+] as const;
 
 /** A list in the middle of its scroll range: it scrolls both ways. */
 function scrollBox(): HTMLElement {
@@ -277,6 +473,98 @@ module(
             assert.false(wheel(box, 40), 'it scrolls the other way');
           });
 
+          if (placement === 'bottom') {
+            for (const control of CONTROLS) {
+              test(`${name}: a swipe on a ${control} is left to it`, async function (assert) {
+                await setup(base);
+                const element = el(`[data-test-control="${control}"]`);
+                for (const [label, way] of [
+                  ['left', LEFT],
+                  ['right', RIGHT],
+                ] as const) {
+                  assert.strictEqual(
+                    swipe(element, way).filter(Boolean).length,
+                    0,
+                    `${label}: no touchmove cancelled`,
+                  );
+                }
+              });
+            }
+
+            test(`${name}: a horizontal scroller in the nested drawer scrolls`, async function (assert) {
+              await setup(base);
+              const wide = el('[data-test-inner-wide]');
+              assert.strictEqual(
+                swipe(wide, LEFT).filter(Boolean).length,
+                0,
+                'left: it can scroll, no touchmove cancelled',
+              );
+              assert.true(
+                swipe(wide, RIGHT)[0],
+                'right: at its start, cancelled',
+              );
+            });
+
+            test(`${name}: a scroller in a shadow root in the nested drawer scrolls`, async function (assert) {
+              await setup(base);
+              const scroller = el('[data-test-inner-shadow]').shadowRoot!
+                .firstElementChild!;
+              assert.strictEqual(
+                composedSwipe(scroller, LEFT).filter(Boolean).length,
+                0,
+                'left: it can scroll, no touchmove cancelled',
+              );
+              assert.true(
+                composedSwipe(scroller, RIGHT)[0],
+                'right: at its start, cancelled',
+              );
+            });
+          }
+
+          test(`${name}: the direction is decided after the slop, from the start`, async function (assert) {
+            await setup(base);
+            const box = scrollBox();
+            // A first step that is a little sideways, then up: the list
+            // scrolls.
+            assert.deepEqual(
+              moves(box, [
+                [3, -2],
+                [0, -4],
+                [-1, -4],
+                [0, -4],
+              ]),
+              [false, false, false, false],
+              'no touchmove cancelled',
+            );
+          });
+
+          if (modal) {
+            test(`${name}: a multi-touch gesture on the nested backdrop is left alone`, async function (assert) {
+              await setup(base);
+              const backdrop = el(
+                '[data-test-inner] > .mobile-drawer__backdrop',
+              );
+              assert.deepEqual(
+                moves(
+                  backdrop,
+                  [
+                    [0, -4],
+                    [0, -4],
+                    [0, -4],
+                  ],
+                  {
+                    resting: true,
+                  },
+                ),
+                [false, false, false],
+              );
+              assert.false(
+                wheel(backdrop, 40, { ctrlKey: true }),
+                'a pinch-zoom wheel (Ctrl) is not cancelled',
+              );
+            });
+          }
+
           test(`${name}, inner @handleOnly: a swipe on nested content that can't scroll scrolls nothing`, async function (assert) {
             await setup({ ...base, innerHandleOnly: true });
             const content = el('[data-test-inner-static]');
@@ -301,5 +589,48 @@ module(
       assert.strictEqual(swipe(content, UP).filter(Boolean).length, 0, 'swipe');
       assert.false(wheel(content, 40), 'wheel');
     });
+
+    test('the portal listeners are removed with the nested drawer', async function (assert) {
+      const state = await setup({ mode: 'portal' });
+      const portal = el('.mobile-drawer-nested');
+      const removed: string[] = [];
+      const remove = portal.removeEventListener.bind(portal);
+      portal.removeEventListener = (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | EventListenerOptions,
+      ) => {
+        removed.push(type);
+        remove(type, listener, options);
+      };
+      state.nestedShown = false;
+      await settled();
+      clock.runUntilIdle();
+      await settled();
+      for (const type of ['touchstart', 'touchmove', 'touchend', 'wheel']) {
+        assert.true(removed.includes(type), `${type} removed`);
+      }
+    });
+
+    for (const mode of ['dom', 'portal'] as const) {
+      test(`three levels (${mode === 'dom' ? 'each in the tray of the one around it' : 'each in Nested'}): a gesture in the innermost drawer scrolls only it`, async function (assert) {
+        const state = new ThreeLevels();
+        state.mode = mode;
+        await renderThreeLevels(state);
+        clock.runUntilIdle();
+        await settled();
+        const backdrop = el('[data-test-c] > .mobile-drawer__backdrop');
+        assert.true(swipe(backdrop, UP)[0], 'its backdrop: cancelled');
+        assert.true(wheel(backdrop, 40), 'a wheel on its backdrop: cancelled');
+        const box = el('[data-test-c-box]');
+        box.scrollTop = 100;
+        assert.strictEqual(
+          swipe(box, UP).filter(Boolean).length,
+          0,
+          'its list scrolls',
+        );
+        assert.false(wheel(box, 40), 'a wheel on its list scrolls it');
+      });
+    }
   },
 );
