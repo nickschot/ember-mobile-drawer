@@ -1,6 +1,6 @@
 {
   "name": "ember-mobile-drawer",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A gesture-enabled drawer component for Ember.",
   "keywords": [
     "ember-addon",
