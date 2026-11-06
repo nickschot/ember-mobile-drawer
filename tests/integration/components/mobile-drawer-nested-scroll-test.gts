@@ -101,6 +101,11 @@ const InnerContent = <template>
     <div contenteditable="true" data-test-control="contenteditable">Edit</div>
     <div draggable="true" data-test-control="draggable">Drag</div>
     <div style={{noTouchStyle}} data-test-control="touch-action-none">Draw</div>
+    <input type="checkbox" aria-label="On" data-test-plain="checkbox" />
+    <input type="button" value="Go" aria-label="Go" data-test-plain="button" />
+    <fieldset disabled>
+      <input type="range" aria-label="Off" data-test-plain="disabled-range" />
+    </fieldset>
   </div>
 </template>;
 
@@ -517,6 +522,39 @@ module(
               assert.true(
                 composedSwipe(scroller, RIGHT)[0],
                 'right: at its start, cancelled',
+              );
+            });
+          }
+
+          if (placement === 'right') {
+            // Vertical swipes: across the side drawer's axis, so its own
+            // drag source leaves them alone (review B1 of #148, round 2).
+            for (const kind of [
+              'checkbox',
+              'button',
+              'disabled-range',
+            ] as const) {
+              test(`${name}: a vertical swipe on a ${kind} input is cancelled`, async function (assert) {
+                await setup(base);
+                const element = el(`[data-test-plain="${kind}"]`);
+                assert.true(
+                  swipe(element, UP).every(Boolean),
+                  'up: every touchmove cancelled',
+                );
+                assert.true(
+                  swipe(element, DOWN).every(Boolean),
+                  'down: every touchmove cancelled',
+                );
+              });
+            }
+
+            test(`${name}: a vertical swipe on an enabled range input is left to it`, async function (assert) {
+              await setup(base);
+              const range = el('[data-test-control="range"]');
+              assert.strictEqual(
+                swipe(range, UP).filter(Boolean).length,
+                0,
+                'no touchmove cancelled',
               );
             });
           }

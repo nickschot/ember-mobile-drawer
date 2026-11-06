@@ -694,10 +694,12 @@ function isTextField(element: Element): boolean {
 /**
  * Whether `element` handles its own touch gestures, so a swipe that starts
  * on it in a nested drawer is never cancelled (see `#onNestedTouchMove`):
- * an enabled form control (a range slider, a text field, a select), an
+ * an enabled text field (see `isTextField`), range slider or select, an
  * editable element, a media element with controls, an element the app
  * made `draggable="true"`, or one with `touch-action: none` (e.g. a
  * drawing canvas or a map, which handles every gesture on it in script).
+ * Not other inputs (a checkbox, a button): a swipe on them is a swipe on
+ * the drawer. `:disabled` also matches a control in a disabled fieldset.
  */
 function handlesOwnGesture(
   element: Element,
@@ -708,7 +710,12 @@ function handlesOwnGesture(
     element instanceof HTMLSelectElement ||
     element instanceof HTMLTextAreaElement
   ) {
-    return !element.disabled;
+    if (element.matches(':disabled')) return false;
+    return (
+      !(element instanceof HTMLInputElement) ||
+      element.type === 'range' ||
+      isTextField(element)
+    );
   }
   if (element instanceof HTMLMediaElement) return element.controls;
   if (element instanceof HTMLElement && element.isContentEditable) return true;
