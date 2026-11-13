@@ -136,16 +136,10 @@ function restorePinned(): void {
  * that is what shows the field (the #71 lock gets the same scroll, see
  * #116). Thus while the keyboard is open, the scroll stays: scrolling it back
  * hid the field and made the sheet jump. Any other scroll of the page is
- * undone at once. When the keyboard closes, the page goes back to its
- * position (see `onViewportResize`).
+ * undone at once. Also on a `resize` of the visual viewport: when the
+ * keyboard closes, the page goes back to its position.
  */
-const onScroll = (): void => {
-  if (!pinned || keyboardOpen()) return;
-  restorePinned();
-};
-
-/** The keyboard closed: put the page back where it was. */
-const onViewportResize = (): void => {
+const onViewportChange = (): void => {
   if (!pinned || keyboardOpen()) return;
   restorePinned();
 };
@@ -265,8 +259,8 @@ function lock(options: LockOptions): Saved {
     html.style.overscrollBehavior = 'none';
     body.style.overscrollBehavior = 'none';
     pinned = { x, y };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.visualViewport?.addEventListener('resize', onViewportResize);
+    window.addEventListener('scroll', onViewportChange, { passive: true });
+    window.visualViewport?.addEventListener('resize', onViewportChange);
     document.addEventListener('focusout', onFocusOut);
     document.addEventListener('touchstart', onTouchStart, { passive: true });
     document.addEventListener('touchmove', onTouchMoveOverflow, {
@@ -294,8 +288,8 @@ function unlock(state: Saved): void {
   body.style.paddingRight = state.bodyPaddingRight;
   const { position, overflow } = state;
   if (overflow) {
-    window.removeEventListener('scroll', onScroll);
-    window.visualViewport?.removeEventListener('resize', onViewportResize);
+    window.removeEventListener('scroll', onViewportChange);
+    window.visualViewport?.removeEventListener('resize', onViewportChange);
     document.removeEventListener('focusout', onFocusOut);
     document.removeEventListener('touchstart', onTouchStart);
     document.removeEventListener('touchmove', onTouchMoveOverflow);
