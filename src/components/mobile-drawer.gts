@@ -2252,13 +2252,27 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       }
     }
     if (!lock) return;
+    this.#lockContainers(
+      tray,
+      tray.querySelectorAll<HTMLElement>(`[${SCROLL_ATTRIBUTE}]`),
+    );
+  }
+
+  /**
+   * Locks the tray, the content in the header mode (it is the scroll
+   * container then) and the elements of `marked` that are marked scroll
+   * containers (`data-mobile-drawer-scroll`) of this tray, not of a nested
+   * drawer's. See `#lockScroll`.
+   */
+  #lockContainers(tray: HTMLElement, marked: Iterable<Element>): void {
     this.#lockScroll(tray);
-    // In the header mode the content is the scroll container.
     if (this.#header) this.#lockScroll(this.#content!);
-    for (const element of tray.querySelectorAll<HTMLElement>(
-      `[${SCROLL_ATTRIBUTE}]`,
-    )) {
-      if (element.closest('.mobile-drawer__tray') === tray) {
+    for (const element of marked) {
+      if (
+        element instanceof HTMLElement &&
+        element.hasAttribute(SCROLL_ATTRIBUTE) &&
+        element.closest('.mobile-drawer__tray') === tray
+      ) {
         this.#lockScroll(element);
       }
     }
@@ -3331,21 +3345,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!tray || !this.#scrollLockProperty || !(target instanceof Element)) {
       return;
     }
-    this.#lockScroll(tray);
-    if (this.#header) this.#lockScroll(this.#content!);
+    const between: Element[] = [];
     for (
       let element: Element | null = target;
       element && element !== tray && tray.contains(element);
       element = element.parentElement
     ) {
-      if (
-        element instanceof HTMLElement &&
-        element.hasAttribute(SCROLL_ATTRIBUTE) &&
-        element.closest('.mobile-drawer__tray') === tray
-      ) {
-        this.#lockScroll(element);
-      }
+      between.push(element);
     }
+    this.#lockContainers(tray, between);
   };
 
   /**
