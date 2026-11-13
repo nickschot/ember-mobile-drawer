@@ -975,6 +975,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #pageDim?: PageDim;
   /** Removes the listener for a change of the scroll lock. */
   #offLockChange?: () => void;
+  /** Removes the listeners that `hooks.install` adds. */
+  #listeners?: AbortController;
+  /** Removes the document listeners for the backdrop pointer. */
+  #backdropListeners?: AbortController;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
   #layout?: Layout;
@@ -1114,7 +1118,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * set while the drawer rests at a peek: a smallest snap point above 0 keeps
    * the drawer, and the drawers inside it, visible. Also set until the
    * drawer is first measured. Updated with `#open` by `#syncOpen`, see
-   * `#insideClosedDrawer`.
+   * `#applyOpen`.
    */
   #hidden = true;
   /**
@@ -1364,11 +1368,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         onUpdate: ({ value }) => this.#render(value),
       });
       this.#placement = this.placement;
-      root.addEventListener('keydown', this.#onKeyDown);
-      root.addEventListener('scroll', this.#onRootScroll, { passive: true });
-      root.addEventListener('focusout', this.#onRootFocusOut);
+      this.#listeners = new AbortController();
+      const { signal } = this.#listeners;
+      root.addEventListener('keydown', this.#onKeyDown, { signal });
+      root.addEventListener('scroll', this.#onRootScroll, {
+        passive: true,
+        signal,
+      });
+      root.addEventListener('focusout', this.#onRootFocusOut, { signal });
       this.#sheet.addEventListener('scroll', this.#onRootScroll, {
         passive: true,
+        signal,
       });
       mountedDrawers.add(this);
       registerDrawer({
@@ -1401,22 +1411,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#offLockChange = onLockChange(() => this.#endStatusBar());
       const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
-        tray.addEventListener(
-          type,
-          this.#onTrayInput,
-          type === 'wheel' ? CAPTURE_ACTIVE : CAPTURE_PASSIVE,
-        );
+        tray.addEventListener(type, this.#onTrayInput, {
+          ...(type === 'wheel' ? CAPTURE_ACTIVE : CAPTURE_PASSIVE),
+          signal,
+        });
       }
-      tray.addEventListener('focusin', this.#onTrayFocusIn);
+      tray.addEventListener('focusin', this.#onTrayFocusIn, { signal });
       tray.addEventListener('touchstart', this.#onTrayTouchStart, {
         passive: true,
+        signal,
       });
       // Not passive: see `#onTrayTouchMove`.
       tray.addEventListener('touchmove', this.#onTrayTouchMove, {
         passive: false,
+        signal,
       });
-      tray.addEventListener('touchend', this.#onTrayTouchEnd);
-      tray.addEventListener('touchcancel', this.#onTrayTouchEnd);
+      tray.addEventListener('touchend', this.#onTrayTouchEnd, { signal });
+      tray.addEventListener('touchcancel', this.#onTrayTouchEnd, { signal });
       this.#listenNested(tray, true);
       this.#keyboardFill = new KeyboardFill({
         root,
@@ -1481,15 +1492,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     destroy: () => {
       this.#destroyed = true;
+      this.#listeners?.abort();
+      this.#listeners = undefined;
       const tray = this.#tray;
-      for (const type of TRAY_INPUT_EVENTS) {
-        tray?.removeEventListener(type, this.#onTrayInput, true);
-      }
-      tray?.removeEventListener('focusin', this.#onTrayFocusIn);
-      tray?.removeEventListener('touchstart', this.#onTrayTouchStart);
-      tray?.removeEventListener('touchmove', this.#onTrayTouchMove);
-      tray?.removeEventListener('touchend', this.#onTrayTouchEnd);
-      tray?.removeEventListener('touchcancel', this.#onTrayTouchEnd);
       if (tray) this.#listenNested(tray, false);
       for (const portal of this.#portals) this.#listenNested(portal, false);
       this.#lockedTouch = undefined;
@@ -1506,10 +1511,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#endSwallowClick();
       this.#syncScrollLock();
       this.onTrayScrollEnd();
-      this.#root?.removeEventListener('keydown', this.#onKeyDown);
-      this.#root?.removeEventListener('scroll', this.#onRootScroll);
-      this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
-      this.#sheet?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
       if (this.#root) unregisterDrawer(this.#root);
       MobileDrawer.#syncNested();
@@ -2382,15 +2383,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       y: event.clientY,
       moved: false,
     };
+    this.#backdropListeners = new AbortController();
+    const { signal } = this.#backdropListeners;
     document.addEventListener('pointermove', this.#onBackdropPointerMove, {
       capture: true,
       passive: true,
+      signal,
     });
     document.addEventListener('pointerup', this.#onBackdropPointerUp, {
       capture: true,
+      signal,
     });
     document.addEventListener('pointercancel', this.#onBackdropPointerCancel, {
       capture: true,
+      signal,
     });
   };
 
@@ -2432,17 +2438,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   #removeBackdropListeners(): void {
-    document.removeEventListener('pointermove', this.#onBackdropPointerMove, {
-      capture: true,
-    });
-    document.removeEventListener('pointerup', this.#onBackdropPointerUp, {
-      capture: true,
-    });
-    document.removeEventListener(
-      'pointercancel',
-      this.#onBackdropPointerCancel,
-      { capture: true },
-    );
+    this.#backdropListeners?.abort();
+    this.#backdropListeners = undefined;
   }
 
   #endBackdropPointer(): void {
@@ -2538,11 +2535,21 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * Turns the modal behaviour on or off to match `#open` and `@modal`, and
    * moves focus: into a modal drawer that opens, back to where it came from
-   * when the drawer closes.
+   * when the drawer closes. Then calls `@onOpen` or `@onClose` when `#open`
+   * differs from what was last reported, so a drawer that opens and closes
+   * again before this runs reports neither.
+   *
+   * The modal behaviour is off while the drawer is inside another drawer
+   * that is closed or closing, whose `data-closed` hides it (or soon will),
+   * so it never keeps the page inert and locked from inside a hidden
+   * drawer. It comes back when that drawer opens again. A drawer that rests
+   * at a peek (a smallest snap point above 0) is visible, so it does not
+   * count, see `#hidden`.
    */
   #applyOpen(): void {
     if (this.#destroyed) return;
-    const insideClosed = this.#insideClosedDrawer();
+    const root = this.#root;
+    const insideClosed = !!root && this.#hiddenByDrawer(root);
     const modal =
       this.#open && this.isModal && !insideClosed && !this.#openedByFocus;
     const wasModal = this.#releaseModal !== undefined;
@@ -2560,15 +2567,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#closedWithFocusInside = undefined;
       this.#returnFocusAfterClose(focusInside, wasModal);
     }
-    this.#reportOpen();
-  }
-
-  /**
-   * Calls `@onOpen` or `@onClose` when `#open` differs from what was last
-   * reported. Runs in `#applyOpen`, so a drawer that opens and closes again
-   * before it runs reports neither.
-   */
-  #reportOpen(): void {
     const open = this.#open;
     if (open === this.#reportedOpen) return;
     this.#reportedOpen = open;
@@ -2868,19 +2866,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       path.push(node);
     }
     return path;
-  }
-
-  /**
-   * Whether the drawer is inside another drawer that is closed or closing,
-   * whose `data-closed` hides it (or soon will): its modal behaviour is then
-   * off, so it never keeps the page inert and locked from inside a hidden
-   * drawer. It comes back when that drawer opens again. A drawer that rests
-   * at a peek (a smallest snap point above 0) is visible, so it does not
-   * count, see `#hidden`.
-   */
-  #insideClosedDrawer(): boolean {
-    const root = this.#root;
-    return !!root && this.#hiddenByDrawer(root);
   }
 
   /**
