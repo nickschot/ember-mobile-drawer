@@ -60,6 +60,12 @@ import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
 import Grabber, { type GrabberOwner } from '../-private/grabber.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
 import { KeyboardFill } from '../-private/keyboard-fill.ts';
+import {
+  isEditable,
+  isInactiveTextField,
+  isTextField,
+  isTypingField,
+} from '../-private/fields.ts';
 import type { MobileDrawerSpring } from '../springs.ts';
 
 import type {
@@ -610,85 +616,6 @@ function measureLength(
       : 0;
   const length = px(vertical ? style.height : style.width) + extra;
   return Number.isFinite(length) ? { length, extra } : undefined;
-}
-
-/** `<input>` types that take no typed text, so open no on-screen keyboard. */
-const NON_TEXT_INPUTS = new Set([
-  'button',
-  'checkbox',
-  'color',
-  'file',
-  'hidden',
-  'image',
-  'radio',
-  'range',
-  'reset',
-  'submit',
-]);
-
-/**
- * Whether `element` is a field the user edits: a text input, a textarea, a
- * select, or contenteditable content. Focus on one of them can open an
- * on-screen keyboard or picker, and the browser then scrolls the field into
- * view. An iframe counts too: the element focused inside it is unknown. A
- * `readonly` or `disabled` text field opens no keyboard, so it doesn't count.
- */
-function isEditable(element: Element): boolean {
-  if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement
-  ) {
-    if (element.readOnly || element.disabled) return false;
-    return (
-      element instanceof HTMLTextAreaElement ||
-      !NON_TEXT_INPUTS.has(element.type)
-    );
-  }
-  return (
-    element instanceof HTMLSelectElement ||
-    element instanceof HTMLIFrameElement ||
-    (element instanceof HTMLElement && element.isContentEditable)
-  );
-}
-
-/**
- * Whether `element` is a text `<input>` or a `<textarea>` that is `readonly`
- * or `disabled`: it opens no keyboard, see `isEditable`.
- */
-function isInactiveTextField(element: Element): boolean {
-  return (
-    ((element instanceof HTMLInputElement &&
-      !NON_TEXT_INPUTS.has(element.type)) ||
-      element instanceof HTMLTextAreaElement) &&
-    (element.readOnly || element.disabled)
-  );
-}
-
-/**
- * Whether `element` is a field the user types in: a text `<input>` or a
- * `<textarea>` that isn't `readonly` or `disabled`, or contenteditable
- * content. Focus on one of them opens an on-screen keyboard, also after a
- * tap. Unlike `isEditable`, not a select or an iframe.
- */
-function isTypingField(element: Element): boolean {
-  return (
-    isEditable(element) &&
-    !(element instanceof HTMLSelectElement) &&
-    !(element instanceof HTMLIFrameElement)
-  );
-}
-
-/**
- * Whether `element` is a field that takes text: a text `<input>` (not
- * `disabled`), a `<textarea>` or contenteditable content. Unlike
- * `isEditable`, `readonly` fields count: their text can still be selected.
- */
-function isTextField(element: Element): boolean {
-  if (element instanceof HTMLInputElement) {
-    return !element.disabled && !NON_TEXT_INPUTS.has(element.type);
-  }
-  if (element instanceof HTMLTextAreaElement) return !element.disabled;
-  return element instanceof HTMLElement && element.isContentEditable;
 }
 
 /**

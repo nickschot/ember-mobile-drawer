@@ -38,6 +38,7 @@
  */
 
 import { drawerEnvironment } from '../environment.ts';
+import { containsTypingField } from '../fields.ts';
 
 interface Saved {
   htmlOverflow: string;
@@ -210,23 +211,9 @@ const onTouchMoveOverflow = (event: TouchEvent): void => {
   if (!allow && event.cancelable) event.preventDefault();
 };
 
-/** `<input>` types that open no on-screen keyboard. */
-const NON_TEXT_INPUTS = new Set([
-  'button',
-  'checkbox',
-  'color',
-  'file',
-  'hidden',
-  'image',
-  'radio',
-  'range',
-  'reset',
-  'submit',
-]);
-
 /**
  * Whether `element` contains a field the user types in (it opens the
- * on-screen keyboard).
+ * on-screen keyboard), see `containsTypingField`.
  *
  * The overflow lock can't give the keyboard behaviour of the
  * fixed `<body>`. iOS shows a focused field by scrolling the visual viewport
@@ -243,26 +230,7 @@ const NON_TEXT_INPUTS = new Set([
  * drawer with such a field gets the fixed `<body>` from the start; the
  * status bar is then one solid colour (#113).
  */
-function hasTypingField(element: HTMLElement): boolean {
-  for (const field of element.querySelectorAll<HTMLElement>(
-    'input, textarea, [contenteditable]',
-  )) {
-    if (field instanceof HTMLInputElement) {
-      if (
-        !NON_TEXT_INPUTS.has(field.type) &&
-        !field.disabled &&
-        !field.readOnly
-      ) {
-        return true;
-      }
-    } else if (field instanceof HTMLTextAreaElement) {
-      if (!field.disabled && !field.readOnly) return true;
-    } else if (field.isContentEditable) {
-      return true;
-    }
-  }
-  return false;
-}
+const hasTypingField = containsTypingField;
 
 function lock(options: LockOptions): Saved {
   const html = document.documentElement;
