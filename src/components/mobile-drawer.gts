@@ -64,6 +64,7 @@ import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
 import Grabber, { type GrabberOwner } from '../-private/grabber.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
 import { KeyboardFill } from '../-private/keyboard-fill.ts';
+import { InlineOverrides } from '../-private/inline-style.ts';
 import {
   isEditable,
   isInactiveTextField,
@@ -180,10 +181,10 @@ const CLICK_MATCH = 2;
  * `#activateModal`). Only the last one handles Escape and Tab on the
  * document.
  */
-const modalStack: object[] = [];
+const modalStack: MobileDrawer[] = [];
 
 /** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
-const mountedDrawers = new Set<object>();
+const mountedDrawers = new Set<MobileDrawer>();
 
 /** The kind of input the user gave last, see `trackInput`. */
 type InputType = 'keyboard' | 'pointer';
@@ -282,6 +283,42 @@ function focusInputOf(element: Element): InputType {
   }
 }
 
+/** How far (px) `element` can scroll along the axis in all. */
+function scrollRange(element: Element, vertical: boolean): number {
+  return vertical
+    ? element.scrollHeight - element.clientHeight
+    : element.scrollWidth - element.clientWidth;
+}
+
+/**
+ * The scroll range of `element` along the axis: the smallest and largest
+ * scroll position, and the position now. Horizontal right-to-left positions
+ * run from `-range` to `0`; `style` gives the direction.
+ */
+function scrollBounds(
+  element: Element,
+  vertical: boolean,
+  style: { direction: string },
+): { range: number; min: number; max: number; position: number } {
+  const range = scrollRange(element, vertical);
+  const rtl = !vertical && style.direction === 'rtl';
+  return {
+    range,
+    min: rtl ? -range : 0,
+    max: rtl ? 0 : range,
+    position: vertical ? element.scrollTop : element.scrollLeft,
+  };
+}
+
+/** Whether `style` lets the user scroll along the axis. */
+function scrollsAlong(
+  style: { overflowX: string; overflowY: string },
+  vertical: boolean,
+): boolean {
+  const overflow = vertical ? style.overflowY : style.overflowX;
+  return overflow === 'auto' || overflow === 'scroll';
+}
+
 /**
  * Whether `element` can scroll along the axis in the direction a finger that
  * moved `movement` px (positive: down or right) pushes its content.
@@ -292,18 +329,10 @@ function canScroll(
   movement: number,
 ): boolean {
   const style = getComputedStyle(element);
-  const overflow = vertical ? style.overflowY : style.overflowX;
-  if (overflow !== 'auto' && overflow !== 'scroll') return false;
-  const range = vertical
-    ? element.scrollHeight - element.clientHeight
-    : element.scrollWidth - element.clientWidth;
+  if (!scrollsAlong(style, vertical)) return false;
+  const { range, min, max, position } = scrollBounds(element, vertical, style);
   if (!(range > EPSILON)) return false;
-  // Horizontal right-to-left scroll positions run from -range to 0.
-  const rtl = !vertical && style.direction === 'rtl';
-  const min = rtl ? -range : 0;
-  const max = rtl ? 0 : range;
   // iOS reports positions past the ends while bouncing; those count as ends.
-  const position = vertical ? element.scrollTop : element.scrollLeft;
   // A finger moving down (right) reveals what is above (left of) the view,
   // so the position has to be able to decrease; moving up (left), increase.
   return movement > 0 ? position > min + EPSILON : position < max - EPSILON;
@@ -315,13 +344,12 @@ function canScroll(
  * towards than the other end.
  */
 function nearEnd(element: Element, vertical: boolean, way: number): boolean {
-  const range = vertical
-    ? element.scrollHeight - element.clientHeight
-    : element.scrollWidth - element.clientWidth;
-  if (!(range > EPSILON)) return true;
-  const rtl = !vertical && getComputedStyle(element).direction === 'rtl';
-  const min = rtl ? -range : 0;
-  const position = vertical ? element.scrollTop : element.scrollLeft;
+  if (!(scrollRange(element, vertical) > EPSILON)) return true;
+  const { range, min, position } = scrollBounds(
+    element,
+    vertical,
+    getComputedStyle(element),
+  );
   const fromMin = position - min;
   // A finger moving down (right) pushes the content towards `min`.
   return way > 0 ? fromMin <= range / 2 : fromMin >= range / 2;
@@ -932,9 +960,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * The pinned elements while bouncing (see `PINNED_ATTRIBUTE`), with their
    * inline `translate` from before the bounce, put back after.
    */
-  #pinned = new Map<HTMLElement, { value: string; priority: string }>();
+  #pinned = new InlineOverrides();
   /** The content's inline `will-change` before a bounce, put back after. */
-  #contentWillChange?: { value: string; priority: string };
+  #contentWillChange = new InlineOverrides();
   #backdrop?: HTMLElement;
   /** The backdrop's `.mobile-drawer__backdrop-tint` sibling, if any. */
   #backdropTint?: HTMLElement;
@@ -947,6 +975,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #pageDim?: PageDim;
   /** Removes the listener for a change of the scroll lock. */
   #offLockChange?: () => void;
+  /** Removes the listeners that `hooks.install` adds. */
+  #listeners?: AbortController;
+  /** Removes the document listeners for the backdrop pointer. */
+  #backdropListeners?: AbortController;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
   #layout?: Layout;
@@ -1018,20 +1050,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * The elements whose scrolling along the axis is locked, with the inline
    * value of the overflow property they had before. See `#syncScrollLock`.
    */
-  #scrollLock = new Map<
-    HTMLElement,
-    { property: string; value: string; priority: string }
-  >();
+  #scrollLock = new InlineOverrides();
   /** The overflow property the lock sets, while locked. */
   #scrollLockProperty?: string;
   /**
    * The elements with an inline `overscroll-behavior` during a scroll, with
    * the inline value they had before, see `#setOverscroll`.
    */
-  #overscroll = new Map<
-    HTMLElement,
-    { property: string; value: string; priority: string }
-  >();
+  #overscroll = new InlineOverrides();
   /**
    * With `@handleOnly`, the touch on the tray that started while scrolling
    * was locked, see `#onTrayTouchMove`. `cancels` is `undefined` until the
@@ -1092,7 +1118,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * set while the drawer rests at a peek: a smallest snap point above 0 keeps
    * the drawer, and the drawers inside it, visible. Also set until the
    * drawer is first measured. Updated with `#open` by `#syncOpen`, see
-   * `#insideClosedDrawer`.
+   * `#applyOpen`.
    */
   #hidden = true;
   /**
@@ -1342,11 +1368,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         onUpdate: ({ value }) => this.#render(value),
       });
       this.#placement = this.placement;
-      root.addEventListener('keydown', this.#onKeyDown);
-      root.addEventListener('scroll', this.#onRootScroll, { passive: true });
-      root.addEventListener('focusout', this.#onRootFocusOut);
+      this.#listeners = new AbortController();
+      const { signal } = this.#listeners;
+      root.addEventListener('keydown', this.#onKeyDown, { signal });
+      root.addEventListener('scroll', this.#onRootScroll, {
+        passive: true,
+        signal,
+      });
+      root.addEventListener('focusout', this.#onRootFocusOut, { signal });
       this.#sheet.addEventListener('scroll', this.#onRootScroll, {
         passive: true,
+        signal,
       });
       mountedDrawers.add(this);
       registerDrawer({
@@ -1379,22 +1411,23 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#offLockChange = onLockChange(() => this.#endStatusBar());
       const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
-        tray.addEventListener(
-          type,
-          this.#onTrayInput,
-          type === 'wheel' ? CAPTURE_ACTIVE : CAPTURE_PASSIVE,
-        );
+        tray.addEventListener(type, this.#onTrayInput, {
+          ...(type === 'wheel' ? CAPTURE_ACTIVE : CAPTURE_PASSIVE),
+          signal,
+        });
       }
-      tray.addEventListener('focusin', this.#onTrayFocusIn);
+      tray.addEventListener('focusin', this.#onTrayFocusIn, { signal });
       tray.addEventListener('touchstart', this.#onTrayTouchStart, {
         passive: true,
+        signal,
       });
       // Not passive: see `#onTrayTouchMove`.
       tray.addEventListener('touchmove', this.#onTrayTouchMove, {
         passive: false,
+        signal,
       });
-      tray.addEventListener('touchend', this.#onTrayTouchEnd);
-      tray.addEventListener('touchcancel', this.#onTrayTouchEnd);
+      tray.addEventListener('touchend', this.#onTrayTouchEnd, { signal });
+      tray.addEventListener('touchcancel', this.#onTrayTouchEnd, { signal });
       this.#listenNested(tray, true);
       this.#keyboardFill = new KeyboardFill({
         root,
@@ -1459,15 +1492,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     destroy: () => {
       this.#destroyed = true;
+      this.#listeners?.abort();
+      this.#listeners = undefined;
       const tray = this.#tray;
-      for (const type of TRAY_INPUT_EVENTS) {
-        tray?.removeEventListener(type, this.#onTrayInput, true);
-      }
-      tray?.removeEventListener('focusin', this.#onTrayFocusIn);
-      tray?.removeEventListener('touchstart', this.#onTrayTouchStart);
-      tray?.removeEventListener('touchmove', this.#onTrayTouchMove);
-      tray?.removeEventListener('touchend', this.#onTrayTouchEnd);
-      tray?.removeEventListener('touchcancel', this.#onTrayTouchEnd);
       if (tray) this.#listenNested(tray, false);
       for (const portal of this.#portals) this.#listenNested(portal, false);
       this.#lockedTouch = undefined;
@@ -1484,10 +1511,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#endSwallowClick();
       this.#syncScrollLock();
       this.onTrayScrollEnd();
-      this.#root?.removeEventListener('keydown', this.#onKeyDown);
-      this.#root?.removeEventListener('scroll', this.#onRootScroll);
-      this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
-      this.#sheet?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
       if (this.#root) unregisterDrawer(this.#root);
       MobileDrawer.#syncNested();
@@ -1961,12 +1984,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // Past the tray's length the tray stays at its edge; the content moves
     // on inside it (see `#renderBounce`).
     const distance = Math.max(0, layout.trayLength - open);
-    const transform = {
-      bottom: `translate3d(0, ${distance}px, 0)`,
-      top: `translate3d(0, ${-distance}px, 0)`,
-      left: `translate3d(${-distance}px, 0, 0)`,
-      right: `translate3d(${distance}px, 0, 0)`,
-    }[this.placement];
+    // Away from the edge, against the opening direction.
+    const shift = -OPENING_DIRECTION[this.placement] * distance;
+    const transform =
+      this.axis === 'vertical'
+        ? `translate3d(0, ${shift}px, 0)`
+        : `translate3d(${shift}px, 0, 0)`;
 
     this.#tray!.style.transform = transform;
     this.#paintShadow(transform, distance, this.#sinkOf(open));
@@ -2164,41 +2187,24 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const content = this.#content;
     if (!content) return;
     const bouncing = bounce > 0;
-    const value = (b: number) =>
-      bouncing
-        ? {
-            bottom: `0px ${-b}px`,
-            top: `0px ${b}px`,
-            left: `${b}px 0px`,
-            right: `${-b}px 0px`,
-          }[this.placement]
-        : '';
+    const value = (b: number) => {
+      if (!bouncing) return '';
+      const shift = OPENING_DIRECTION[this.placement] * b;
+      return this.axis === 'vertical' ? `0px ${shift}px` : `${shift}px 0px`;
+    };
     if (bouncing !== this.#bouncing) {
       this.#bouncing = bouncing;
-      const { style } = content;
       if (bouncing) {
-        this.#contentWillChange = {
-          value: style.getPropertyValue('will-change'),
-          priority: style.getPropertyPriority('will-change'),
-        };
-        style.setProperty('will-change', 'translate');
+        this.#contentWillChange.set(content, 'will-change', 'translate');
         for (const element of content.querySelectorAll<HTMLElement>(
           `[${PINNED_ATTRIBUTE}]`,
         )) {
           if (element.closest('.mobile-drawer__content') !== content) continue;
-          this.#pinned.set(element, {
-            value: element.style.getPropertyValue('translate'),
-            priority: element.style.getPropertyPriority('translate'),
-          });
+          this.#pinned.save(element, 'translate');
         }
       } else {
-        const saved = this.#contentWillChange;
-        style.setProperty('will-change', saved?.value ?? '', saved?.priority);
-        this.#contentWillChange = undefined;
-        for (const [element, saved] of this.#pinned) {
-          element.style.setProperty('translate', saved.value, saved.priority);
-        }
-        this.#pinned.clear();
+        this.#contentWillChange.restoreAll();
+        this.#pinned.restoreAll();
       }
       this.#syncScrollLock();
     }
@@ -2248,17 +2254,33 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         // Removed from the page: nothing to put back.
         this.#scrollLock.delete(element);
       } else if (!lock || saved.property !== property) {
-        this.#unlockScroll(element);
+        // Puts back the inline value from before the lock, unless the app
+        // has set a value of its own since, which is then kept.
+        this.#scrollLock.restore(element, 'hidden');
       }
     }
     if (!lock) return;
+    this.#lockContainers(
+      tray,
+      tray.querySelectorAll<HTMLElement>(`[${SCROLL_ATTRIBUTE}]`),
+    );
+  }
+
+  /**
+   * Locks the tray, the content in the header mode (it is the scroll
+   * container then) and the elements of `marked` that are marked scroll
+   * containers (`data-mobile-drawer-scroll`) of this tray, not of a nested
+   * drawer's. See `#lockScroll`.
+   */
+  #lockContainers(tray: HTMLElement, marked: Iterable<Element>): void {
     this.#lockScroll(tray);
-    // In the header mode the content is the scroll container.
     if (this.#header) this.#lockScroll(this.#content!);
-    for (const element of tray.querySelectorAll<HTMLElement>(
-      `[${SCROLL_ATTRIBUTE}]`,
-    )) {
-      if (element.closest('.mobile-drawer__tray') === tray) {
+    for (const element of marked) {
+      if (
+        element instanceof HTMLElement &&
+        element.hasAttribute(SCROLL_ATTRIBUTE) &&
+        element.closest('.mobile-drawer__tray') === tray
+      ) {
         this.#lockScroll(element);
       }
     }
@@ -2273,30 +2295,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const property = this.#scrollLockProperty;
     if (!property) return;
     const { style } = element;
-    const value = style.getPropertyValue(property);
-    const priority = style.getPropertyPriority(property);
-    if (value === 'hidden' && !priority && this.#scrollLock.has(element)) {
+    if (
+      style.getPropertyValue(property) === 'hidden' &&
+      !style.getPropertyPriority(property) &&
+      this.#scrollLock.get(element)
+    ) {
       return;
     }
-    this.#scrollLock.set(element, { property, value, priority });
-    style.setProperty(property, 'hidden');
-  }
-
-  /**
-   * Puts back the inline value `element` had before it was locked, unless
-   * the app has set a value of its own since, which is then kept.
-   */
-  #unlockScroll(element: HTMLElement): void {
-    const saved = this.#scrollLock.get(element);
-    if (!saved) return;
-    this.#scrollLock.delete(element);
-    const { style } = element;
-    if (
-      style.getPropertyValue(saved.property) === 'hidden' &&
-      !style.getPropertyPriority(saved.property)
-    ) {
-      style.setProperty(saved.property, saved.value, saved.priority);
-    }
+    this.#scrollLock.set(element, property, 'hidden');
   }
 
   /**
@@ -2377,15 +2383,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       y: event.clientY,
       moved: false,
     };
+    this.#backdropListeners = new AbortController();
+    const { signal } = this.#backdropListeners;
     document.addEventListener('pointermove', this.#onBackdropPointerMove, {
       capture: true,
       passive: true,
+      signal,
     });
     document.addEventListener('pointerup', this.#onBackdropPointerUp, {
       capture: true,
+      signal,
     });
     document.addEventListener('pointercancel', this.#onBackdropPointerCancel, {
       capture: true,
+      signal,
     });
   };
 
@@ -2427,17 +2438,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   #removeBackdropListeners(): void {
-    document.removeEventListener('pointermove', this.#onBackdropPointerMove, {
-      capture: true,
-    });
-    document.removeEventListener('pointerup', this.#onBackdropPointerUp, {
-      capture: true,
-    });
-    document.removeEventListener(
-      'pointercancel',
-      this.#onBackdropPointerCancel,
-      { capture: true },
-    );
+    this.#backdropListeners?.abort();
+    this.#backdropListeners = undefined;
   }
 
   #endBackdropPointer(): void {
@@ -2533,11 +2535,21 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * Turns the modal behaviour on or off to match `#open` and `@modal`, and
    * moves focus: into a modal drawer that opens, back to where it came from
-   * when the drawer closes.
+   * when the drawer closes. Then calls `@onOpen` or `@onClose` when `#open`
+   * differs from what was last reported, so a drawer that opens and closes
+   * again before this runs reports neither.
+   *
+   * The modal behaviour is off while the drawer is inside another drawer
+   * that is closed or closing, whose `data-closed` hides it (or soon will),
+   * so it never keeps the page inert and locked from inside a hidden
+   * drawer. It comes back when that drawer opens again. A drawer that rests
+   * at a peek (a smallest snap point above 0) is visible, so it does not
+   * count, see `#hidden`.
    */
   #applyOpen(): void {
     if (this.#destroyed) return;
-    const insideClosed = this.#insideClosedDrawer();
+    const root = this.#root;
+    const insideClosed = !!root && this.#hiddenByDrawer(root);
     const modal =
       this.#open && this.isModal && !insideClosed && !this.#openedByFocus;
     const wasModal = this.#releaseModal !== undefined;
@@ -2555,15 +2567,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#closedWithFocusInside = undefined;
       this.#returnFocusAfterClose(focusInside, wasModal);
     }
-    this.#reportOpen();
-  }
-
-  /**
-   * Calls `@onOpen` or `@onClose` when `#open` differs from what was last
-   * reported. Runs in `#applyOpen`, so a drawer that opens and closes again
-   * before it runs reports neither.
-   */
-  #reportOpen(): void {
     const open = this.#open;
     if (open === this.#reportedOpen) return;
     this.#reportedOpen = open;
@@ -2594,7 +2597,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // tray with `Nested`): the nested drawer stays in front, so it keeps
     // Escape and the Tab wrap.
     const nested = modalStack.findIndex((other) =>
-      logicallyContains(root, (other as MobileDrawer).#root),
+      logicallyContains(root, other.#root),
     );
     modalStack.splice(nested === -1 ? modalStack.length : nested, 0, this);
     MobileDrawer.#syncNested();
@@ -2701,7 +2704,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     let root = this.#root!;
     for (;;) {
       const inner = root;
-      const outer = [...(mountedDrawers as Set<MobileDrawer>)].find(
+      const outer = [...mountedDrawers].find(
         (other) =>
           other.#root !== inner &&
           !!other.#tray &&
@@ -2729,7 +2732,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     queueMicrotask(() => {
       if (this.#destroyed || !this.#hidden) return;
       const root = this.#root!;
-      for (const other of mountedDrawers as Set<MobileDrawer>) {
+      for (const other of mountedDrawers) {
         const otherRoot = other.#root;
         if (
           other === this ||
@@ -2793,11 +2796,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   static #portalsQueued = false;
 
   static #applyPortals(): void {
-    for (const drawer of modalStack as MobileDrawer[]) {
+    for (const drawer of modalStack) {
       if (drawer.#releaseInert) drawer.#makeOutsideInert();
     }
     MobileDrawer.#syncNested();
-    for (const drawer of mountedDrawers as Set<MobileDrawer>) {
+    for (const drawer of mountedDrawers) {
       if (drawer.#portals.size > 0) drawer.#applyNested();
     }
   }
@@ -2866,24 +2869,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Whether the drawer is inside another drawer that is closed or closing,
-   * whose `data-closed` hides it (or soon will): its modal behaviour is then
-   * off, so it never keeps the page inert and locked from inside a hidden
-   * drawer. It comes back when that drawer opens again. A drawer that rests
-   * at a peek (a smallest snap point above 0) is visible, so it does not
-   * count, see `#hidden`.
-   */
-  #insideClosedDrawer(): boolean {
-    const root = this.#root;
-    return !!root && this.#hiddenByDrawer(root);
-  }
-
-  /**
    * Whether `element` is inside a drawer (other than this one) that is
    * closed or closing, see `#hidden`.
    */
   #hiddenByDrawer(element: Element): boolean {
-    for (const other of mountedDrawers as Set<MobileDrawer>) {
+    for (const other of mountedDrawers) {
       if (other !== this && other.#hidden && other.#contains(element)) {
         return true;
       }
@@ -2921,9 +2911,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * inserted or removed.
    */
   static #syncNested(): void {
-    const front = modalStack[modalStack.length - 1] as MobileDrawer | undefined;
+    const front = modalStack[modalStack.length - 1];
     const frontRoot = front ? front.#root : undefined;
-    for (const drawer of mountedDrawers as Set<MobileDrawer>) {
+    for (const drawer of mountedDrawers) {
       const root = drawer.#root;
       if (!root) continue;
       root.toggleAttribute(
@@ -2940,7 +2930,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #applyNested(): void {
     const root = this.#root;
     if (!root) return;
-    for (const other of mountedDrawers as Set<MobileDrawer>) {
+    for (const other of mountedDrawers) {
       if (
         other !== this &&
         other.#root &&
@@ -3190,9 +3180,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /** The tray's `onScrollEnd`: puts back the overscroll behaviour. */
   private onTrayScrollEnd = (): void => {
-    for (const element of [...this.#overscroll.keys()]) {
-      this.#setOverscroll(element, false);
-    }
+    this.#overscroll.restoreAll();
   };
 
   /**
@@ -3205,21 +3193,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.axis === 'vertical'
         ? 'overscroll-behavior-y'
         : 'overscroll-behavior-x';
-    const { style } = element;
-    const saved = this.#overscroll.get(element);
-    if (none) {
-      if (saved && saved.property === property) return;
-      if (saved) this.#setOverscroll(element, false);
-      this.#overscroll.set(element, {
-        property,
-        value: style.getPropertyValue(property),
-        priority: style.getPropertyPriority(property),
-      });
-      style.setProperty(property, 'none');
-    } else if (saved) {
-      this.#overscroll.delete(element);
-      style.setProperty(saved.property, saved.value, saved.priority);
-    }
+    if (none && this.#overscroll.get(element)?.property === property) return;
+    this.#overscroll.restore(element);
+    if (none) this.#overscroll.set(element, property, 'none');
   }
 
   /**
@@ -3331,21 +3307,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!tray || !this.#scrollLockProperty || !(target instanceof Element)) {
       return;
     }
-    this.#lockScroll(tray);
-    if (this.#header) this.#lockScroll(this.#content!);
+    const between: Element[] = [];
     for (
       let element: Element | null = target;
       element && element !== tray && tray.contains(element);
       element = element.parentElement
     ) {
-      if (
-        element instanceof HTMLElement &&
-        element.hasAttribute(SCROLL_ATTRIBUTE) &&
-        element.closest('.mobile-drawer__tray') === tray
-      ) {
-        this.#lockScroll(element);
-      }
+      between.push(element);
     }
+    this.#lockContainers(tray, between);
   };
 
   /**
@@ -4115,21 +4085,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // A finger moving towards open moves the position this way.
     const sign = -OPENING_DIRECTION[this.placement] as 1 | -1;
     for (const element of this.#scrollChain(drag.from)) {
-      const range = vertical
-        ? element.scrollHeight - element.clientHeight
-        : element.scrollWidth - element.clientWidth;
-      if (!(range > EPSILON)) continue;
+      if (!(scrollRange(element, vertical) > EPSILON)) continue;
       const style = this.#unlockedStyle(element);
-      const overflow = vertical ? style.overflowY : style.overflowX;
-      if (overflow !== 'auto' && overflow !== 'scroll') continue;
-      const rtl = !vertical && style.direction === 'rtl';
-      const min = rtl ? -range : 0;
-      const max = rtl ? 0 : range;
-      const start = clamp(
-        vertical ? element.scrollTop : element.scrollLeft,
-        min,
-        max,
-      );
+      if (!scrollsAlong(style, vertical)) continue;
+      const { min, max, position } = scrollBounds(element, vertical, style);
+      const start = clamp(position, min, max);
       const room = sign > 0 ? max - start : start - min;
       if (!(room > EPSILON)) continue;
       drag.scroll = {
@@ -4410,23 +4370,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       const pending = this.#pendingState!;
       this.#pendingState = undefined;
       if (this.#destroyed) return;
-      if (
-        pending.isAnimating !== undefined &&
-        pending.isAnimating !== this.isAnimating
-      ) {
-        this.isAnimating = pending.isAnimating;
+      const { isAnimating, progress, isDragging } = pending;
+      if (isAnimating !== undefined && isAnimating !== this.isAnimating) {
+        this.isAnimating = isAnimating;
       }
-      if (
-        pending.progress !== undefined &&
-        pending.progress !== this.progress
-      ) {
-        this.progress = pending.progress;
+      if (progress !== undefined && progress !== this.progress) {
+        this.progress = progress;
       }
-      if (
-        pending.isDragging !== undefined &&
-        pending.isDragging !== this.isDragging
-      ) {
-        this.isDragging = pending.isDragging;
+      if (isDragging !== undefined && isDragging !== this.isDragging) {
+        this.isDragging = isDragging;
       }
       if (pending.openSnapPoints) {
         this.openSnapPoints = pending.openSnapPoints;
