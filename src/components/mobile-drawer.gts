@@ -48,7 +48,11 @@ import {
   initialFocus,
   tabbables,
 } from '../-private/modal/focus.ts';
-import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
+import {
+  isDrawerRoot,
+  registerDrawer,
+  unregisterDrawer,
+} from '../-private/registry.ts';
 import {
   addPortal,
   logicalParent,
@@ -180,12 +184,6 @@ const modalStack: object[] = [];
 
 /** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
 const mountedDrawers = new Set<object>();
-
-/**
- * The root elements of the drawers in `mountedDrawers`, to tell a drawer's
- * root from another element with the `mobile-drawer` class, see `#inNested`.
- */
-const mountedRoots = new WeakSet<Element>();
 
 /** The kind of input the user gave last, see `trackInput`. */
 type InputType = 'keyboard' | 'pointer';
@@ -1351,21 +1349,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         passive: true,
       });
       mountedDrawers.add(this);
-      mountedRoots.add(root);
-      MobileDrawer.#syncNested();
-      // Where the yielded `Nested` renders by default. Tracked state, so not
-      // during rendering (and the drawers around this one are in the DOM
-      // by then).
-      queueMicrotask(() => {
-        if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
-      });
-      this.#measure();
-      // Appear at the initial snap point without animating in.
-      this.#moveToActive(false);
-      this.#syncScrollLock();
-      // A drawer with a text field opened in front: the lock is now the
-      // fixed `<body>`, so the status bar is solid again.
-      this.#offLockChange = onLockChange(() => this.#endStatusBar());
       registerDrawer({
         root,
         tray: this.#tray,
@@ -1380,6 +1363,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         open: this.open,
         close: this.close,
       });
+      MobileDrawer.#syncNested();
+      // Where the yielded `Nested` renders by default. Tracked state, so not
+      // during rendering (and the drawers around this one are in the DOM
+      // by then).
+      queueMicrotask(() => {
+        if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
+      });
+      this.#measure();
+      // Appear at the initial snap point without animating in.
+      this.#moveToActive(false);
+      this.#syncScrollLock();
+      // A drawer with a text field opened in front: the lock is now the
+      // fixed `<body>`, so the status bar is solid again.
+      this.#offLockChange = onLockChange(() => this.#endStatusBar());
       const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
         tray.addEventListener(
@@ -1492,14 +1489,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
       this.#sheet?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
-      if (this.#root) mountedRoots.delete(this.#root);
+      if (this.#root) unregisterDrawer(this.#root);
       MobileDrawer.#syncNested();
       trackInput(this, false);
       this.#focused = undefined;
-      if (this.#root) {
-        setPageProgress(this.#root, 0);
-        unregisterDrawer(this.#root);
-      }
+      if (this.#root) setPageProgress(this.#root, 0);
       // Undone right away, so nothing outlives the drawer. Focus can only
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
@@ -2761,7 +2755,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       node;
       node = logicalParent(node)
     ) {
-      if (mountedRoots.has(node)) return node;
+      if (isDrawerRoot(node)) return node;
     }
     return undefined;
   }
@@ -3277,7 +3271,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       element && element !== root;
       element = element.parentElement
     ) {
-      if (mountedRoots.has(element)) return true;
+      if (isDrawerRoot(element)) return true;
     }
     return false;
   }
@@ -3743,7 +3737,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (element === root || this.#portals.has(element as HTMLElement)) {
         return found;
       }
-      if (mountedRoots.has(element)) found = element;
+      if (isDrawerRoot(element)) found = element;
     }
     return undefined;
   }
