@@ -64,6 +64,7 @@ import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
 import Grabber, { type GrabberOwner } from '../-private/grabber.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
 import { KeyboardFill } from '../-private/keyboard-fill.ts';
+import { InlineOverrides } from '../-private/inline-style.ts';
 import {
   isEditable,
   isInactiveTextField,
@@ -959,9 +960,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * The pinned elements while bouncing (see `PINNED_ATTRIBUTE`), with their
    * inline `translate` from before the bounce, put back after.
    */
-  #pinned = new Map<HTMLElement, { value: string; priority: string }>();
+  #pinned = new InlineOverrides();
   /** The content's inline `will-change` before a bounce, put back after. */
-  #contentWillChange?: { value: string; priority: string };
+  #contentWillChange = new InlineOverrides();
   #backdrop?: HTMLElement;
   /** The backdrop's `.mobile-drawer__backdrop-tint` sibling, if any. */
   #backdropTint?: HTMLElement;
@@ -1045,20 +1046,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * The elements whose scrolling along the axis is locked, with the inline
    * value of the overflow property they had before. See `#syncScrollLock`.
    */
-  #scrollLock = new Map<
-    HTMLElement,
-    { property: string; value: string; priority: string }
-  >();
+  #scrollLock = new InlineOverrides();
   /** The overflow property the lock sets, while locked. */
   #scrollLockProperty?: string;
   /**
    * The elements with an inline `overscroll-behavior` during a scroll, with
    * the inline value they had before, see `#setOverscroll`.
    */
-  #overscroll = new Map<
-    HTMLElement,
-    { property: string; value: string; priority: string }
-  >();
+  #overscroll = new InlineOverrides();
   /**
    * With `@handleOnly`, the touch on the tray that started while scrolling
    * was locked, see `#onTrayTouchMove`. `cancels` is `undefined` until the
@@ -2202,30 +2197,17 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         : '';
     if (bouncing !== this.#bouncing) {
       this.#bouncing = bouncing;
-      const { style } = content;
       if (bouncing) {
-        this.#contentWillChange = {
-          value: style.getPropertyValue('will-change'),
-          priority: style.getPropertyPriority('will-change'),
-        };
-        style.setProperty('will-change', 'translate');
+        this.#contentWillChange.set(content, 'will-change', 'translate');
         for (const element of content.querySelectorAll<HTMLElement>(
           `[${PINNED_ATTRIBUTE}]`,
         )) {
           if (element.closest('.mobile-drawer__content') !== content) continue;
-          this.#pinned.set(element, {
-            value: element.style.getPropertyValue('translate'),
-            priority: element.style.getPropertyPriority('translate'),
-          });
+          this.#pinned.save(element, 'translate');
         }
       } else {
-        const saved = this.#contentWillChange;
-        style.setProperty('will-change', saved?.value ?? '', saved?.priority);
-        this.#contentWillChange = undefined;
-        for (const [element, saved] of this.#pinned) {
-          element.style.setProperty('translate', saved.value, saved.priority);
-        }
-        this.#pinned.clear();
+        this.#contentWillChange.restoreAll();
+        this.#pinned.restoreAll();
       }
       this.#syncScrollLock();
     }
@@ -2275,7 +2257,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         // Removed from the page: nothing to put back.
         this.#scrollLock.delete(element);
       } else if (!lock || saved.property !== property) {
-        this.#unlockScroll(element);
+        // Puts back the inline value from before the lock, unless the app
+        // has set a value of its own since, which is then kept.
+        this.#scrollLock.restore(element, 'hidden');
       }
     }
     if (!lock) return;
@@ -2314,30 +2298,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const property = this.#scrollLockProperty;
     if (!property) return;
     const { style } = element;
-    const value = style.getPropertyValue(property);
-    const priority = style.getPropertyPriority(property);
-    if (value === 'hidden' && !priority && this.#scrollLock.has(element)) {
+    if (
+      style.getPropertyValue(property) === 'hidden' &&
+      !style.getPropertyPriority(property) &&
+      this.#scrollLock.get(element)
+    ) {
       return;
     }
-    this.#scrollLock.set(element, { property, value, priority });
-    style.setProperty(property, 'hidden');
-  }
-
-  /**
-   * Puts back the inline value `element` had before it was locked, unless
-   * the app has set a value of its own since, which is then kept.
-   */
-  #unlockScroll(element: HTMLElement): void {
-    const saved = this.#scrollLock.get(element);
-    if (!saved) return;
-    this.#scrollLock.delete(element);
-    const { style } = element;
-    if (
-      style.getPropertyValue(saved.property) === 'hidden' &&
-      !style.getPropertyPriority(saved.property)
-    ) {
-      style.setProperty(saved.property, saved.value, saved.priority);
-    }
+    this.#scrollLock.set(element, property, 'hidden');
   }
 
   /**
@@ -3231,9 +3199,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /** The tray's `onScrollEnd`: puts back the overscroll behaviour. */
   private onTrayScrollEnd = (): void => {
-    for (const element of [...this.#overscroll.keys()]) {
-      this.#setOverscroll(element, false);
-    }
+    this.#overscroll.restoreAll();
   };
 
   /**
@@ -3246,21 +3212,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.axis === 'vertical'
         ? 'overscroll-behavior-y'
         : 'overscroll-behavior-x';
-    const { style } = element;
-    const saved = this.#overscroll.get(element);
-    if (none) {
-      if (saved && saved.property === property) return;
-      if (saved) this.#setOverscroll(element, false);
-      this.#overscroll.set(element, {
-        property,
-        value: style.getPropertyValue(property),
-        priority: style.getPropertyPriority(property),
-      });
-      style.setProperty(property, 'none');
-    } else if (saved) {
-      this.#overscroll.delete(element);
-      style.setProperty(saved.property, saved.value, saved.priority);
-    }
+    if (none && this.#overscroll.get(element)?.property === property) return;
+    this.#overscroll.restore(element);
+    if (none) this.#overscroll.set(element, property, 'none');
   }
 
   /**
