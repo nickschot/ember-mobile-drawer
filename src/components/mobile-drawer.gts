@@ -282,6 +282,42 @@ function focusInputOf(element: Element): InputType {
   }
 }
 
+/** How far (px) `element` can scroll along the axis in all. */
+function scrollRange(element: Element, vertical: boolean): number {
+  return vertical
+    ? element.scrollHeight - element.clientHeight
+    : element.scrollWidth - element.clientWidth;
+}
+
+/**
+ * The scroll range of `element` along the axis: the smallest and largest
+ * scroll position, and the position now. Horizontal right-to-left positions
+ * run from `-range` to `0`; `style` gives the direction.
+ */
+function scrollBounds(
+  element: Element,
+  vertical: boolean,
+  style: { direction: string },
+): { range: number; min: number; max: number; position: number } {
+  const range = scrollRange(element, vertical);
+  const rtl = !vertical && style.direction === 'rtl';
+  return {
+    range,
+    min: rtl ? -range : 0,
+    max: rtl ? 0 : range,
+    position: vertical ? element.scrollTop : element.scrollLeft,
+  };
+}
+
+/** Whether `style` lets the user scroll along the axis. */
+function scrollsAlong(
+  style: { overflowX: string; overflowY: string },
+  vertical: boolean,
+): boolean {
+  const overflow = vertical ? style.overflowY : style.overflowX;
+  return overflow === 'auto' || overflow === 'scroll';
+}
+
 /**
  * Whether `element` can scroll along the axis in the direction a finger that
  * moved `movement` px (positive: down or right) pushes its content.
@@ -292,18 +328,10 @@ function canScroll(
   movement: number,
 ): boolean {
   const style = getComputedStyle(element);
-  const overflow = vertical ? style.overflowY : style.overflowX;
-  if (overflow !== 'auto' && overflow !== 'scroll') return false;
-  const range = vertical
-    ? element.scrollHeight - element.clientHeight
-    : element.scrollWidth - element.clientWidth;
+  if (!scrollsAlong(style, vertical)) return false;
+  const { range, min, max, position } = scrollBounds(element, vertical, style);
   if (!(range > EPSILON)) return false;
-  // Horizontal right-to-left scroll positions run from -range to 0.
-  const rtl = !vertical && style.direction === 'rtl';
-  const min = rtl ? -range : 0;
-  const max = rtl ? 0 : range;
   // iOS reports positions past the ends while bouncing; those count as ends.
-  const position = vertical ? element.scrollTop : element.scrollLeft;
   // A finger moving down (right) reveals what is above (left of) the view,
   // so the position has to be able to decrease; moving up (left), increase.
   return movement > 0 ? position > min + EPSILON : position < max - EPSILON;
@@ -315,13 +343,12 @@ function canScroll(
  * towards than the other end.
  */
 function nearEnd(element: Element, vertical: boolean, way: number): boolean {
-  const range = vertical
-    ? element.scrollHeight - element.clientHeight
-    : element.scrollWidth - element.clientWidth;
-  if (!(range > EPSILON)) return true;
-  const rtl = !vertical && getComputedStyle(element).direction === 'rtl';
-  const min = rtl ? -range : 0;
-  const position = vertical ? element.scrollTop : element.scrollLeft;
+  if (!(scrollRange(element, vertical) > EPSILON)) return true;
+  const { range, min, position } = scrollBounds(
+    element,
+    vertical,
+    getComputedStyle(element),
+  );
   const fromMin = position - min;
   // A finger moving down (right) pushes the content towards `min`.
   return way > 0 ? fromMin <= range / 2 : fromMin >= range / 2;
@@ -4123,21 +4150,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // A finger moving towards open moves the position this way.
     const sign = -OPENING_DIRECTION[this.placement] as 1 | -1;
     for (const element of this.#scrollChain(drag.from)) {
-      const range = vertical
-        ? element.scrollHeight - element.clientHeight
-        : element.scrollWidth - element.clientWidth;
-      if (!(range > EPSILON)) continue;
+      if (!(scrollRange(element, vertical) > EPSILON)) continue;
       const style = this.#unlockedStyle(element);
-      const overflow = vertical ? style.overflowY : style.overflowX;
-      if (overflow !== 'auto' && overflow !== 'scroll') continue;
-      const rtl = !vertical && style.direction === 'rtl';
-      const min = rtl ? -range : 0;
-      const max = rtl ? 0 : range;
-      const start = clamp(
-        vertical ? element.scrollTop : element.scrollLeft,
-        min,
-        max,
-      );
+      if (!scrollsAlong(style, vertical)) continue;
+      const { min, max, position } = scrollBounds(element, vertical, style);
+      const start = clamp(position, min, max);
       const room = sign > 0 ? max - start : start - min;
       if (!(room > EPSILON)) continue;
       drag.scroll = {
