@@ -294,10 +294,9 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     assert.strictEqual(tray().offsetWidth, 400);
     // The tray's clip moves far out, so it doesn't cut an app's shadow.
     const clip = getComputedStyle(tray()).clipPath;
-    assert.true(
-      clip.startsWith(
-        'polygon(-10000px calc(100% + 1000px), -10000px -10000px',
-      ),
+    assert.strictEqual(
+      clip,
+      'inset(-10000px -10000px -1000px)',
       `the tray clips nothing: ${clip}`,
     );
   });
@@ -311,18 +310,18 @@ module('Integration | Component | mobile-drawer | sheet', function (hooks) {
     const clip = () => getComputedStyle(tray()).clipPath;
     // Above the top edge the tray's own shadow would be a flat band across
     // the sheet, with hard ends at the sheet's sides.
-    assert.true(
-      clip().startsWith('polygon(8px calc(100% + 1000px), 8px 0px, '),
-      `floating: the sides at the inset (${clip()})`,
+    // Top, right, bottom (1000px below), left.
+    assert.strictEqual(
+      clip(),
+      'inset(0px 8px -1000px)',
+      `floating: the sides at the inset, the top edge at the tray's (${clip()})`,
     );
-    assert.notOk(/-\d/.test(clip()), `floating: no point above (${clip()})`);
 
     state.active = 2;
     await settle();
-    assert.true(
-      clip().startsWith(
-        'polygon(-10000px calc(100% + 1000px), -10000px -10000px',
-      ),
+    assert.strictEqual(
+      clip(),
+      'inset(-10000px -10000px -1000px)',
       `highest: the clip clips nothing, the whole shadow shows (${clip()})`,
     );
   });
