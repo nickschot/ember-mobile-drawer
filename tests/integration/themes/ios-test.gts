@@ -1054,17 +1054,11 @@ module('Integration | themes/ios.css', function (hooks) {
       'the tray keeps the root width; its own clip cuts the sides',
     );
     const clip = () => getComputedStyle(tray).clipPath;
-    assert.true(
-      clip().startsWith('polygon(8px calc(100% + 1000px), 8px 36px, '),
-      `the tray's own clip: its sides at the inset, the radius there (${clip()})`,
-    );
-    assert.true(
-      clip().includes('44px 0px, calc(100% - 44px) 0px'),
-      `the clip's top edge is the tray's top edge, from corner to corner (${clip()})`,
-    );
-    assert.notOk(
-      /-\d/.test(clip()),
-      `no point above the top edge or left of the root: no flat shadow band above the floating sheet (${clip()})`,
+    // Top, right, bottom (1000px below), left, and the top corners' radius.
+    assert.strictEqual(
+      clip(),
+      'inset(0px 8px -1000px round 36px 36px 0px 0px)',
+      `the tray's own clip: its sides at the inset, the radius there, and its top edge is the tray's top edge: no flat shadow band above the floating sheet (${clip()})`,
     );
     const content = getComputedStyle(
       el('[data-test-tray] > .mobile-drawer__content'),
@@ -1075,19 +1069,15 @@ module('Integration | themes/ios.css', function (hooks) {
       'the content is padded by the inset, at every snap point',
     );
     setProgress(0.5);
-    assert.true(
-      clip().startsWith('polygon(4px calc(100% + 1000px), 4px 36px, '),
-      `half way: the sides at 4px (${clip()})`,
-    );
-    assert.notOk(
-      /-\d/.test(clip()),
-      `still no point above the top edge (${clip()})`,
+    assert.strictEqual(
+      clip(),
+      'inset(0px 4px -1000px round 36px 36px 0px 0px)',
+      `half way: the sides at 4px, still nothing above the top edge (${clip()})`,
     );
     setProgress(1);
-    assert.true(
-      clip().startsWith(
-        'polygon(-10000px calc(100% + 1000px), -10000px -9964px, ',
-      ),
+    assert.strictEqual(
+      clip(),
+      'inset(-10000px -10000px -1000px round 36px 36px 0px 0px)',
       `at full height the clip moves 10000px out and clips nothing: the whole shadow shows (${clip()})`,
     );
     assert.strictEqual(
@@ -1106,7 +1096,7 @@ module('Integration | themes/ios.css', function (hooks) {
 
     styles.push(addStyles('[data-test-theme] { --mobile-drawer-inset: 0px; }'));
     assert.true(
-      clip().startsWith('polygon(-10000px calc(100% + 1000px), '),
+      clip().startsWith('inset(-10000px -10000px -1000px'),
       `no inset: the clip moves 10000px out and clips nothing (${clip()})`,
     );
   });
@@ -1199,7 +1189,7 @@ module('Integration | themes/ios.css', function (hooks) {
     );
     assert.strictEqual(getComputedStyle(tray).backdropFilter, 'none');
     assert.true(
-      getComputedStyle(tray).clipPath.startsWith('polygon('),
+      getComputedStyle(tray).clipPath.startsWith('inset('),
       'the tray keeps its clip for its tint and content',
     );
     assert.strictEqual(
