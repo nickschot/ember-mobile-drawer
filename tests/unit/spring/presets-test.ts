@@ -27,12 +27,11 @@ function run(config: Partial<typeof DEFAULT_SPRING_CONFIG>) {
   const updates: SpringState[] = [];
   const spring = new Spring({
     ...config,
-    from: 0,
-    to: 300,
     clock,
     prefersReducedMotion: () => false,
     onUpdate: (state) => updates.push(state),
   });
+  spring.retarget(300);
   void spring.start();
   const frames = clock.runUntilIdle();
   return {
@@ -160,38 +159,66 @@ module('Unit | spring presets', function () {
 });
 
 module('Unit | spring | configure', function () {
+  /** A spring at 0 that moves to 300, and its clock. */
+  const moving = (config: Partial<typeof DEFAULT_SPRING_CONFIG> = {}) => {
+    const clock = new FakeClock();
+    const spring = new Spring({
+      ...config,
+      clock,
+      prefersReducedMotion: () => false,
+    });
+    spring.retarget(300);
+    return { clock, spring };
+  };
+
+  /** The values of `spring` over 10 frames. */
+  const valuesOf = ({ clock, spring }: ReturnType<typeof moving>) => {
+    void spring.start();
+    const values = [];
+    for (let i = 0; i < 10; i++) {
+      clock.frame();
+      values.push(spring.value);
+    }
+    return values;
+  };
+
   test('changes the parameters and keeps the rest', function (assert) {
-    const spring = new Spring({ from: 10, to: 20, velocity: 5 });
+    const spring = new Spring();
+    spring.set(10, 5);
+    spring.retarget(20);
     spring.configure({ stiffness: 100, damping: undefined });
-    assert.deepEqual(
-      { ...spring.config },
-      { ...DEFAULT_SPRING_CONFIG, stiffness: 100 },
-    );
-    assert.true(Object.isFrozen(spring.config));
     assert.strictEqual(spring.value, 10);
     assert.strictEqual(spring.velocity, 5);
     assert.strictEqual(spring.target, 20);
+
+    const configured = moving();
+    configured.spring.configure({ stiffness: 100, damping: undefined });
+    assert.deepEqual(
+      valuesOf(configured),
+      valuesOf(moving({ stiffness: 100 })),
+      'moves like a spring made with only the new stiffness',
+    );
   });
 
   test('rejects invalid values and keeps the old ones', function (assert) {
-    const spring = new Spring();
+    const configured = moving();
     for (const value of [0, -1, NaN, Infinity]) {
       assert.throws(
-        () => spring.configure({ stiffness: 100, damping: value }),
+        () => configured.spring.configure({ stiffness: 100, damping: value }),
         RangeError,
       );
     }
-    assert.deepEqual({ ...spring.config }, { ...DEFAULT_SPRING_CONFIG });
+    assert.deepEqual(
+      valuesOf(configured),
+      valuesOf(moving()),
+      'moves like a spring with the defaults',
+    );
   });
 
   test('a run in progress continues with the new parameters', function (assert) {
     const clock = new FakeClock();
-    const spring = new Spring({
-      from: 0,
-      to: 300,
-      clock,
-      prefersReducedMotion: () => false,
-    });
+    const spring = new Spring({ clock, prefersReducedMotion: () => false });
+    spring.retarget(300);
     void spring.start();
     clock.frame();
     spring.configure(springPresets.ios);

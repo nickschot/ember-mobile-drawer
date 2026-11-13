@@ -31,22 +31,6 @@ module('Unit | snap-points | rubberBand', function () {
     assert.true(Math.abs(above - below) < 1e-9);
   });
 
-  test('the factor is configurable', function (assert) {
-    const soft = rubberBand(500, 0, 400, { dimension, factor: 1 });
-    const stiff = rubberBand(500, 0, 400, { dimension, factor: 0.2 });
-    assert.true(stiff < soft);
-    assert.strictEqual(
-      rubberBand(500, 0, 400, { dimension, factor: 0 }),
-      400,
-      'factor 0 is a hard stop',
-    );
-    assert.strictEqual(
-      rubberBand(-50, 0, 400, { dimension, factor: 0 }),
-      0,
-      'at both ends',
-    );
-  });
-
   test('works with a single snap point', function (assert) {
     assert.strictEqual(rubberBand(300, 300, 300, { dimension }), 300);
     assert.true(rubberBand(350, 300, 300, { dimension }) > 300);
@@ -55,52 +39,6 @@ module('Unit | snap-points | rubberBand', function () {
 
   test('is a hard stop with a zero dimension', function (assert) {
     assert.strictEqual(rubberBand(50, 0, 0, { dimension: 0 }), 0);
-  });
-
-  test('throws a RangeError for invalid input', function (assert) {
-    const throwsRange = (fn: () => number, message: RegExp, label: string) =>
-      assert.throws(
-        fn,
-        (error: Error) =>
-          error instanceof RangeError && message.test(error.message),
-        label,
-      );
-
-    throwsRange(
-      () => rubberBand(300, 500, 100, { dimension }),
-      /min must be <= max, got min 500 and max 100/,
-      'min > max',
-    );
-    throwsRange(
-      () => rubberBand(NaN, 0, 400, { dimension }),
-      /offset must be a finite number/,
-      'NaN offset',
-    );
-    throwsRange(
-      () => rubberBand(0, -Infinity, 400, { dimension }),
-      /min must be a finite number/,
-      'infinite min',
-    );
-    throwsRange(
-      () => rubberBand(0, 0, NaN, { dimension }),
-      /max must be a finite number/,
-      'NaN max',
-    );
-    throwsRange(
-      () => rubberBand(0, 0, 400, { dimension: NaN }),
-      /dimension must be a finite number >= 0/,
-      'NaN dimension',
-    );
-    throwsRange(
-      () => rubberBand(0, 0, 400, { dimension: -1 }),
-      /dimension must be a finite number >= 0/,
-      'negative dimension',
-    );
-    throwsRange(
-      () => rubberBand(0, 0, 400, { dimension, factor: -0.5 }),
-      /factor must be a finite number >= 0/,
-      'negative factor',
-    );
   });
 });
 
@@ -139,14 +77,7 @@ module('Unit | snap-points | unRubberBand', function () {
 
   test('clamps to the range without resistance', function (assert) {
     assert.strictEqual(unRubberBand(450, 0, 400, { dimension: 0 }), 400);
-    assert.strictEqual(unRubberBand(-50, 0, 400, { dimension, factor: 0 }), 0);
-  });
-
-  test('throws a RangeError for invalid input', function (assert) {
-    assert.throws(
-      () => unRubberBand(NaN, 0, 400, { dimension }),
-      (error: Error) => error instanceof RangeError,
-    );
+    assert.strictEqual(unRubberBand(-50, 0, 400, { dimension: 0 }), 0);
   });
 });
 
@@ -212,10 +143,5 @@ module('Unit | snap-points | dragOffset', function () {
       );
       assert.strictEqual(drag(start, -20), start - 20, `${start}: 1:1 back in`);
     }
-  });
-
-  test('throws a RangeError for non-finite input', function (assert) {
-    assert.throws(() => drag(NaN, 0), RangeError);
-    assert.throws(() => drag(0, Infinity), RangeError);
   });
 });

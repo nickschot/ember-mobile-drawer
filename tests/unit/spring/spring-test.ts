@@ -8,15 +8,34 @@ import {
 } from '#src/-private/spring/spring.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 
-function setup(options: SpringOptions = {}) {
+/** Initial position, target and velocity, set with `set` and `retarget`. */
+interface Start {
+  from?: number;
+  to?: number;
+  velocity?: number;
+}
+
+/** A spring that starts at `from` and moves towards `to`. */
+function moving(
+  spring: Spring,
+  { from = 0, to = from, velocity = 0 }: Start,
+): Spring {
+  spring.set(from, velocity);
+  spring.retarget(to);
+  return spring;
+}
+
+function setup(options: SpringOptions & Start = {}) {
   const clock = new FakeClock();
   const updates: SpringState[] = [];
+  const { from, to, velocity, ...rest } = options;
   const spring = new Spring({
     prefersReducedMotion: () => false,
-    ...options,
+    ...rest,
     clock,
     onUpdate: (state) => updates.push(state),
   });
+  moving(spring, { from, to, velocity });
   return { clock, spring, updates };
 }
 
@@ -43,11 +62,7 @@ module('Unit | spring', function () {
       const frames = clock.runUntilIdle();
 
       assert.true(frames > 1, 'animates over several frames');
-      assert.deepEqual(await promise, {
-        finished: true,
-        value: 300,
-        target: 300,
-      });
+      await promise;
       assert.strictEqual(spring.value, 300);
       assert.strictEqual(spring.velocity, 0);
       assert.false(spring.isAnimating);
@@ -202,9 +217,10 @@ module('Unit | spring', function () {
     assert.true(spring.value > before.value, 'momentum carries it forward');
 
     clock.runUntilIdle();
-    assert.deepEqual(
-      await promise,
-      { finished: true, value: -300, target: -300 },
+    await promise;
+    assert.strictEqual(
+      spring.value,
+      -300,
       'the original promise resolves at the new target',
     );
   });
@@ -304,11 +320,8 @@ module('Unit | spring', function () {
       clock.frame(60_000); // e.g. a backgrounded tab
 
       assert.true(updates.every((u) => Number.isFinite(u.value)));
-      assert.deepEqual(await promise, {
-        finished: true,
-        value: 300,
-        target: 300,
-      });
+      await promise;
+      assert.strictEqual(spring.value, 300);
     }
   });
 
@@ -333,20 +346,13 @@ module('Unit | spring', function () {
     assert.false(spring.isAnimating);
     assert.strictEqual(clock.pendingFrames, 0, 'no frames scheduled');
     assert.deepEqual(updates, [{ value: 300, velocity: 0 }]);
-    assert.deepEqual(await promise, {
-      finished: true,
-      value: 300,
-      target: 300,
-    });
+    await promise;
   });
 
   test('start() at rest on the target resolves immediately', async function (assert) {
     const { clock, spring } = setup({ from: 300, to: 300 });
-    assert.deepEqual(await spring.start(), {
-      finished: true,
-      value: 300,
-      target: 300,
-    });
+    await spring.start();
+    assert.strictEqual(spring.value, 300);
     assert.strictEqual(clock.pendingFrames, 0);
   });
 
@@ -355,7 +361,7 @@ module('Unit | spring', function () {
     assert.strictEqual(spring.start(), spring.start());
   });
 
-  test('stop() freezes the spring and resolves unfinished', async function (assert) {
+  test('stop() freezes the spring and resolves', async function (assert) {
     const { clock, spring, updates } = setup({ from: 0, to: 300 });
     const promise = spring.start();
     clock.frame(16);
@@ -365,7 +371,7 @@ module('Unit | spring', function () {
     spring.stop();
     assert.false(spring.isAnimating);
     assert.strictEqual(clock.pendingFrames, 0, 'cancels the next frame');
-    assert.deepEqual(await promise, { finished: false, value, target: 300 });
+    await promise;
     assert.strictEqual(spring.value, value, 'keeps its position');
     assert.strictEqual(spring.velocity, velocity, 'keeps its velocity');
 
@@ -379,17 +385,18 @@ module('Unit | spring', function () {
   test('stop() from onUpdate ends the run', async function (assert) {
     const clock = new FakeClock();
     const spring: Spring = new Spring({
-      from: 0,
-      to: 300,
       clock,
       prefersReducedMotion: () => false,
       onUpdate: () => spring.stop(),
     });
+    moving(spring, { to: 300 });
     const promise = spring.start();
     clock.frame(16);
 
     assert.strictEqual(clock.pendingFrames, 0);
-    assert.false((await promise).finished);
+    await promise;
+    assert.false(spring.isAnimating);
+    assert.notStrictEqual(spring.value, 300, 'stopped on the way');
   });
 
   test('can be restarted after stop()', async function (assert) {
@@ -400,7 +407,7 @@ module('Unit | spring', function () {
 
     const promise = spring.start();
     clock.runUntilIdle();
-    assert.true((await promise).finished);
+    await promise;
     assert.strictEqual(spring.value, 300);
   });
 
@@ -423,9 +430,6 @@ module('Unit | spring', function () {
       ['infinite stiffness', { stiffness: Infinity }],
       ['rest threshold 0', { restDisplacementThreshold: 0 }],
       ['NaN rest velocity threshold', { restVelocityThreshold: NaN }],
-      ['NaN from', { from: NaN }],
-      ['infinite to', { to: Infinity }],
-      ['NaN velocity', { velocity: NaN }],
     ] as const) {
       test(`constructor rejects ${name}`, function (assert) {
         assert.throws(() => setup(options), RangeError);
@@ -442,11 +446,8 @@ module('Unit | spring', function () {
       assert.strictEqual(spring.target, 300, 'target unchanged');
 
       clock.runUntilIdle();
-      assert.deepEqual(await promise, {
-        finished: true,
-        value: 300,
-        target: 300,
-      });
+      await promise;
+      assert.strictEqual(spring.value, 300);
     });
 
     test('set() rejects non-finite values without changing state', function (assert) {
@@ -467,7 +468,8 @@ module('Unit | spring', function () {
 
       assert.false(spring.isAnimating);
       assert.strictEqual(clock.pendingFrames, 0, 'no runaway frame loop');
-      assert.deepEqual(await promise, { finished: false, value, target: 300 });
+      await promise;
+      assert.strictEqual(spring.value, value);
       assert.strictEqual(spring.velocity, velocity);
     });
   });
@@ -477,83 +479,53 @@ module('Unit | spring', function () {
       const clock = new FakeClock();
       let shouldThrow = true;
       const spring = new Spring({
-        from: 0,
-        to: 300,
         clock,
         prefersReducedMotion: () => false,
         onUpdate: () => {
           if (shouldThrow) throw new Error('boom');
         },
       });
+      moving(spring, { to: 300 });
       const promise = spring.start();
 
       assert.throws(() => clock.frame(16), /boom/);
       assert.false(spring.isAnimating);
       assert.strictEqual(clock.pendingFrames, 0);
-      assert.false((await promise).finished);
+      await promise;
 
       shouldThrow = false;
       const next = spring.start();
       assert.notStrictEqual(next, promise, 'a new run can start');
       clock.runUntilIdle();
-      assert.true((await next).finished);
+      await next;
+      assert.strictEqual(spring.value, 300);
     });
 
-    test('a throwing onUpdate on settle still resolves finished', async function (assert) {
+    test('a throwing onUpdate on settle still resolves', async function (assert) {
       const clock = new FakeClock();
       const spring = new Spring({
-        from: 0,
-        to: 300,
         clock,
         prefersReducedMotion: () => false,
         onUpdate: ({ value }) => {
           if (value === 300) throw new Error('boom');
         },
       });
+      moving(spring, { to: 300 });
       const promise = spring.start();
 
       assert.throws(() => clock.runUntilIdle(), /boom/);
       assert.false(spring.isAnimating);
       assert.strictEqual(clock.pendingFrames, 0);
-      assert.deepEqual(await promise, {
-        finished: true,
-        value: 300,
-        target: 300,
-      });
-    });
-
-    test('a throwing requestFrame (no rAF, e.g. SSR) ends the run', function (assert) {
-      const clock = new FakeClock();
-      let available = false;
-      const original = clock.requestFrame.bind(clock);
-      clock.requestFrame = (callback) => {
-        if (!available) throw new ReferenceError('requestAnimationFrame');
-        return original(callback);
-      };
-      const spring = new Spring({
-        from: 0,
-        to: 300,
-        clock,
-        prefersReducedMotion: () => false,
-      });
-
-      assert.throws(() => void spring.start(), ReferenceError);
-      assert.false(spring.isAnimating);
-
-      available = true;
-      void spring.start();
-      assert.true(spring.isAnimating, 'can start once frames are available');
-      assert.strictEqual(clock.pendingFrames, 1);
+      await promise;
+      assert.strictEqual(spring.value, 300);
     });
   });
 
   module('re-entrancy from the final onUpdate', function () {
-    test('retarget() keeps the finished result consistent', async function (assert) {
+    test('retarget() ends the run at the old target', async function (assert) {
       const clock = new FakeClock();
       let retargeted = false;
       const spring: Spring = new Spring({
-        from: 0,
-        to: 300,
         clock,
         prefersReducedMotion: () => false,
         onUpdate: ({ value }) => {
@@ -563,14 +535,12 @@ module('Unit | spring', function () {
           }
         },
       });
+      moving(spring, { to: 300 });
       const promise = spring.start();
       clock.runUntilIdle();
 
-      assert.deepEqual(await promise, {
-        finished: true,
-        value: 300,
-        target: 300,
-      });
+      await promise;
+      assert.strictEqual(spring.value, 300);
       assert.strictEqual(spring.target, 500);
       assert.false(spring.isAnimating, 'retarget does not start');
     });
@@ -579,8 +549,6 @@ module('Unit | spring', function () {
       const clock = new FakeClock();
       let next: Promise<unknown> | undefined;
       const spring: Spring = new Spring({
-        from: 0,
-        to: 300,
         clock,
         prefersReducedMotion: () => false,
         onUpdate: ({ value }) => {
@@ -590,16 +558,13 @@ module('Unit | spring', function () {
           }
         },
       });
+      moving(spring, { to: 300 });
       const first = spring.start();
       clock.runUntilIdle();
 
       assert.notStrictEqual(next, first);
-      assert.deepEqual(await first, {
-        finished: true,
-        value: 300,
-        target: 300,
-      });
-      assert.deepEqual(await next, { finished: true, value: 500, target: 500 });
+      await first;
+      await next;
       assert.strictEqual(spring.value, 500);
     });
   });

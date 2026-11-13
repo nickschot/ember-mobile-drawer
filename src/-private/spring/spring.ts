@@ -66,32 +66,12 @@ export interface SpringState {
   velocity: number;
 }
 
-/** What the promise returned by {@link Spring.start} resolves with. */
-export interface SpringResult {
-  /**
-   * `true` when the spring came to rest at its target. `false` when the run
-   * ended early: {@link Spring.stop} was called, `onUpdate` or the clock
-   * threw, or the simulation produced a non-finite value.
-   */
-  finished: boolean;
-  /** Position when the run ended. Equals `target` when `finished`. */
-  value: number;
-  /** The target at the time the run ended (after any retargets). */
-  target: number;
-}
-
 export interface SpringOptions extends Partial<SpringConfig> {
-  /** Initial position in px. Default `0`. */
-  from?: number;
-  /** Target position in px. Default: `from`. */
-  to?: number;
-  /** Initial velocity in px/s, e.g. a gesture's release velocity. Default `0`. */
-  velocity?: number;
   /**
    * Called on every animation frame with the new state, and once more when
    * the spring snaps onto its target (after the run has ended, so it may
    * start a new run). Not called on {@link Spring.stop}. If it throws, the
-   * run ends with `finished: false` and the error is rethrown.
+   * run ends and the error is rethrown.
    */
   onUpdate?: (state: SpringState) => void;
   /** Time and frame source. Default: `performance.now` + `requestAnimationFrame`. */
@@ -225,71 +205,53 @@ export function stepSpring(
 }
 
 /**
- * A one-dimensional damped spring driven by animation frames.
+ * A one-dimensional damped spring driven by animation frames. It starts at
+ * rest at `0`; use {@link Spring.set} and {@link Spring.retarget} to give it
+ * a position, velocity and target.
  *
  * It holds no tracked state: consumers apply {@link SpringState.value} in
  * `onUpdate` (e.g. to a CSS transform) themselves.
  *
- * Positions and velocities must be finite: the constructor,
- * {@link Spring.retarget} and {@link Spring.set} throw a `RangeError`
- * (without changing any state) otherwise. If a frame still produces a
- * non-finite value, the run ends with `finished: false` and the last finite
- * state is kept.
+ * Positions and velocities must be finite: {@link Spring.retarget} and
+ * {@link Spring.set} throw a `RangeError` (without changing any state)
+ * otherwise. If a frame still produces a non-finite value, the run ends and
+ * the last finite state is kept.
  *
  * ```ts
  * const spring = new Spring({
- *   from: currentOffset,
- *   to: snapPoint,
- *   velocity: releaseVelocity,
  *   onUpdate: ({ value }) => (el.style.transform = `translateY(${value}px)`),
  * });
- * const { finished } = await spring.start();
+ * spring.set(currentOffset, releaseVelocity);
+ * spring.retarget(snapPoint);
+ * await spring.start();
  * ```
  */
 export class Spring {
   #config: Readonly<SpringConfig>;
 
-  #value: number;
-  #velocity: number;
-  #target: number;
+  #value = 0;
+  #velocity = 0;
+  #target = 0;
   #onUpdate?: (state: SpringState) => void;
   #clock: FrameClock;
   #prefersReducedMotion: () => boolean;
 
   #frame: number | undefined;
   #lastTime = 0;
-  #run:
-    | { promise: Promise<SpringResult>; resolve: (r: SpringResult) => void }
-    | undefined;
+  #run: { promise: Promise<void>; resolve: () => void } | undefined;
 
   constructor(options: SpringOptions = {}) {
     const {
-      from = 0,
-      to = from,
-      velocity = 0,
       onUpdate,
       clock = browserClock,
       prefersReducedMotion = browserPrefersReducedMotion,
       ...overrides
     } = options;
 
-    const config = mergeConfig(DEFAULT_SPRING_CONFIG, overrides);
-    assertFinite('from', from);
-    assertFinite('to', to);
-    assertFinite('velocity', velocity);
-
-    this.#config = config;
-    this.#value = from;
-    this.#velocity = velocity;
-    this.#target = to;
+    this.#config = mergeConfig(DEFAULT_SPRING_CONFIG, overrides);
     this.#onUpdate = onUpdate;
     this.#clock = clock;
     this.#prefersReducedMotion = prefersReducedMotion;
-  }
-
-  /** The physical parameters in use, see {@link Spring.configure}. */
-  get config(): Readonly<SpringConfig> {
-    return this.#config;
   }
 
   /**
@@ -326,20 +288,16 @@ export class Spring {
 
   /**
    * Starts moving towards the target and returns a promise for the end of
-   * this run. The promise never rejects; it resolves with `finished: true`
-   * once the spring rests at its target (also after any
-   * {@link Spring.retarget} calls), or with `finished: false` when the run
-   * ends early (see {@link SpringResult.finished}).
+   * this run. The promise never rejects; it resolves once the spring rests
+   * at its target (also after any {@link Spring.retarget} calls), or when
+   * the run ends early: {@link Spring.stop} was called, `onUpdate` threw, or
+   * the simulation produced a non-finite value.
    *
    * Calling `start()` while already animating returns the current run's
    * promise. With reduced motion, or when already at rest on the target, the
-   * spring snaps to the target synchronously and the promise resolves with
-   * `finished: true`.
-   *
-   * If the clock's `requestFrame` throws (e.g. no `requestAnimationFrame`
-   * during server-side rendering), the run ends and the error is rethrown.
+   * spring snaps to the target synchronously and the promise resolves.
    */
-  start(): Promise<SpringResult> {
+  start(): Promise<void> {
     if (this.#run) {
       return this.#run.promise;
     }
@@ -348,8 +306,8 @@ export class Spring {
     const jump = this.#prefersReducedMotion() || this.#isAtRest();
     const now = jump ? 0 : this.#clock.now();
 
-    let resolve!: (r: SpringResult) => void;
-    const promise = new Promise<SpringResult>((r) => (resolve = r));
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
     this.#run = { promise, resolve };
 
     if (jump) {
@@ -364,7 +322,7 @@ export class Spring {
 
   /**
    * Stops animating, leaving the spring at its current position and velocity.
-   * A pending {@link Spring.start} promise resolves with `finished: false`.
+   * A pending {@link Spring.start} promise resolves.
    * Does nothing when not animating.
    */
   stop(): void {
@@ -372,7 +330,7 @@ export class Spring {
       this.#clock.cancelFrame(this.#frame);
       this.#frame = undefined;
     }
-    this.#endRun(false);
+    this.#endRun();
   }
 
   /**
@@ -419,7 +377,7 @@ export class Spring {
       const value = this.#target + next.displacement;
       if (!Number.isFinite(value) || !Number.isFinite(next.velocity)) {
         // Keep the last finite state rather than looping on NaN forever.
-        this.#endRun(false);
+        this.#endRun();
         return;
       }
       this.#value = value;
@@ -445,12 +403,7 @@ export class Spring {
   };
 
   #scheduleFrame(): void {
-    try {
-      this.#frame = this.#clock.requestFrame(this.#tick);
-    } catch (error) {
-      this.#endRun(false);
-      throw error;
-    }
+    this.#frame = this.#clock.requestFrame(this.#tick);
   }
 
   #isAtRest(): boolean {
@@ -464,16 +417,16 @@ export class Spring {
   #settle(): void {
     this.#value = this.#target;
     this.#velocity = 0;
-    // End the run first, so the result is consistent even if onUpdate throws
-    // or calls retarget()/start().
-    this.#endRun(true);
+    // End the run first, so it ends even if onUpdate throws or calls
+    // retarget()/start().
+    this.#endRun();
     this.#onUpdate?.({ value: this.#value, velocity: 0 });
   }
 
-  #endRun(finished: boolean): void {
+  #endRun(): void {
     const run = this.#run;
     if (!run) return;
     this.#run = undefined;
-    run.resolve({ finished, value: this.#value, target: this.#target });
+    run.resolve();
   }
 }
