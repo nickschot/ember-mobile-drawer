@@ -9,7 +9,6 @@ import {
   browserClock,
   browserPrefersReducedMotion,
   type FrameClock,
-  type SpringResult,
 } from '../-private/spring/spring.ts';
 import {
   dragOffset,
@@ -1859,7 +1858,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * Not with an injected clock: the addon's own tests then run the frames
    * themselves, and `settled()` would wait for frames that never come.
    */
-  #startSpring(spring: Spring): Promise<SpringResult> {
+  #startSpring(spring: Spring): Promise<void> {
     if (!spring.isAnimating) spring.configure(this.#springConfig());
     const run = spring.start();
     if (spring.isAnimating && !this.#clock) {

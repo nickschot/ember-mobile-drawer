@@ -140,9 +140,9 @@ function resolveOne(
  *
  * @throws RangeError when a size or a px or percentage snap point is
  *   non-finite or out of range.
- * @throws Error when `sizes` is missing, the snap point array is empty, a
- *   snap point is malformed (an unknown string or type), or `'content'` is used
- *   without a content size.
+ * @throws Error when the snap point array is empty, a snap point is
+ *   malformed (an unknown string or type), or `'content'` is used without a
+ *   content size.
  *
  * @example
  * ```ts
@@ -162,11 +162,6 @@ export function resolveSnapPoints(
   if (!Array.isArray(snapPoints) || snapPoints.length === 0) {
     throw new Error(
       `ember-mobile-drawer: snap points must be a non-empty array, got ${describe(snapPoints)}.`,
-    );
-  }
-  if (typeof sizes !== 'object' || sizes === null) {
-    throw new Error(
-      `ember-mobile-drawer: resolving snap points needs a sizes object like { container: 800 }, got ${describe(sizes)}.`,
     );
   }
   assertSize('container', sizes.container);
@@ -210,51 +205,37 @@ export function findSnapPoint(
 }
 
 /**
- * Default deceleration rate per millisecond, matching iOS
+ * Deceleration rate per millisecond, matching iOS
  * `UIScrollView.DecelerationRate.fast`. iOS `.normal` (`0.998`) projects
  * five times as far, which skips snap points too eagerly on small sheets.
  * Provisional: to be tuned on a real device.
  */
-export const DEFAULT_DECELERATION_RATE = 0.99;
+const DECELERATION_RATE = 0.99;
 
 /**
  * Projects where a release would come to rest if it kept moving and slowed
  * down by exponential decay: each millisecond the velocity is multiplied by
- * `decelerationRate`. Summed over time that adds
- * `velocity / 1000 * rate / (1 - rate)` px, which for the default rate is
- * roughly a tenth of the velocity in px/s (a 1000 px/s flick travels ~99px;
- * with `0.998` it would travel ~499px).
+ * {@link DECELERATION_RATE}. Summed over time that adds
+ * `velocity / 1000 * rate / (1 - rate)` px, roughly a tenth of the velocity
+ * in px/s (a 1000 px/s flick travels ~99px; with `0.998` it would travel
+ * ~499px).
  *
  * @param offset Current offset in px.
  * @param velocity Release velocity in px/s along the same axis (positive moves
  *   towards larger offsets).
- * @param decelerationRate Velocity multiplier per ms, strictly between `0` and
- *   `1`. Lower values stop sooner. `0.99` matches iOS `.fast`.
- * @throws RangeError when `offset` or `velocity` is not finite, or
- *   `decelerationRate` is not strictly between `0` and `1`. Callers that
+ * @throws RangeError when `offset` or `velocity` is not finite. Callers that
  *   derive velocity from a zero time delta must guard against that themselves.
  */
-export function projectOffset(
-  offset: number,
-  velocity: number,
-  decelerationRate: number = DEFAULT_DECELERATION_RATE,
-): number {
+export function projectOffset(offset: number, velocity: number): number {
   assertFinite('offset', offset);
   assertFinite('velocity', velocity);
-  if (!(decelerationRate > 0 && decelerationRate < 1)) {
-    throw new RangeError(
-      `ember-mobile-drawer: decelerationRate must be a number strictly between 0 and 1, got ${describe(decelerationRate)}.`,
-    );
-  }
   return (
-    offset + ((velocity / 1000) * decelerationRate) / (1 - decelerationRate)
+    offset + ((velocity / 1000) * DECELERATION_RATE) / (1 - DECELERATION_RATE)
   );
 }
 
 /** Options for {@link selectSnapPoint}. */
 export interface SelectSnapPointOptions {
-  /** See {@link projectOffset}. Defaults to {@link DEFAULT_DECELERATION_RATE}. */
-  decelerationRate?: number;
   /**
    * Speed in px/s, `>= 0`, at or above which a release always moves at least
    * to the next snap point in the direction of the velocity (when there is
@@ -281,9 +262,7 @@ export interface SelectSnapPointOptions {
  * @param resolved Snap points from {@link resolveSnapPoints}; must not be empty.
  * @param offset Offset in px at release.
  * @param velocity Release velocity in px/s.
- * @throws RangeError for non-finite or out of range input, see
- *   {@link projectOffset}.
- * @throws Error when `resolved` is empty.
+ * @throws RangeError for non-finite input, see {@link projectOffset}.
  */
 export function selectSnapPoint(
   resolved: readonly ResolvedSnapPoint[],
@@ -291,22 +270,9 @@ export function selectSnapPoint(
   velocity: number,
   options: SelectSnapPointOptions = {},
 ): ResolvedSnapPoint {
-  const first = resolved[0];
-  if (!first) {
-    throw new Error(
-      'ember-mobile-drawer: cannot select from zero snap points.',
-    );
-  }
+  const first = resolved[0]!;
   const { flingVelocity } = options;
-  if (
-    flingVelocity !== undefined &&
-    !(Number.isFinite(flingVelocity) && flingVelocity >= 0)
-  ) {
-    throw new RangeError(
-      `ember-mobile-drawer: flingVelocity must be a finite number >= 0, got ${describe(flingVelocity)}.`,
-    );
-  }
-  const projected = projectOffset(offset, velocity, options.decelerationRate);
+  const projected = projectOffset(offset, velocity);
 
   let best = first;
   let bestDistance = Math.abs(first.offset - projected);
@@ -338,11 +304,8 @@ export function selectSnapPoint(
   return best;
 }
 
-/**
- * Default rubber-band factor, as used by iOS scroll views. Lower is stiffer,
- * `0` disables overscroll entirely.
- */
-export const DEFAULT_RUBBER_BAND_FACTOR = 0.55;
+/** Rubber-band resistance factor, as used by iOS scroll views. */
+const DEFAULT_RUBBER_BAND_FACTOR = 0.55;
 
 /** Options for {@link rubberBand}. */
 export interface RubberBandOptions {
@@ -351,11 +314,6 @@ export interface RubberBandOptions {
    * overshoot approaches but never reaches this distance. `0` is a hard stop.
    */
   dimension: number;
-  /**
-   * Resistance factor, `>= 0`. Defaults to
-   * {@link DEFAULT_RUBBER_BAND_FACTOR}.
-   */
-  factor?: number;
 }
 
 /**
@@ -367,43 +325,24 @@ export interface RubberBandOptions {
  * (1 - 1 / (x * factor / dimension + 1)) * dimension
  * ```
  *
- * At first the drawer moves `factor` px for every px the finger moves
- * (`factor`:1). After that it gives diminishing returns the further it is
- * pulled, and the overshoot never exceeds `dimension`.
+ * with `factor` {@link DEFAULT_RUBBER_BAND_FACTOR}. At first the drawer moves
+ * `factor` px for every px the finger moves (`factor`:1). After that it gives
+ * diminishing returns the further it is pulled, and the overshoot never
+ * exceeds `dimension`.
  *
  * @param offset Raw offset in px (e.g. where the finger is).
  * @param min Lowest allowed offset, e.g. the first snap point.
  * @param max Highest allowed offset, e.g. the last snap point; `>= min`.
- * @throws RangeError when an input is not finite, `min > max`, or `dimension`
- *   or `factor` is negative.
  */
 export function rubberBand(
   offset: number,
   min: number,
   max: number,
-  { dimension, factor = DEFAULT_RUBBER_BAND_FACTOR }: RubberBandOptions,
+  { dimension }: RubberBandOptions,
 ): number {
-  assertFinite('offset', offset);
-  assertFinite('min', min);
-  assertFinite('max', max);
-  if (min > max) {
-    throw new RangeError(
-      `ember-mobile-drawer: rubberBand min must be <= max, got min ${min} and max ${max}.`,
-    );
-  }
-  for (const [name, value] of [
-    ['dimension', dimension],
-    ['factor', factor],
-  ] as const) {
-    if (!(Number.isFinite(value) && value >= 0)) {
-      throw new RangeError(
-        `ember-mobile-drawer: rubberBand ${name} must be a finite number >= 0, got ${describe(value)}.`,
-      );
-    }
-  }
-
+  const factor = DEFAULT_RUBBER_BAND_FACTOR;
   const resist = (overshoot: number): number =>
-    factor <= 0 || dimension <= 0
+    dimension <= 0
       ? 0
       : (1 - 1 / ((overshoot * factor) / dimension + 1)) * dimension;
 
@@ -427,23 +366,18 @@ export function rubberBand(
  * without bound. So an overshoot is first clamped to
  * `MAX_BAND_FRACTION * dimension`, which keeps the result finite and
  * moderate: at most `999 * dimension / factor` outside the range. With a
- * `factor` or `dimension` of `0` nothing can be outside the range, so the
- * offset is clamped to it.
- *
- * @throws RangeError for the same input as {@link rubberBand}.
+ * `dimension` of `0` nothing can be outside the range, so the offset is
+ * clamped to it.
  */
 export function unRubberBand(
   offset: number,
   min: number,
   max: number,
-  options: RubberBandOptions,
+  { dimension }: RubberBandOptions,
 ): number {
-  // Validates the input the same way.
-  rubberBand(offset, min, max, options);
-  const { dimension, factor = DEFAULT_RUBBER_BAND_FACTOR } = options;
-
+  const factor = DEFAULT_RUBBER_BAND_FACTOR;
   const unresist = (overshoot: number): number => {
-    if (factor <= 0 || dimension <= 0) return 0;
+    if (dimension <= 0) return 0;
     const fraction = Math.min(overshoot / dimension, MAX_BAND_FRACTION);
     return (dimension / factor) * (1 / (1 - fraction) - 1);
   };
@@ -461,7 +395,7 @@ export function unRubberBand(
  * The largest fraction of the rubber-band `dimension` that
  * {@link unRubberBand} inverts; larger overshoots are clamped to it.
  */
-export const MAX_BAND_FRACTION = 0.999;
+const MAX_BAND_FRACTION = 0.999;
 
 /** The rubber-bands below the first and above the last snap point. */
 export interface DragBands {
@@ -485,9 +419,6 @@ export interface DragBands {
  *   increase of the band from where it is. An overshoot at or past the
  *   band's limit (possible after a spring overshoot when the tray is longer
  *   than the largest snap point) then barely moves, but never jumps.
- *
- * @throws RangeError for non-finite input, or band options
- *   {@link rubberBand} rejects.
  */
 export function dragOffset(
   start: number,
@@ -496,26 +427,17 @@ export function dragOffset(
   max: number,
   bands: DragBands,
 ): number {
-  assertFinite('start', start);
-  assertFinite('delta', delta);
   const { below, above } = bands;
   const raw = start + delta;
 
-  if (start > max && delta > 0) {
+  if (start > max ? delta > 0 : start < min && delta < 0) {
     // Further out: the band's increase from its (un-banded) position.
-    const from = unRubberBand(start, min, max, above);
+    const band = start > max ? above : below;
+    const from = unRubberBand(start, min, max, band);
     return (
       start +
-      rubberBand(from + delta, min, max, above) -
-      rubberBand(from, min, max, above)
-    );
-  }
-  if (start < min && delta < 0) {
-    const from = unRubberBand(start, min, max, below);
-    return (
-      start +
-      rubberBand(from + delta, min, max, below) -
-      rubberBand(from, min, max, below)
+      rubberBand(from + delta, min, max, band) -
+      rubberBand(from, min, max, band)
     );
   }
   // Towards the range: 1:1 while still outside it.
