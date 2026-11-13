@@ -181,10 +181,10 @@ const CLICK_MATCH = 2;
  * `#activateModal`). Only the last one handles Escape and Tab on the
  * document.
  */
-const modalStack: object[] = [];
+const modalStack: MobileDrawer[] = [];
 
 /** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
-const mountedDrawers = new Set<object>();
+const mountedDrawers = new Set<MobileDrawer>();
 
 /** The kind of input the user gave last, see `trackInput`. */
 type InputType = 'keyboard' | 'pointer';
@@ -1983,12 +1983,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // Past the tray's length the tray stays at its edge; the content moves
     // on inside it (see `#renderBounce`).
     const distance = Math.max(0, layout.trayLength - open);
-    const transform = {
-      bottom: `translate3d(0, ${distance}px, 0)`,
-      top: `translate3d(0, ${-distance}px, 0)`,
-      left: `translate3d(${-distance}px, 0, 0)`,
-      right: `translate3d(${distance}px, 0, 0)`,
-    }[this.placement];
+    // Away from the edge, against the opening direction.
+    const shift = -OPENING_DIRECTION[this.placement] * distance;
+    const transform =
+      this.axis === 'vertical'
+        ? `translate3d(0, ${shift}px, 0)`
+        : `translate3d(${shift}px, 0, 0)`;
 
     this.#tray!.style.transform = transform;
     this.#paintShadow(transform, distance, this.#sinkOf(open));
@@ -2186,15 +2186,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const content = this.#content;
     if (!content) return;
     const bouncing = bounce > 0;
-    const value = (b: number) =>
-      bouncing
-        ? {
-            bottom: `0px ${-b}px`,
-            top: `0px ${b}px`,
-            left: `${b}px 0px`,
-            right: `${-b}px 0px`,
-          }[this.placement]
-        : '';
+    const value = (b: number) => {
+      if (!bouncing) return '';
+      const shift = OPENING_DIRECTION[this.placement] * b;
+      return this.axis === 'vertical' ? `0px ${shift}px` : `${shift}px 0px`;
+    };
     if (bouncing !== this.#bouncing) {
       this.#bouncing = bouncing;
       if (bouncing) {
@@ -2603,7 +2599,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     // tray with `Nested`): the nested drawer stays in front, so it keeps
     // Escape and the Tab wrap.
     const nested = modalStack.findIndex((other) =>
-      logicallyContains(root, (other as MobileDrawer).#root),
+      logicallyContains(root, other.#root),
     );
     modalStack.splice(nested === -1 ? modalStack.length : nested, 0, this);
     MobileDrawer.#syncNested();
@@ -2710,7 +2706,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     let root = this.#root!;
     for (;;) {
       const inner = root;
-      const outer = [...(mountedDrawers as Set<MobileDrawer>)].find(
+      const outer = [...mountedDrawers].find(
         (other) =>
           other.#root !== inner &&
           !!other.#tray &&
@@ -2738,7 +2734,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     queueMicrotask(() => {
       if (this.#destroyed || !this.#hidden) return;
       const root = this.#root!;
-      for (const other of mountedDrawers as Set<MobileDrawer>) {
+      for (const other of mountedDrawers) {
         const otherRoot = other.#root;
         if (
           other === this ||
@@ -2802,11 +2798,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   static #portalsQueued = false;
 
   static #applyPortals(): void {
-    for (const drawer of modalStack as MobileDrawer[]) {
+    for (const drawer of modalStack) {
       if (drawer.#releaseInert) drawer.#makeOutsideInert();
     }
     MobileDrawer.#syncNested();
-    for (const drawer of mountedDrawers as Set<MobileDrawer>) {
+    for (const drawer of mountedDrawers) {
       if (drawer.#portals.size > 0) drawer.#applyNested();
     }
   }
@@ -2892,7 +2888,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * closed or closing, see `#hidden`.
    */
   #hiddenByDrawer(element: Element): boolean {
-    for (const other of mountedDrawers as Set<MobileDrawer>) {
+    for (const other of mountedDrawers) {
       if (other !== this && other.#hidden && other.#contains(element)) {
         return true;
       }
@@ -2930,9 +2926,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * inserted or removed.
    */
   static #syncNested(): void {
-    const front = modalStack[modalStack.length - 1] as MobileDrawer | undefined;
+    const front = modalStack[modalStack.length - 1];
     const frontRoot = front ? front.#root : undefined;
-    for (const drawer of mountedDrawers as Set<MobileDrawer>) {
+    for (const drawer of mountedDrawers) {
       const root = drawer.#root;
       if (!root) continue;
       root.toggleAttribute(
@@ -2949,7 +2945,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #applyNested(): void {
     const root = this.#root;
     if (!root) return;
-    for (const other of mountedDrawers as Set<MobileDrawer>) {
+    for (const other of mountedDrawers) {
       if (
         other !== this &&
         other.#root &&
@@ -4389,23 +4385,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       const pending = this.#pendingState!;
       this.#pendingState = undefined;
       if (this.#destroyed) return;
-      if (
-        pending.isAnimating !== undefined &&
-        pending.isAnimating !== this.isAnimating
-      ) {
-        this.isAnimating = pending.isAnimating;
+      const { isAnimating, progress, isDragging } = pending;
+      if (isAnimating !== undefined && isAnimating !== this.isAnimating) {
+        this.isAnimating = isAnimating;
       }
-      if (
-        pending.progress !== undefined &&
-        pending.progress !== this.progress
-      ) {
-        this.progress = pending.progress;
+      if (progress !== undefined && progress !== this.progress) {
+        this.progress = progress;
       }
-      if (
-        pending.isDragging !== undefined &&
-        pending.isDragging !== this.isDragging
-      ) {
-        this.isDragging = pending.isDragging;
+      if (isDragging !== undefined && isDragging !== this.isDragging) {
+        this.isDragging = isDragging;
       }
       if (pending.openSnapPoints) {
         this.openSnapPoints = pending.openSnapPoints;
