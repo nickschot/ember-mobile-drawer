@@ -39,6 +39,14 @@ export function unregisterDrawer(root: Element): void {
 }
 
 /**
+ * Whether `element` is the root of a drawer in the DOM, not just any element
+ * with the `mobile-drawer` class (e.g. an app element that reuses it).
+ */
+export function isDrawerRoot(element: Element): boolean {
+  return drawers.has(element);
+}
+
+/**
  * The drawer whose root is `element` or contains it: the innermost one, for
  * nested drawers.
  */

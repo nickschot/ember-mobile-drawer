@@ -48,7 +48,11 @@ import {
   initialFocus,
   tabbables,
 } from '../-private/modal/focus.ts';
-import { registerDrawer, unregisterDrawer } from '../-private/registry.ts';
+import {
+  isDrawerRoot,
+  registerDrawer,
+  unregisterDrawer,
+} from '../-private/registry.ts';
 import {
   addPortal,
   logicalParent,
@@ -60,6 +64,12 @@ import NestedPortal, { type NestedOwner } from '../-private/nested-portal.gts';
 import Grabber, { type GrabberOwner } from '../-private/grabber.gts';
 import { setPageProgress } from '../-private/page-progress.ts';
 import { KeyboardFill } from '../-private/keyboard-fill.ts';
+import {
+  isEditable,
+  isInactiveTextField,
+  isTextField,
+  isTypingField,
+} from '../-private/fields.ts';
 import type { MobileDrawerSpring } from '../springs.ts';
 
 import type {
@@ -174,12 +184,6 @@ const modalStack: object[] = [];
 
 /** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
 const mountedDrawers = new Set<object>();
-
-/**
- * The root elements of the drawers in `mountedDrawers`, to tell a drawer's
- * root from another element with the `mobile-drawer` class, see `#inNested`.
- */
-const mountedRoots = new WeakSet<Element>();
 
 /** The kind of input the user gave last, see `trackInput`. */
 type InputType = 'keyboard' | 'pointer';
@@ -610,85 +614,6 @@ function measureLength(
       : 0;
   const length = px(vertical ? style.height : style.width) + extra;
   return Number.isFinite(length) ? { length, extra } : undefined;
-}
-
-/** `<input>` types that take no typed text, so open no on-screen keyboard. */
-const NON_TEXT_INPUTS = new Set([
-  'button',
-  'checkbox',
-  'color',
-  'file',
-  'hidden',
-  'image',
-  'radio',
-  'range',
-  'reset',
-  'submit',
-]);
-
-/**
- * Whether `element` is a field the user edits: a text input, a textarea, a
- * select, or contenteditable content. Focus on one of them can open an
- * on-screen keyboard or picker, and the browser then scrolls the field into
- * view. An iframe counts too: the element focused inside it is unknown. A
- * `readonly` or `disabled` text field opens no keyboard, so it doesn't count.
- */
-function isEditable(element: Element): boolean {
-  if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement
-  ) {
-    if (element.readOnly || element.disabled) return false;
-    return (
-      element instanceof HTMLTextAreaElement ||
-      !NON_TEXT_INPUTS.has(element.type)
-    );
-  }
-  return (
-    element instanceof HTMLSelectElement ||
-    element instanceof HTMLIFrameElement ||
-    (element instanceof HTMLElement && element.isContentEditable)
-  );
-}
-
-/**
- * Whether `element` is a text `<input>` or a `<textarea>` that is `readonly`
- * or `disabled`: it opens no keyboard, see `isEditable`.
- */
-function isInactiveTextField(element: Element): boolean {
-  return (
-    ((element instanceof HTMLInputElement &&
-      !NON_TEXT_INPUTS.has(element.type)) ||
-      element instanceof HTMLTextAreaElement) &&
-    (element.readOnly || element.disabled)
-  );
-}
-
-/**
- * Whether `element` is a field the user types in: a text `<input>` or a
- * `<textarea>` that isn't `readonly` or `disabled`, or contenteditable
- * content. Focus on one of them opens an on-screen keyboard, also after a
- * tap. Unlike `isEditable`, not a select or an iframe.
- */
-function isTypingField(element: Element): boolean {
-  return (
-    isEditable(element) &&
-    !(element instanceof HTMLSelectElement) &&
-    !(element instanceof HTMLIFrameElement)
-  );
-}
-
-/**
- * Whether `element` is a field that takes text: a text `<input>` (not
- * `disabled`), a `<textarea>` or contenteditable content. Unlike
- * `isEditable`, `readonly` fields count: their text can still be selected.
- */
-function isTextField(element: Element): boolean {
-  if (element instanceof HTMLInputElement) {
-    return !element.disabled && !NON_TEXT_INPUTS.has(element.type);
-  }
-  if (element instanceof HTMLTextAreaElement) return !element.disabled;
-  return element instanceof HTMLElement && element.isContentEditable;
 }
 
 /**
@@ -1424,21 +1349,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         passive: true,
       });
       mountedDrawers.add(this);
-      mountedRoots.add(root);
-      MobileDrawer.#syncNested();
-      // Where the yielded `Nested` renders by default. Tracked state, so not
-      // during rendering (and the drawers around this one are in the DOM
-      // by then).
-      queueMicrotask(() => {
-        if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
-      });
-      this.#measure();
-      // Appear at the initial snap point without animating in.
-      this.#moveToActive(false);
-      this.#syncScrollLock();
-      // A drawer with a text field opened in front: the lock is now the
-      // fixed `<body>`, so the status bar is solid again.
-      this.#offLockChange = onLockChange(() => this.#endStatusBar());
       registerDrawer({
         root,
         tray: this.#tray,
@@ -1453,6 +1363,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         open: this.open,
         close: this.close,
       });
+      MobileDrawer.#syncNested();
+      // Where the yielded `Nested` renders by default. Tracked state, so not
+      // during rendering (and the drawers around this one are in the DOM
+      // by then).
+      queueMicrotask(() => {
+        if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
+      });
+      this.#measure();
+      // Appear at the initial snap point without animating in.
+      this.#moveToActive(false);
+      this.#syncScrollLock();
+      // A drawer with a text field opened in front: the lock is now the
+      // fixed `<body>`, so the status bar is solid again.
+      this.#offLockChange = onLockChange(() => this.#endStatusBar());
       const tray = this.#tray;
       for (const type of TRAY_INPUT_EVENTS) {
         tray.addEventListener(
@@ -1565,14 +1489,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#root?.removeEventListener('focusout', this.#onRootFocusOut);
       this.#sheet?.removeEventListener('scroll', this.#onRootScroll);
       mountedDrawers.delete(this);
-      if (this.#root) mountedRoots.delete(this.#root);
+      if (this.#root) unregisterDrawer(this.#root);
       MobileDrawer.#syncNested();
       trackInput(this, false);
       this.#focused = undefined;
-      if (this.#root) {
-        setPageProgress(this.#root, 0);
-        unregisterDrawer(this.#root);
-      }
+      if (this.#root) setPageProgress(this.#root, 0);
       // Undone right away, so nothing outlives the drawer. Focus can only
       // move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
@@ -2834,7 +2755,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       node;
       node = logicalParent(node)
     ) {
-      if (mountedRoots.has(node)) return node;
+      if (isDrawerRoot(node)) return node;
     }
     return undefined;
   }
@@ -3350,7 +3271,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       element && element !== root;
       element = element.parentElement
     ) {
-      if (mountedRoots.has(element)) return true;
+      if (isDrawerRoot(element)) return true;
     }
     return false;
   }
@@ -3816,7 +3737,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (element === root || this.#portals.has(element as HTMLElement)) {
         return found;
       }
-      if (mountedRoots.has(element)) found = element;
+      if (isDrawerRoot(element)) found = element;
     }
     return undefined;
   }
