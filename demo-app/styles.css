@@ -509,5 +509,14 @@ section > h2 {
 
 .example-ios-detail {
   margin: 0;
-  padding: 0 1rem 2rem;
+  padding: 0 1rem 0.5rem;
+}
+
+/* A row of the nested detail sheet's list, which scrolls at full height. */
+.example-ios-row {
+  padding: 0.75rem 0;
+}
+
+.example-ios-detail + .example-ios-list {
+  padding-bottom: 2rem;
 }

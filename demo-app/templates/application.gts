@@ -63,7 +63,10 @@ import { pageScale } from '../lib/page-scale.ts';
             page-facing edge. With "Scale the page", the page behind scales down
             and gets rounded corners as the sheet opens. Tap a place for a
             nested sheet: it renders outside the sheet's tray with the yielded
-            Nested component, so it shows also while the sheet is at 40%.
+            Nested component, so it shows also while the sheet is at 40%. Drag
+            the nested sheet to full height to scroll its list. "Detail sheet in
+            the tray" renders it in the sheet's tray instead (open the sheet to
+            full height first).
           </p>
           <div class="demo-buttons"><IosSheetExample /></div>
         </article>
