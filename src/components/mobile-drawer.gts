@@ -219,14 +219,55 @@ function trackInput(drawer: object, shown: boolean): void {
 }
 
 /**
- * The last pointer that went down while a drawer is on the page, also a
- * closed one: Safari doesn't focus a button on click, so this is how a drawer
- * opened by a tap there knows its trigger.
+ * The control that the last pointer went down on while a drawer is on the
+ * page, also a closed one: Safari doesn't focus a button on click, so this is
+ * how a drawer opened by a tap there knows its trigger. Found at the
+ * `pointerdown`, so a trigger that disables itself until the open still
+ * counts. Cleared when an open uses it.
  */
-let lastPointerDown: { target: EventTarget | null; time: number } | undefined;
+let lastPointerDown:
+  { trigger: HTMLElement | SVGElement | undefined; time: number } | undefined;
+
+/** The elements that Safari doesn't focus on click, and `tabindex`. */
+const POINTER_TRIGGER = [
+  'button:not(:disabled)',
+  'input:is([type=button],[type=submit],[type=reset],[type=image],[type=checkbox],[type=radio]):not(:disabled)',
+  'summary',
+  'a[href]',
+  'area[href]',
+  '[tabindex]',
+].join(', ');
+
+/**
+ * The nearest such element from `node` up, also out of shadow roots; for a
+ * `<label>`, its control.
+ */
+function pointerTriggerOf(
+  node: EventTarget | undefined,
+): HTMLElement | SVGElement | undefined {
+  for (
+    let current: Node | null = node instanceof Node ? node : null;
+    current;
+    current = current instanceof ShadowRoot ? current.host : current.parentNode
+  ) {
+    if (!(current instanceof HTMLElement || current instanceof SVGElement)) {
+      continue;
+    }
+    if (current.matches(POINTER_TRIGGER)) return current;
+    if (current instanceof HTMLLabelElement) {
+      const control = current.control;
+      if (control?.matches(POINTER_TRIGGER)) return control;
+    }
+  }
+  return undefined;
+}
 
 const onPointerDownTarget = (event: PointerEvent): void => {
-  lastPointerDown = { target: event.target, time: inputTime() };
+  lastPointerDown = {
+    // The element in a shadow root, not its host.
+    trigger: pointerTriggerOf(event.composedPath()[0]),
+    time: inputTime(),
+  };
 };
 
 function trackPointerDown(listen: boolean): void {
@@ -247,22 +288,14 @@ function trackPointerDown(listen: boolean): void {
 }
 
 /**
- * The button, link or `tabindex` element that a pointer went down on less
- * than `INPUT_WINDOW` ago, for when focus is on `<body>` at the open.
+ * The control that a pointer went down on less than `INPUT_WINDOW` ago, for
+ * when focus is on `<body>` at the open.
  */
 function recentPointerTrigger(): HTMLElement | SVGElement | undefined {
-  if (!lastPointerDown || inputTime() - lastPointerDown.time >= INPUT_WINDOW) {
-    return undefined;
-  }
-  const { target } = lastPointerDown;
-  const trigger =
-    target instanceof Element
-      ? target.closest('button:not(:disabled), a[href], area[href], [tabindex]')
-      : null;
-  return (trigger instanceof HTMLElement || trigger instanceof SVGElement) &&
-    trigger.isConnected
-    ? trigger
-    : undefined;
+  const record = lastPointerDown;
+  lastPointerDown = undefined;
+  if (!record || inputTime() - record.time >= INPUT_WINDOW) return undefined;
+  return record.trigger?.isConnected ? record.trigger : undefined;
 }
 
 /**
