@@ -1478,13 +1478,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   /**
    * Where the spring aims for `target`: past closed (`CLOSE_OVERSHOOT`) for
-   * a close to offset 0 from an open tray, so the tray doesn't creep to the
-   * edge. `#onSpringUpdate` ends that run at 0.
+   * a close to offset 0 while the tray is open by any amount, so the tray
+   * doesn't creep to the edge. Also in the last pixel of such a run, where a
+   * retarget to 0 (a resize, a changed argument) would give a long invisible
+   * tail. `#onSpringUpdate` ends that run at 0.
    */
   #aimFor(target: number): number {
-    return target <= EPSILON && this.#spring!.value > EPSILON
-      ? -CLOSE_OVERSHOOT
-      : target;
+    return target <= 0 && this.#spring!.value > 0 ? -CLOSE_OVERSHOOT : target;
   }
 
   /**

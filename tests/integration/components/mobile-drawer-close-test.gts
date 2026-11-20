@@ -169,11 +169,11 @@ module('Integration | Component | mobile-drawer | close', function (hooks) {
       );
       const step = offsets.at(-3)! - offsets.at(-2)!;
       assert.true(step > 3, `moves ${step} px per frame just before 0`);
+      // Not a check for "never past closed": the transform that this reads
+      // is clamped at 0 in `#render`, so it can't show that.
       assert.true(
-        offsets.every(
-          (offset, i) => offset >= 0 && offset <= (offsets[i - 1] ?? 337.6),
-        ),
-        'never past closed, never back',
+        offsets.every((offset, i) => offset <= (offsets[i - 1] ?? 337.6)),
+        'moves towards closed in every frame',
       );
 
       assert.strictEqual(openDistance(), 0, 'at closed');
@@ -234,27 +234,127 @@ module('Integration | Component | mobile-drawer | close', function (hooks) {
     await dragDrawer('.mobile-drawer', { distance: -100, velocity: -800 });
     const [end] = state.dragEnds;
     assert.strictEqual(end?.snapPoint, 0, 'picks closed');
+    // The spring starts where the tray is (not where the finger is) with the
+    // release velocity.
+    const from = openDistance();
     const offsets = await frames();
 
-    const before = reference(
-      springPresets.ios,
-      end!.offset,
-      0,
-      end!.velocity,
-    ).length;
+    const before = reference(springPresets.ios, from, 0, end!.velocity).length;
     assert.true(
       offsets.length < before / 2,
       `${offsets.length} frames, less than half of ${before}`,
     );
     const step = offsets.at(-3)! - offsets.at(-2)!;
     assert.true(step > 3, `moves ${step} px per frame just before 0`);
-    assert.true(
-      offsets.every((offset) => offset >= 0),
-      'never past closed',
-    );
     assert.strictEqual(openDistance(), 0);
     assert.true(root().hasAttribute('data-closed'));
     assert.false(state.api!.isAnimating);
+  });
+
+  /** Asserts the state of a drawer that rests at `offset`. */
+  function assertRest(
+    assert: Assert,
+    state: State,
+    offset: number,
+    message: string,
+  ) {
+    assert.strictEqual(openDistance(), offset, `${message}: offset`);
+    assert.strictEqual(
+      root().hasAttribute('data-closed'),
+      offset === 0,
+      `${message}: data-closed`,
+    );
+    assert.false(state.api!.isAnimating, `${message}: isAnimating`);
+    assert.strictEqual(clock.pendingFrames, 0, `${message}: no frames`);
+  }
+
+  async function runFrames(count: number): Promise<void> {
+    await settled();
+    for (let i = 0; i < count; i++) clock.frame(FRAME);
+    await settled();
+  }
+
+  test('a change in the last pixel of a close does not aim at 0 again', async function (assert) {
+    const state = new State();
+    state.spring = springPresets.ios;
+    await renderDrawer(state);
+    await moveTo(state, 1);
+
+    state.api!.close();
+    await settled();
+    // Short frames, so the tray stops in the last half pixel.
+    while (clock.pendingFrames > 0) {
+      clock.frame(0.05);
+      const offset = openDistance();
+      if (offset > 0 && offset <= 0.5) break;
+    }
+    const near = openDistance();
+    assert.true(near > 0 && near <= 0.5, `at ${near} px`);
+
+    // Each argument change retargets the spring.
+    state.spring = { ...springPresets.ios };
+    const offsets = await frames();
+
+    assert.true(offsets.length <= 2, `ends after ${offsets.length} frames`);
+    assertRest(assert, state, 0, 'closed');
+  });
+
+  test('snapTo during a close goes back up, and a new close still ends at 0', async function (assert) {
+    const state = new State();
+    state.spring = springPresets.ios;
+    await renderDrawer(state);
+    await moveTo(state, 1);
+
+    state.api!.close();
+    await runFrames(8);
+    assert.true(openDistance() > 0, 'moving');
+    await moveTo(state, 1);
+    assertRest(assert, state, 337.6, 'reopened');
+
+    const offsets = await moveTo(state, 0);
+    assert.true(offsets.length < 20, `closed in ${offsets.length} frames`);
+    assertRest(assert, state, 0, 'closed');
+  });
+
+  test('close() during an opening ends at 0', async function (assert) {
+    const state = new State();
+    state.spring = springPresets.ios;
+    await renderDrawer(state);
+
+    state.api!.snapTo(2);
+    await runFrames(1);
+    assert.true(openDistance() > 0, 'opening');
+    state.api!.close();
+    await frames();
+
+    assertRest(assert, state, 0, 'closed');
+  });
+
+  test('a touch hold during a close, then the release, ends at 0', async function (assert) {
+    const state = new State();
+    state.spring = springPresets.ios;
+    await renderDrawer(state);
+    await moveTo(state, 1);
+
+    state.api!.close();
+    await runFrames(5);
+    const init = {
+      bubbles: true,
+      composed: true,
+      pointerId: 7,
+      pointerType: 'touch',
+    };
+    tray().dispatchEvent(new PointerEvent('pointerdown', init));
+    await settled();
+    const held = openDistance();
+    assert.false(state.api!.isAnimating, 'held');
+    assert.true(held > 0, `held at ${held} px`);
+
+    tray().dispatchEvent(new PointerEvent('pointerup', init));
+    const offsets = await frames();
+
+    assert.true(offsets.length < 15, `closed in ${offsets.length} frames`);
+    assertRest(assert, state, 0, 'closed');
   });
 
   test('with reduced motion a close still jumps to closed', async function (assert) {
