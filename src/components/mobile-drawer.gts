@@ -239,23 +239,20 @@ const POINTER_TRIGGER = [
 ].join(', ');
 
 /**
- * The nearest such element from `node` up, also out of shadow roots; for a
- * `<label>`, its control.
+ * The first such element in the event path, which goes into shadow roots and
+ * through slots (a slotted `<span>` in a web component's shadow `<button>`);
+ * for a `<label>`, its control.
  */
 function pointerTriggerOf(
-  node: EventTarget | undefined,
+  path: readonly EventTarget[],
 ): HTMLElement | SVGElement | undefined {
-  for (
-    let current: Node | null = node instanceof Node ? node : null;
-    current;
-    current = current instanceof ShadowRoot ? current.host : current.parentNode
-  ) {
-    if (!(current instanceof HTMLElement || current instanceof SVGElement)) {
+  for (const node of path) {
+    if (!(node instanceof HTMLElement || node instanceof SVGElement)) {
       continue;
     }
-    if (current.matches(POINTER_TRIGGER)) return current;
-    if (current instanceof HTMLLabelElement) {
-      const control = current.control;
+    if (node.matches(POINTER_TRIGGER)) return node;
+    if (node instanceof HTMLLabelElement) {
+      const control = node.control;
       if (control?.matches(POINTER_TRIGGER)) return control;
     }
   }
@@ -264,8 +261,8 @@ function pointerTriggerOf(
 
 const onPointerDownTarget = (event: PointerEvent): void => {
   lastPointerDown = {
-    // The element in a shadow root, not its host.
-    trigger: pointerTriggerOf(event.composedPath()[0]),
+    // Into shadow roots and through slots, not only the host.
+    trigger: pointerTriggerOf(event.composedPath()),
     time: inputTime(),
   };
 };
@@ -2286,7 +2283,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!(focusInside || this.#hasFocus() || (wasModal && dropped))) return;
     if (target.isConnected) {
       target.focus();
-      return;
+      // Else, e.g. a trigger that is disabled now, near where it is.
+      const scope = target.getRootNode() as Document | ShadowRoot;
+      if (scope.activeElement === target) return;
     }
     const root = this.#root;
     const ancestor = path.find((element) => element.isConnected);

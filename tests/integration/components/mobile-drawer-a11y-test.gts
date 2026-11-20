@@ -1126,6 +1126,63 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
         }
       });
 
+      test('slotted content of a button in a web component counts', async function (assert) {
+        if (!customElements.get('test-slot-trigger')) {
+          customElements.define(
+            'test-slot-trigger',
+            class extends HTMLElement {
+              constructor() {
+                super();
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.append(document.createElement('slot'));
+                this.attachShadow({ mode: 'open' }).append(button);
+              }
+            },
+          );
+        }
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const host = document.createElement('test-slot-trigger');
+        const label = document.createElement('span');
+        label.textContent = 'Open';
+        host.append(label);
+        el('[data-test-container]').prepend(host);
+        try {
+          // The path: <span>, <slot>, <button>, shadow root, host.
+          await tapOpenClose(state, label);
+          assert.strictEqual(active(), host, 'the host has focus');
+          assert.strictEqual(
+            host.shadowRoot!.activeElement,
+            host.shadowRoot!.querySelector('button'),
+            'on the button that the span is slotted in',
+          );
+        } finally {
+          host.remove();
+        }
+      });
+
+      test('a trigger that is disabled at the close: focus goes near it', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const trigger = el('[data-test-trigger]') as HTMLButtonElement;
+        blur();
+        tap(trigger);
+        state.active = 2;
+        await settle();
+        trigger.disabled = true;
+        state.active = 0;
+        await settle();
+        assert.strictEqual(
+          active(),
+          el('[data-test-page]'),
+          'the first tabbable element in its nearest ancestor',
+        );
+        trigger.disabled = false;
+      });
+
       test('a trigger that disables itself until the open still counts', async function (assert) {
         const state = new State();
         await renderDrawer(state);
