@@ -1,0 +1,22 @@
+{
+  "solution": {
+    "ember-mobile-drawer": {
+      "impact": "patch",
+      "oldVersion": "1.0.0",
+      "newVersion": "1.0.1",
+      "tagName": "latest",
+      "constraints": [
+        {
+          "impact": "patch",
+          "reason": "Appears in changelog section :memo: Documentation"
+        },
+        {
+          "impact": "patch",
+          "reason": "Appears in changelog section :house: Internal"
+        }
+      ],
+      "pkgJSONPath": "./package.json"
+    }
+  },
+  "description": "## Release (2026-11-20)\n\n* ember-mobile-drawer 1.0.1 (patch)\n\n#### :memo: Documentation\n* `ember-mobile-drawer`\n  * [#172](https://github.com/nickschot/ember-mobile-drawer/pull/172) README accessibility: close button, peek scroll-padding and non-modal labels ([@nickschot](https://github.com/nickschot))\n  * README accessibility: close button, peek scroll-padding and non-modal labels ([@nickschot](https://github.com/nickschot))\n\n#### :house: Internal\n* `ember-mobile-drawer`\n  * [#173](https://github.com/nickschot/ember-mobile-drawer/pull/173) Demo: add the color-scheme meta tag ([@nickschot](https://github.com/nickschot))\n  * Demo: add the color-scheme meta tag ([@nickschot](https://github.com/nickschot))\n\n#### Committers: 1\n- Nick Schot ([@nickschot](https://github.com/nickschot))\n"
+}
