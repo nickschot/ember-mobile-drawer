@@ -356,7 +356,7 @@ The drawer only removes the `inert` attributes it added. An element that was alr
 
 The root gets `role="dialog"`, and `aria-modal="true"` while open. Give it a name with `aria-labelledby` (pointing at a heading in the drawer) or `aria-label`; a modal drawer without one logs a warning in development. A closed drawer is hidden (`visibility: hidden`), also from assistive technology.
 
-Always show a close button in a modal drawer. Escape needs a keyboard, a tap on the backdrop needs a pointer (the backdrop is not focusable), and the grabber never closes the drawer, so a touch screen reader user has no other way out. The Android back gesture doesn't close the drawer today. Also give the button that opens the drawer `aria-expanded` (`"true"` while the drawer is open) and `aria-controls` (the drawer's `id`):
+Always show a close button in a modal drawer. Escape needs a keyboard, a tap on the backdrop needs a pointer (the backdrop is not focusable), and the grabber never closes the drawer, so a touch screen reader user has no other way out. The Android back gesture closes the drawer only in Chromium browsers (see above). Also give the button that opens the drawer `aria-expanded` (`"true"` while the drawer is open) and `aria-controls` (the drawer's `id`):
 
 ```gts
 import Component from '@glimmer/component';
