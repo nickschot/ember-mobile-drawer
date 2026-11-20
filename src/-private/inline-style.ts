@@ -1,6 +1,5 @@
 /**
- * Inline style values that the drawer overrides on elements, saved to put
- * back later.
+ * Inline style values that the drawer overrides, saved to put back later.
  *
  * @module
  * @internal
@@ -12,14 +11,10 @@ export interface SavedStyle {
   priority: string;
 }
 
-/**
- * The inline value of one property per element from before the drawer
- * changed it.
- */
+/** One property per element. */
 export class InlineOverrides {
   #saved = new Map<HTMLElement, SavedStyle>();
 
-  /** Saves the inline value of `property` on `element`. */
   save(element: HTMLElement, property: string): void {
     const { style } = element;
     this.#saved.set(element, {
@@ -29,7 +24,6 @@ export class InlineOverrides {
     });
   }
 
-  /** Saves the inline value of `property` on `element`, then sets `value`. */
   set(element: HTMLElement, property: string, value: string): void {
     this.save(element, property);
     element.style.setProperty(property, value);
@@ -39,16 +33,11 @@ export class InlineOverrides {
     return this.#saved.get(element);
   }
 
-  /** Forgets `element` without putting its value back. */
   delete(element: HTMLElement): void {
     this.#saved.delete(element);
   }
 
-  /**
-   * Puts back the saved value of `element` and forgets it. With `ifStill`,
-   * only when the inline value is still `ifStill` without priority: a value
-   * the app set in the meantime is kept.
-   */
+  /** With `ifStill`, a value the app set in the meantime is kept. */
   restore(element: HTMLElement, ifStill?: string): void {
     const saved = this.#saved.get(element);
     if (!saved) return;
@@ -63,7 +52,6 @@ export class InlineOverrides {
     }
   }
 
-  /** Puts back the saved values of all elements. */
   restoreAll(): void {
     for (const element of [...this.#saved.keys()]) this.restore(element);
   }

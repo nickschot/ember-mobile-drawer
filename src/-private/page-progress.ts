@@ -1,36 +1,16 @@
 /**
- * Publishes how far the modal drawers are open to the page behind them, for
- * effects such as the iOS theme's page scale.
+ * Publishes how far the modal drawers are open to the page elements behind
+ * them (`data-mobile-drawer-page`), for effects such as the iOS page scale.
  *
- * Every element marked with `data-mobile-drawer-page` gets two inline custom
- * properties while a modal drawer outside it is open above its smallest snap
- * point:
- * - `--mobile-drawer-page-progress`: the largest progress of those drawers,
- *   above `0` and at most `1`;
- * - `--mobile-drawer-page-viewport-top`: where the top of the viewport is in
- *   the element, in px (`0` when the element starts at the top of the
- *   viewport, `500px` when the page is scrolled down by 500px), measured
- *   when the element was looked up. Body scrolling is locked while a modal
- *   drawer is open, so it doesn't change after that.
- * It also gets the attribute `data-mobile-drawer-page-active` for that time,
- * for styles that only need to know that the page is behind an open drawer
- * (e.g. the iOS theme's black `<body>`).
- * Otherwise the properties and the attribute are removed, so styles that
- * use the properties (with no fallback) don't apply at all, and e.g. a
- * `transform` on the page doesn't change `position: fixed` content in it
- * while no drawer is open.
+ * The viewport top is measured once: body scrolling is locked while a modal
+ * drawer is open. With no drawer open, the properties and the attribute are
+ * removed, so e.g. a page `transform` doesn't change `position: fixed`
+ * content then. A drawer inside a marked element never drives it: the page
+ * can't move without moving the drawer.
  *
- * Only modal drawers from the bottom call this (see the component's
- * `#render`). A drawer inside a marked element never drives that element:
- * the page that contains a drawer can't move without moving the drawer.
- *
- * The marked elements are looked up when the first drawer starts to open
- * and kept until no drawer is open, so the document isn't queried on every
- * frame. While a drawer is open, a `MutationObserver` looks them up again
- * when elements are added or removed, or an element is marked or unmarked
- * (e.g. a route change replaces the page wrapper), and writes the current
- * progress on them at once, also while the drawers are at rest. An element
- * that leaves the list gets its properties and attribute removed.
+ * The marked elements are cached while a drawer is open, so the document
+ * isn't queried every frame; a `MutationObserver` refreshes them (e.g. a
+ * route change replaces the page wrapper).
  *
  * @module
  * @internal
@@ -44,15 +24,13 @@ export const PAGE_ACTIVE_ATTRIBUTE = 'data-mobile-drawer-page-active';
 
 interface Page {
   element: HTMLElement;
-  /** The value written last; `0` when nothing is written. */
+  /** `0` when nothing is written. */
   progress: number;
 }
 
-/** Progress (above 0) by drawer root. */
 const sources = new Map<Element, number>();
-/** The marked elements; `undefined` when they must be looked up again. */
 let pages: Page[] | undefined;
-/** The pages written so far, also while `pages` is out of date. */
+/** Also while `pages` is out of date. */
 const written = new Map<HTMLElement, Page>();
 let observer: MutationObserver | undefined;
 
@@ -77,7 +55,6 @@ function write(page: Page, progress: number): void {
   page.progress = progress;
 }
 
-/** Looks up the marked elements, and clears those that are no longer. */
 function findPages(): Page[] {
   const found = Array.from(
     document.querySelectorAll<HTMLElement>(`[${PAGE_ATTRIBUTE}]`),
@@ -89,7 +66,6 @@ function findPages(): Page[] {
   return found;
 }
 
-/** Writes the current progress of the drawers on every page element. */
 function writeAll(pages: Page[]): void {
   for (const page of pages) {
     let max = 0;
@@ -100,11 +76,6 @@ function writeAll(pages: Page[]): void {
   }
 }
 
-/**
- * Watches the DOM while a drawer is open: after a change, looks up the page
- * elements again and writes the current progress on them at once, also
- * while the drawers are at rest.
- */
 function observe(): void {
   if (observer || typeof MutationObserver === 'undefined') return;
   observer = new MutationObserver(() => {
@@ -119,11 +90,7 @@ function observe(): void {
   });
 }
 
-/**
- * Sets the progress of the drawer with root `source`, from `0` to `1`, and
- * updates the marked page elements. `0` removes the drawer, e.g. when it
- * closes or is destroyed.
- */
+/** `0` removes the drawer, e.g. when it closes or is destroyed. */
 export function setPageProgress(source: Element, progress: number): void {
   if (progress > 0) {
     sources.set(source, Math.min(progress, 1));

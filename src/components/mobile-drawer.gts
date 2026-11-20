@@ -80,10 +80,7 @@ import type {
   Placement,
 } from '../types.ts';
 
-/**
- * Keeps `settled()` from `@ember/test-helpers` waiting while the drawer
- * animates, see `#startSpring`. A no-op in production builds.
- */
+/** Keeps `settled()` waiting while the drawer animates. */
 const animationWaiter = buildWaiter('ember-mobile-drawer:animation');
 
 const PLACEMENTS: readonly Placement[] = ['bottom', 'top', 'left', 'right'];
@@ -96,16 +93,10 @@ const DEFAULT_SNAP_POINTS: readonly SnapPoint[] = Object.freeze([0, 'content']);
  */
 const POINTER_TYPES = Object.freeze(['touch', 'pen'] as const);
 
-/**
- * A release at least this fast (px/s) always moves to at least the next snap
- * point in the direction of the finger, see `selectSnapPoint`.
- */
+/** A release this fast (px/s) moves at least to the next snap point. */
 const FLING_VELOCITY = 400;
 
-/**
- * Which way along the pointer's axis opens the drawer: `1` when opening moves
- * towards larger client coordinates (right, down), `-1` otherwise.
- */
+/** `1` when opening moves towards larger client coordinates, else `-1`. */
 const OPENING_DIRECTION: Record<Placement, 1 | -1> = {
   bottom: -1,
   top: 1,
@@ -114,100 +105,63 @@ const OPENING_DIRECTION: Record<Placement, 1 | -1> = {
 };
 
 /**
- * The rubber band past the largest snap point, like the content of an iOS
- * sheet: the classic UIScrollView curve `(1 - 1 / (x * c / d + 1)) * d` with
- * `c = DEFAULT_RUBBER_BAND_FACTOR` (0.55) and a dimension `d` of this ratio
- * times the tray's length (the scroll container's size along the axis).
- * Measured in the iOS 27 simulator (iPhone 17e): a sheet at its largest
- * detent doesn't move, its content bounces with c ≈ 0.55 and d ≈ 440pt for
- * a scroll view of about 800pt, so d ≈ 0.55 × the scroll view's size. Past
- * the tray's length only the content moves (see `#renderBounce`); the tray
- * stays at its edge. Past the smallest snap point the container size is
- * used.
+ * The rubber band past the largest snap point, like an iOS sheet's content:
+ * the UIScrollView curve `(1 - 1 / (x * c / d + 1)) * d` with `c = 0.55` and
+ * `d` this ratio times the tray's length. Only the content moves; the tray
+ * stays at its edge. Past the smallest snap point `d` is the container size.
  */
 const OPEN_RUBBER_BAND_RATIO = 0.55;
 
-/**
- * Marks an element in `.mobile-drawer__content` that stays at the tray's
- * edge while the content bounces past fully open, such as a sticky grabber
- * or header: the component writes the opposite `translate` on it.
- */
+/** Content that stays at the tray's edge while the content bounces. */
 const PINNED_ATTRIBUTE = 'data-mobile-drawer-pinned';
 
-/**
- * Marks an element inside the tray as a scroll container for scroll vs drag
- * handling. The tray itself always is one.
- */
+/** Marks a scroll container in the tray. The tray itself always is one. */
 const SCROLL_ATTRIBUTE = 'data-mobile-drawer-scroll';
 
 /**
  * Events on the tray that (re)lock the scroll containers they reach. `wheel`
- * isn't passive, so the browser applies the lock before the wheel scrolls.
+ * isn't passive, so the lock applies before the wheel scrolls.
  */
 const TRAY_INPUT_EVENTS = ['pointerdown', 'wheel', 'focusin'] as const;
 const CAPTURE_PASSIVE = { capture: true, passive: true } as const;
 const CAPTURE_ACTIVE = { capture: true, passive: false } as const;
 
-/**
- * Tolerance (px) for "at the highest snap point" and "at a scroll end":
- * offsets and scroll positions can be fractional.
- */
+/** Tolerance (px): offsets and scroll positions can be fractional. */
 const EPSILON = 0.5;
 
-/**
- * How far (screen px) a pointer may move between going down on the backdrop
- * and its click for the click to still count as a tap. The same distance at
- * which `didPan` recognises a pan.
- */
+/** How far (screen px) a backdrop tap may move. The same as `didPan`. */
 const TAP_SLOP = 10;
 
-/**
- * How long (ms) after a pointer stopped the content's momentum its click is
- * still cancelled, see `#swallowClick`.
- */
+/** How long (ms) after stopping momentum its click is still cancelled. */
 const SWALLOW_CLICK_TIME = 1000;
 
-/**
- * How far (px) a click may be from where the backdrop pointer lifted to
- * still be that pointer's click. Pointer and click coordinates can differ
- * by rounding.
- */
+/** How far (px) a click may be from where the pointer lifted (rounding). */
 const CLICK_MATCH = 2;
 
 /**
- * The open modal drawers, in the order they became modal, except that a
- * drawer always comes before the modal drawers inside it (see
- * `#activateModal`). Only the last one handles Escape and Tab on the
- * document.
+ * The open modal drawers in the order they became modal, but a drawer always
+ * comes before the modal drawers inside it. Only the last one handles Escape
+ * and Tab.
  */
 const modalStack: MobileDrawer[] = [];
 
-/** Every drawer in the DOM, to find nested drawers, see `#applyNested`. */
 const mountedDrawers = new Set<MobileDrawer>();
 
-/** The kind of input the user gave last, see `trackInput`. */
 type InputType = 'keyboard' | 'pointer';
 
-/** The drawers that show (open or at a peek), see `trackInput`. */
+/** The drawers that show (open or at a peek). */
 const shownDrawers = new Set<object>();
 
-/**
- * The input the user gave last while a drawer showed, and when (ms, see
- * `inputTime`), or `undefined` when there was none since then. See
- * `trackInput`.
- */
+/** The input the user gave last while a drawer showed. */
 let lastInput: { type: InputType; time: number } | undefined;
 
 /**
- * How long (ms) after a key press or a pointer that goes down a focus still
- * counts as caused by it, see `focusInputOf`. A focus from Tab, a tap or a
- * click, or from the app's own handler for the event, comes at once. A long
- * press can take more time; then the browser decides, as for focus without
- * input.
+ * How long (ms) after an input a focus still counts as caused by it. A long
+ * press can take more time; then the browser decides.
  */
 const INPUT_WINDOW = 1000;
 
-/** The time for `lastInput`: the drawer's clock, as for its animations. */
+/** The drawer's clock, as for its animations. */
 const inputTime = (): number => (drawerEnvironment.clock ?? performance).now();
 
 const onInputKeyDown = (): void => {
@@ -221,14 +175,10 @@ const onInputPointerDown = (): void => {
 const INPUT_LISTENER = { capture: true, passive: true } as const;
 
 /**
- * Adds `drawer` to the drawers that show (`shown`) or removes it. While one
- * or more drawers show, listeners on the window record the input the user
- * gave last: a key press (`keydown`) or a pointer that goes down (mouse,
- * touch or pen, `pointerdown`). They are in the capture phase, so the record
- * is there before the focus that the input causes, also when the app moves
- * focus in its own handler for the event, and an app's listener that stops
- * the event doesn't hide it. When no drawer shows, the listeners go and the
- * record is forgotten. See `focusInputOf`.
+ * While a drawer shows, window listeners record the last input. They capture,
+ * so the record is there before the focus the input causes (also when the
+ * app moves focus in its handler) and an app that stops the event can't hide
+ * it.
  */
 function trackInput(drawer: object, shown: boolean): void {
   if (shown) {
@@ -254,21 +204,11 @@ function trackInput(drawer: object, shown: boolean): void {
 }
 
 /**
- * The input that gives `element` focus now: keyboard focus when the last
- * input was a key press (see `trackInput`) less than `INPUT_WINDOW` ago.
- * Also programmatic focus by the app right after a key press, like
- * `:focus-visible` in Chrome. The same in every browser, and for every
- * element: a mouse click on a `readonly` text field is pointer focus, though
- * Chrome gives it `:focus-visible`.
- *
- * Without a recent input the browser decides: `:focus-visible`, but never
- * for a `readonly` or `disabled` text field (Chrome gives it
- * `:focus-visible` after a mouse click too). That is focus from a screen
- * reader or switch access, which sends no key or pointer event to the page
- * (an old tap must not make it pointer focus), and focus that the app moves
- * right after the click or key press that opened the drawer, before the
- * listeners were there. A browser without `:focus-visible` (Safari before
- * 15.4) throws; nothing then counts as keyboard focus.
+ * The input that gives `element` focus now: the recent input when there is
+ * one, the same in every browser (Chrome gives a clicked `readonly` field
+ * `:focus-visible`). Else, as for a screen reader or switch access, which
+ * send no key or pointer event, `:focus-visible` decides, but never for an
+ * inactive text field. Safari before 15.4 throws on `:focus-visible`.
  */
 function focusInputOf(element: Element): InputType {
   if (lastInput && inputTime() - lastInput.time < INPUT_WINDOW) {
@@ -289,11 +229,7 @@ function scrollRange(element: Element, vertical: boolean): number {
     : element.scrollWidth - element.clientWidth;
 }
 
-/**
- * The scroll range of `element` along the axis: the smallest and largest
- * scroll position, and the position now. Horizontal right-to-left positions
- * run from `-range` to `0`; `style` gives the direction.
- */
+/** Right-to-left horizontal positions run from `-range` to `0`. */
 function scrollBounds(
   element: Element,
   vertical: boolean,
@@ -309,7 +245,6 @@ function scrollBounds(
   };
 }
 
-/** Whether `style` lets the user scroll along the axis. */
 function scrollsAlong(
   style: { overflowX: string; overflowY: string },
   vertical: boolean,
@@ -332,16 +267,10 @@ function canScroll(
   const { range, min, max, position } = scrollBounds(element, vertical, style);
   if (!(range > EPSILON)) return false;
   // iOS reports positions past the ends while bouncing; those count as ends.
-  // A finger moving down (right) reveals what is above (left of) the view,
-  // so the position has to be able to decrease; moving up (left), increase.
   return movement > 0 ? position > min + EPSILON : position < max - EPSILON;
 }
 
-/**
- * Whether `element` is nearer the end of its scroll range along the axis
- * that a finger moving `way` (positive: down or right) pushes its content
- * towards than the other end.
- */
+/** Whether `element` is nearer the end that a finger moving `way` pushes to. */
 function nearEnd(element: Element, vertical: boolean, way: number): boolean {
   if (!(scrollRange(element, vertical) > EPSILON)) return true;
   const { range, min, position } = scrollBounds(
@@ -355,101 +284,63 @@ function nearEnd(element: Element, vertical: boolean, way: number): boolean {
 }
 
 interface Drag {
-  /** The element whose pan modifier started the drag. */
   source: HTMLElement;
-  /** Offset (px open) shown when the drag started. */
   startOffset: number;
-  /** Pointer coordinate along the drawer axis where the finger went down. */
   startPosition: number;
-  /** Screen px per px of drawer offset, see `#screenScale`. */
+  /** Screen px per px of drawer offset. */
   scale: number;
-  /**
-   * How far (drawer px, positive opens) the tray was behind the finger when
-   * the catch-up (re)started: at first the distance the finger had moved
-   * when the pan was recognised. The lag eases from this to `0`, see
-   * `catchUpLag` and `#follow`.
-   */
+  /** How far (drawer px) the tray was behind the finger at catch-up start. */
   lagFrom: number;
-  /** Time (ms, see `#now`) the catch-up (re)started. */
   lagStart: number;
-  /**
-   * Whether the tray holds still while the finger comes back towards it
-   * during the catch-up, see `onPan`.
-   */
+  /** The tray holds still while the finger comes back during the catch-up. */
   holding: boolean;
-  /** Whether the finger moved since the last catch-up frame. */
   moved: boolean;
-  /**
-   * The furthest `delta` the finger reached the way the tray catches up
-   * (the sign of `lagFrom`) since the catch-up (re)started, see `onPan`.
-   */
+  /** The furthest `delta` the way the tray catches up, since the start. */
   peak: number;
-  /** How far (drawer px) the finger has moved from where it went down. */
+  /** How far (drawer px) the finger has moved. */
   delta: number;
-  /** The tray's `delta`: `delta` minus the lag, as last drawn. */
+  /** `delta` minus the lag, as last drawn. */
   drawn: number;
-  /** Where the finger puts the drawer: `#dragOffset` of `delta`. */
   target: number;
-  /** Rendered offset, after rubber-banding, behind `target` while catching up. */
+  /** Rendered offset, after rubber-banding. */
   offset: number;
-  /** The scheduled catch-up frame, see `#catchUpFrame`. */
   frame?: number;
   /**
-   * Whether the drag took over a gesture that scrolled the content (see
-   * `onTrayScroll`). Its touchmoves can't be cancelled, so the content stays
-   * locked for the whole drag, see `#syncScrollLock`.
+   * The drag took over a gesture that scrolled the content. Its touchmoves
+   * can't be cancelled, so the content stays locked for the whole drag.
    */
   handoff?: boolean;
-  /**
-   * The `delta` at which the tray reaches the highest snap point, for a
-   * drag that may scroll the content past it (see `#splitDrag`);
-   * `undefined` for other drags.
-   */
+  /** The `delta` at the highest snap point, for a drag that may scroll. */
   scrollAt?: number;
-  /** Where the gesture started (the element the finger went down on). */
   from: Element | null;
-  /**
-   * The content the drag scrolls past the highest snap point, once the
-   * tray got there (see `#reachContent`); `null` when nothing can scroll
-   * that way.
-   */
+  /** The content scrolled past the highest snap point, `null` for none. */
   scroll?: ContentScroll | null;
-  /** How far (drawer px towards open) the content is scrolled, as written. */
+  /** How far (drawer px towards open) the content is scrolled. */
   written: number;
 }
 
-/**
- * A scroll container that a drag scrolls from script past the highest snap
- * point, see `#splitDrag`. Positions are `scrollTop` (vertical) or
- * `scrollLeft`, read once when the drag reaches it.
- */
+/** A scroll container that a drag scrolls from script past the top. */
 interface ContentScroll {
   element: HTMLElement;
   vertical: boolean;
-  /** The position when the drag reached it. */
   start: number;
   /** Which way the position moves as the finger moves towards open. */
   sign: 1 | -1;
-  /** The scroll range: `-range` to `0` for a right-to-left `scrollLeft`. */
   min: number;
   max: number;
   /** How far (px) it can scroll from `start` as the finger opens. */
   room: number;
-  /** How far (px) it can scroll back from `start`, to its content start. */
+  /** How far (px) it can scroll back from `start`. */
   back: number;
 }
 
-/** A scroll reset of the tray, see `#planScrollReset`. */
 interface ScrollReset {
   /** `scrollTop` of the scroll start. */
   start: number;
   /** Which way `scrollTop` moves away from the start. */
   sign: 1 | -1;
-  /** How far (px) the tray was from its scroll start when planned. */
   distance: number;
-  /** Offset (px open) the tray was at when planned. */
   from: number;
-  /** Offset of the run's target. */
   target: number;
   /** The part of `distance` left, as last written. */
   fraction: number;
@@ -608,17 +499,10 @@ interface Layout {
 }
 
 /**
- * The border-box length of `element` along the drawer axis, in fractional px
- * and in the element's own coordinate space, or `undefined` when it can't be
- * measured: outside of the render tree (e.g. under a `display: none`
- * ancestor) computed styles return specified values such as `'auto'` or
- * `'100%'` instead of px. Computed styles are used instead
- * of `getBoundingClientRect()`, which also includes transforms (of the tray
- * and of any ancestor, e.g. a scaled preview), and instead of
- * `offsetHeight`/`offsetWidth`, which are rounded.
- *
- * `extra` is what the `height`/`width` property doesn't include (padding and
- * border under `box-sizing: content-box`), needed to write an explicit size.
+ * The border-box length of `element` along the axis, or `undefined` outside
+ * the render tree (computed styles then aren't px). Not
+ * `getBoundingClientRect()`, which includes transforms, nor `offsetHeight`,
+ * which is rounded. `extra` is the padding and border of `content-box`.
  */
 function measureLength(
   element: HTMLElement,
@@ -644,14 +528,9 @@ function measureLength(
 }
 
 /**
- * Whether `element` handles its own touch gestures, so a swipe that starts
- * on it in a nested drawer is never cancelled (see `#onNestedTouchMove`):
- * an enabled text field (see `isTextField`), range slider or select, an
- * editable element, a media element with controls, an element the app
- * made `draggable="true"`, or one with `touch-action: none` (e.g. a
- * drawing canvas or a map, which handles every gesture on it in script).
- * Not other inputs (a checkbox, a button): a swipe on them is a swipe on
- * the drawer. `:disabled` also matches a control in a disabled fieldset.
+ * Whether `element` handles its own touch gestures, so a swipe on it in a
+ * nested drawer is never cancelled. `:disabled` also matches a control in a
+ * disabled fieldset.
  */
 function handlesOwnGesture(
   element: Element,
@@ -678,148 +557,33 @@ function handlesOwnGesture(
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
-/** The valid index into an array of `count` items nearest to `index`. */
 const clampIndex = (index: number, count: number) =>
   Number.isFinite(index) ? clamp(Math.round(index), 0, count - 1) : 0;
 
 /**
  * A drawer attached to one edge of its container (by default the viewport)
  * that rests at one of a set of snap points and animates between them with a
- * spring.
+ * spring. The README describes the behaviour; the notes here are about how.
  *
- * The tray can be dragged with touch or pen input along the drawer's axis
- * (through `didPan` from ember-gesture-modifiers). It follows the finger 1:1,
- * with rubber-band resistance past the first and last snap point. Past the
- * last one the tray stays at its edge; a drag from the content scrolls the
- * content there when it can (see `#splitDrag`), else the content bounces,
- * like an iOS sheet (see `OPEN_RUBBER_BAND_RATIO` and `#renderBounce`).
- * On release the drawer's velocity is handed to the spring and the snap point nearest to where the
- * release would carry the drawer is picked; a release faster than
- * `FLING_VELOCITY` always moves at least one snap point its way. A touch
- * holds a running animation where it is, and a drag continues from there.
- * Elements with the yielded `handle` modifier always drag, see below. With
- * `@handleOnly`, only they start a drag. One finger drags at a time.
+ * Scroll vs drag: each touch gesture is decided once (see `dragSource`) and
+ * keeps that decision until the finger lifts. Below the highest snap point
+ * the content is locked along the axis (see `#syncScrollLock`) and every
+ * gesture drags; at it, a gesture scrolls when a scroll container under the
+ * finger can scroll that way. Two exceptions: a scroll that reaches its
+ * scroll start while pulling towards close is taken over by a drag (see
+ * `onTrayScroll`), and a drag that reaches the highest snap point scrolls the
+ * content from script (see `#splitDrag`), because in iOS Safari a native
+ * scroll can't start after its touchmoves were cancelled.
  *
- * Scroll vs drag: the tray is a scroll container, as is every element in it
- * marked with `data-mobile-drawer-scroll`. Each touch gesture is decided
- * once the finger has moved a few px along the axis, and further along it
- * than across it (see `dragSource`), and keeps that decision until the
- * finger lifts:
- * - below the highest snap point every gesture along the axis drags, and
- *   the content can't scroll along the axis at all (see `#syncScrollLock`);
- * - at the highest snap point a gesture scrolls if a scroll container
- *   between the touched element and the tray (inclusive) can scroll the way
- *   the finger pushes the content, and drags otherwise. So at the start of
- *   the content, pulling a bottom drawer down closes it.
- * One exception to "keeps that decision": a gesture that scrolls the
- * content and reaches its scroll start while the finger still pulls
- * towards close is taken over by a drag (the scroll handoff of an iOS
- * sheet, see `onTrayScroll`). The drag starts where the tray is, locks the
- * content and stays a drag until the finger lifts. Momentum after the
- * finger lifted never moves the drawer.
- * The other way, a drag from the content (not a handle) that reaches the
- * highest snap point while the finger moves on towards open scrolls the
- * content from script, 1:1 with the finger, and its release goes on with a
- * momentum (see `#splitDrag` and `#startMomentum`). The gesture stays a
- * drag: in iOS Safari a native scroll can't start after its touchmoves
- * were cancelled.
- * A gesture that drags cancels its `touchmove` events at every snap point
- * (see `dragSource`), so the browser can't scroll the content or the page
- * under it. The tray also gets `touch-action: pan-x` (vertical drawers) or
- * `pan-y` (horizontal ones) below the highest snap point and `pan-x pan-y`
- * at it, but iOS Safari doesn't reliably honour `touch-action` on a scroll
- * container, so nothing relies on it alone. Touchmoves are only cancelled
- * once a gesture is decided, so swipes across the axis (a carousel, a list
- * in a side drawer) keep working.
+ * A drag cancels its touchmoves at every snap point: iOS Safari doesn't
+ * reliably honour `touch-action` on a scroll container, so nothing relies on
+ * it alone. Touchmoves are only cancelled once a gesture is decided, so
+ * swipes across the axis keep working.
  *
- * Handles: an element with the `handle` modifier is a drag source of its
- * own, with `didPan`'s `touch-action` (`pan-x` for a vertical axis, `pan-y`
- * for a horizontal one), so the browser doesn't pan along the axis on it. A
- * gesture that starts on a handle always drags, at every snap point, also
- * when the content is scrolled (see `#onHandle`): a sticky header with the
- * modifier stays a way to drag a scrolled sheet. The handle's drag source
- * decides such a gesture as a drag like the tray's does (`shouldHandleDrag`),
- * so it cancels the touchmoves, also with `@handleOnly`. Without
- * `@handleOnly` the tray's drag source decides it as a drag too
- * (`shouldDrag`); whichever of the two recognises the pan first owns the
- * drag, and the other is ignored. A handle wins over everything in it, also
- * a `data-mobile-drawer-scroll` element, except a text field (see
- * `#onHandle`). A handle belongs to the drawer that yielded it, not to a
- * drawer around that one. A tap on an element in a handle (a button) still
- * clicks.
- *
- * Nested drawers: a drawer in this drawer's tray is a part of its tray, so
- * its touches also reach this drawer's drag sources. A gesture that starts
- * in a nested drawer (its tray, a handle or its backdrop) belongs to that
- * drawer only (see `#inNested`): it never drags this drawer, also when the
- * nested drawer is at its closed position and the finger moves on, and it
- * doesn't hold this drawer's running animation. Nor does it scroll this
- * drawer's content or the page: its swipes and wheels only scroll what
- * can scroll in the nested drawer, and are cancelled where nothing there
- * can (see `#onNestedTouchMove`, #119). A nested drawer in the
- * yielded `Nested` renders outside the tray (see `nesting.ts`), so the tray
- * doesn't clip it; its touches never reach this drawer's drag sources. For
- * the modal stack, `data-nested`, `inert`, focus, the scroll lock, the
- * scroll filter of `#onNestedTouchMove` and the hiding of
- * a closed drawer it still counts as inside this drawer. When this drawer
- * starts to close, it closes such a drawer (see `#closePortaled`).
- *
- * With `@handleOnly` the content is locked below the highest snap point
- * too, so it only scrolls when the drawer is fully open, and swipes along
- * the axis on it are cancelled there without dragging (see
- * `#onTrayTouchMove`), so the page behind doesn't scroll instead. Not
- * swipes in a nested drawer: its content can scroll.
- * When a bottom or top drawer leaves its highest snap point, its tray
- * scrolls back to its scroll start, the content start at the leading edge;
- * at the highest snap point it opens at `scrollTop` 0 (see
- * `#planScrollReset`).
- *
- * Renders the markup contract of `ember-mobile-drawer/styles.css`: a
- * `.mobile-drawer` root with a `.mobile-drawer__backdrop` (unless
- * `@backdrop={{false}}`) and a `.mobile-drawer__sheet` with the
- * `.mobile-drawer__tray` in it, with the block inside
- * `.mobile-drawer__content` (and the `header` block, if given, in a
- * `.mobile-drawer__header` at its leading side, see `headerFirst` and
- * `#scroller`), and an empty
- * `.mobile-drawer__bar-tint` after
- * the sheet and (with the backdrop) an empty `.mobile-drawer__backdrop-tint`
- * after the backdrop (for the iOS Safari 26 bars, see styles.css), and a
- * `.mobile-drawer__shadow` before the sheet, for a theme's outer shadow of
- * a floating bottom sheet (see `#paintShadow`), and an empty
- * `.mobile-drawer__glass` in the sheet before the tray, for a theme's
- * `backdrop-filter` on a floating bottom sheet (see `#paintShadow`).
- * Attributes are applied to the root element.
- *
- * Sheet: the sheet clips the tray. Every frame the component writes the
- * expand progress on it (see `#paintExpand`), from the second-highest to
- * the highest snap point, for themes such as a floating sheet that goes
- * edge-to-edge (`--mobile-drawer-inset`). The root gets `data-at-highest`
- * while the tray is at its highest snap point, and `data-nested` while a
- * modal drawer in front of it is open (see `#syncNested`).
- *
- * Backdrop: its opacity follows the drawer frame by frame through
- * `--mobile-drawer-progress`, written in `#render` like the transform. A tap
- * on it calls `close` (unless `@closeOnBackdropClick={{false}}`); a pointer
- * that moved more than `TAP_SLOP` isn't a tap. The backdrop
- * is not a drag source: touching it doesn't hold a running animation, and
- * a drag on it doesn't move the drawer.
- *
- * Modal (`@modal`, default): "open" means the active snap point is above
- * the smallest one. While open, the rest of the page is inert (the siblings
- * of the root and of each of its ancestors up to `<body>`), body scrolling is
- * locked, Tab wraps around inside the tray and Escape calls `close`. Focus
- * moves in when it opens and back to the previously focused element when it
- * closes, before `data-closed` hides the drawer. All of that is applied in a
- * microtask after rendering (`#syncOpen`), and undone right away on teardown.
- *
- * Keyboard focus on an element in the tray that is off screen moves the
- * drawer (modal or not, also from a peek, then without the modal
- * behaviour) to its highest snap point, see `#onTrayFocusIn`. The root never scrolls, see `#resetRootScroll`.
- *
- * Snap points are re-measured when the root or `.mobile-drawer__content`
- * changes size, and when an argument changes. The tray itself is not
- * observed (the component sizes it), so a change to only the tray's own
- * padding or border is picked up at the next of those.
+ * Handles are drag sources of their own and always drag; whichever drag
+ * source recognises the pan first owns the drag (see `#onHandle`). A gesture
+ * that starts in a nested drawer belongs to that drawer only (see
+ * `#inNested` and `#onNestedTouchMove`).
  *
  * ```gts
  * <MobileDrawer @snapPoints={{array 0 "50%" "100%"}} as |drawer|>
@@ -831,39 +595,21 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   @tracked isAnimating = false;
   @tracked isDragging = false;
   /**
-   * Starts at `0`: the real value needs the measured layout, which only
-   * exists after the first render. A drawer inserted at a snap point other
-   * than closed therefore renders its block once more after insertion.
+   * The real value needs the measured layout, so a drawer inserted open
+   * renders its block once more after insertion.
    */
   @tracked progress = 0;
-  /**
-   * Bumped when the drawer changes its own (uncontrolled) snap point, so
-   * everything that reads `activeSnapPoint` updates.
-   */
+  /** Bumped when the drawer changes its own (uncontrolled) snap point. */
   @tracked uncontrolledVersion = 0;
-  /** Whether the modal behaviour is on, for `aria-modal`. */
   @tracked modalActive = false;
-  /**
-   * For the yielded `Grabber`: the indices of the open snap points (offset
-   * above `0`), one entry per resolved snap point, ascending by offset.
-   * Updated after each measurement (see `#measure`), so empty before the
-   * first one.
-   */
+  /** For the `Grabber`: the open snap point indices, ascending by offset. */
   @tracked openSnapPoints: readonly (readonly number[])[] = [];
-  /**
-   * The parent element of the root, once the drawer is in the DOM: where
-   * the yielded `Nested` renders without `@destination`.
-   */
+  /** Where the yielded `Nested` renders without `@destination`. */
   @tracked nestedParent?: Element;
 
-  /**
-   * The portal elements of the yielded `Nested` (see `nesting.ts`). They
-   * are a part of the tray for the nesting relation, and hidden with the
-   * drawer (`data-closed`, see `#setClosed`).
-   */
+  /** The `Nested` portals: a part of the tray, hidden with the drawer. */
   #portals = new Set<HTMLElement>();
 
-  /** What the yielded `Nested` registers its portal element with. */
   private nestedOwner: NestedOwner = {
     add: (portal) => {
       this.#portals.add(portal);
@@ -885,51 +631,32 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * The snap point when uncontrolled. Not tracked (see `uncontrolledVersion`)
-   * because it is also written during rendering, to remember the last
-   * controlled index: dropping `@activeSnapPoint` keeps the drawer where it
-   * is.
+   * The snap point when uncontrolled. Not tracked: it is also written during
+   * rendering, so dropping `@activeSnapPoint` keeps the drawer where it is.
    */
   #uncontrolledSnapPoint = 0;
   #lastWarning?: string;
 
   #root?: HTMLElement;
-  /** The `.mobile-drawer__sheet` around the tray, see `#paintExpand`. */
   #sheet?: HTMLElement;
   #tray?: HTMLElement;
   #content?: HTMLElement;
-  /**
-   * The tray's `.mobile-drawer__header`, with a `header` block: the header
-   * mode. The content is then the scroll container, see `#scroller`.
-   */
   #header?: HTMLElement;
 
   /**
-   * The drawer's scroll container: the tray, or with a `header` block (the
-   * header mode) `.mobile-drawer__content`, so the header stays out of the
-   * scroll and the content bounces under it at its start, as in a native
-   * iOS sheet. The tray then doesn't scroll (`overflow: hidden` in
-   * styles.css). The scroll reset, the scroll lock, the scroll handoff and
-   * the drag-to-scroll use this element.
+   * The tray, or with a header the content, so the header stays out of the
+   * scroll and the content bounces under it, as in a native iOS sheet.
    */
   get #scroller(): HTMLElement | undefined {
     return this.#header ? this.#content : this.#tray;
   }
 
-  /**
-   * Whether the header goes before the content in the DOM: for bottom and
-   * right drawers, whose leading edge is the start of the tray along the
-   * axis. For top and left drawers it goes after the content. So the DOM
-   * order (the tab order and the reading order) is the order on screen.
-   */
+  /** The DOM order (tab and reading order) is the order on screen. */
   get headerFirst(): boolean {
     return this.placement === 'bottom' || this.placement === 'right';
   }
 
-  /**
-   * Looks up the header again: a placement change can render it on the
-   * other side of the content (see `headerFirst`), as a new element.
-   */
+  /** A placement change renders the header again, as a new element. */
   #syncHeader(): void {
     const header =
       this.#tray?.querySelector<HTMLElement>(
@@ -940,74 +667,44 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#header = header;
     if (header) this.#resizeObserver?.observe(header);
   }
-  /** The root's `.mobile-drawer__bar-tint` child, if any. */
   #barTint?: HTMLElement;
-  /** The root's `.mobile-drawer__shadow` child, see `#paintShadow`. */
   #shadow?: HTMLElement;
-  /** The `.mobile-drawer__shadow-body` in it, see `#paintShadow`. */
   #shadowBody?: HTMLElement;
-  /** The sheet's `.mobile-drawer__glass` child, see `#paintShadow`. */
   #glass?: HTMLElement;
-  /**
-   * The sheet's colour below the root while an on-screen keyboard is open
-   * in iOS Safari, see `KeyboardFill`.
-   */
+  /** Fills below the root while the iOS Safari keyboard is open. */
   #keyboardFill?: KeyboardFill;
-  /** Whether the content is moved past fully open, see `#renderBounce`. */
+  /** Whether the content is moved past fully open. */
   #bouncing = false;
-  /**
-   * The pinned elements while bouncing (see `PINNED_ATTRIBUTE`), with their
-   * inline `translate` from before the bounce, put back after.
-   */
+  /** The pinned elements' own inline `translate`, put back after a bounce. */
   #pinned = new InlineOverrides();
-  /** The content's inline `will-change` before a bounce, put back after. */
   #contentWillChange = new InlineOverrides();
   #backdrop?: HTMLElement;
-  /** The backdrop's `.mobile-drawer__backdrop-tint` sibling, if any. */
   #backdropTint?: HTMLElement;
-  /**
-   * Whether the root has `data-status-bar="transparent"` (#113),
-   * see `#syncStatusBar`.
-   */
+  /** Whether the root has `data-status-bar="transparent"`. */
   #statusBar = false;
-  /** The dim layer (#113), while `#statusBar` with a backdrop. */
   #pageDim?: PageDim;
-  /** Removes the listener for a change of the scroll lock. */
   #offLockChange?: () => void;
-  /** Removes the listeners that `hooks.install` adds. */
   #listeners?: AbortController;
-  /** Removes the document listeners for the backdrop pointer. */
   #backdropListeners?: AbortController;
   #spring?: Spring;
   #resizeObserver?: ResizeObserver;
   #layout?: Layout;
-  /** Whether the tray is below the lowest open snap point, see `#paintSink`. */
+  /** Whether the tray is below the lowest open snap point. */
   #below = false;
-  /** Whether the sheet floats, read in `#paintSink`. */
   #floats = false;
   /** How far (px) `#paintSink` moved the sheet down. */
   #moved = 0;
   #placement?: Placement;
   #destroyed = false;
   #pendingState?: PendingState;
-  /** The injected clock, if any (tests); see `#timeOf`. */
+  /** The injected clock, if any (tests). */
   #clock?: FrameClock;
   #drag?: Drag;
-  /**
-   * Set while a pointer that went down on a drag source holds a running
-   * animation that it stopped, until a drag starts or the pointer lifts.
-   */
+  /** A pointer that stopped a running animation, until a drag or its lift. */
   #hold?: { pointerId: number; end: (event: PointerEvent) => void };
   #velocity = new VelocityTracker();
-  /**
-   * The velocity of the content part of a drag (see `#splitDrag`), for
-   * the momentum on release.
-   */
+  /** The velocity of the content part of a drag, for its momentum. */
   #scrollVelocity = new VelocityTracker();
-  /**
-   * The momentum of content that a drag scrolled, after its release, see
-   * `#startMomentum`.
-   */
   #momentum?: Momentum;
   /** The click that a tap which stopped the momentum may not do. */
   #clickSwallow?: {
@@ -1017,50 +714,27 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     released: boolean;
     timer: ReturnType<typeof setTimeout>;
   };
-  /** Offset written by the last `#render`, after clamping. */
   #renderedOffset = 0;
   /**
    * How far (px) the tray may be rendered past fully open while not dragged.
-   * Set on release to where the finger left it and only shrinks from there,
-   * so the tray returns from a rubber-band without jumping but the spring
-   * never pulls it further off its edge.
+   * Only shrinks after the release, so the tray returns from a rubber band
+   * without a jump but the spring never pulls it further off its edge.
    */
   #overshoot = 0;
-  /**
-   * Set when a run of the spring towards the highest snap point has
-   * reached it; the render then holds the tray there for the rest of that
-   * run (see `#render`). Cleared when the run ends, a drag starts or the
-   * target changes.
-   */
+  /** Holds the tray at the highest snap point for the rest of the run. */
   #arrivedAtHighest = false;
-  /**
-   * Whether the tray was at (or past) the highest snap point at the last
-   * render, i.e. whether its content may scroll. See `#trayTouchAction`.
-   */
+  /** Whether the tray was at the highest snap point at the last render. */
   #atTop = false;
-  /**
-   * A scroll reset that follows the tray in `#render`, see
-   * `#planScrollReset`.
-   */
   #scrollReset?: ScrollReset;
-  /** The spring of a scroll reset that runs on its own, if any. */
+  /** The spring of a scroll reset that runs on its own. */
   #scrollSpring?: Spring;
-  /**
-   * The elements whose scrolling along the axis is locked, with the inline
-   * value of the overflow property they had before. See `#syncScrollLock`.
-   */
+  /** The locked elements, with their own inline overflow. */
   #scrollLock = new InlineOverrides();
-  /** The overflow property the lock sets, while locked. */
   #scrollLockProperty?: string;
-  /**
-   * The elements with an inline `overscroll-behavior` during a scroll, with
-   * the inline value they had before, see `#setOverscroll`.
-   */
   #overscroll = new InlineOverrides();
   /**
-   * With `@handleOnly`, the touch on the tray that started while scrolling
-   * was locked, see `#onTrayTouchMove`. `cancels` is `undefined` until the
-   * gesture is decided; `far` once it moved `TAP_SLOP` along the axis.
+   * With `@handleOnly`, a touch that started while scrolling was locked.
+   * `cancels` is `undefined` until decided; `far` past `TAP_SLOP`.
    */
   #lockedTouch?: {
     id: number;
@@ -1070,11 +744,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     far: boolean;
   };
   /**
-   * The touch that started in a drawer nested in this one, see
-   * `#onNestedTouchMove`: where it started, the elements between its
-   * target and the nested drawer's root that may scroll, whether it
-   * started on an element that handles its own gestures (`own`), and
-   * whether its touchmoves are cancelled (`undefined` until decided).
+   * A touch that started in a nested drawer: the elements that may scroll
+   * for it, whether it is on an element with its own gestures (`own`) and
+   * whether it is cancelled (`undefined` until decided).
    */
   #nestedTouch?: {
     id: number;
@@ -1084,108 +756,63 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     own: boolean;
     cancels?: boolean;
   };
-  /**
-   * The elements with the yielded `handle` modifier, see `#onHandle`.
-   */
   #handles = new Set<HTMLElement>();
 
-  /** Drags started so far, see `GrabberOwner`. */
   #dragCount = 0;
-  /**
-   * The element whose keyboard focus moves the drawer to its highest snap
-   * point, to show in the tray when it arrives, see `#onTrayFocusIn`.
-   */
+  /** The element that keyboard focus reveals once the drawer arrives. */
   #reveal?: Element;
-  /** Backdrop progress written by the last `#render`, see `#paintBackdrop`. */
   #backdropProgress = 0;
-  /** Expand progress written by the last `#render`, see `#paintExpand`. */
   #expandProgress = NaN;
-  /**
-   * Whether the last `#render` was above the smallest snap point, where the
-   * backdrop catches pointers, see `#paintBackdrop`.
-   */
+  /** Whether the backdrop catches pointers (above the smallest snap point). */
   #backdropBlocks = false;
   /**
-   * Whether the active snap point is above the smallest one, i.e. the drawer
-   * is open or opening. Updated during rendering by `#syncOpen`; the modal
-   * behaviour and focus follow in a microtask, see `#applyOpen`.
+   * Whether the active snap point is above the smallest one. Updated during
+   * rendering; the modal behaviour and focus follow in a microtask.
    */
   #open = false;
   /**
-   * Whether the active snap point is at 0, i.e. the drawer is closed or
-   * closing and `data-closed` hides it (or soon will). Unlike `!#open`, not
-   * set while the drawer rests at a peek: a smallest snap point above 0 keeps
-   * the drawer, and the drawers inside it, visible. Also set until the
-   * drawer is first measured. Updated with `#open` by `#syncOpen`, see
-   * `#applyOpen`.
+   * Whether the active snap point is at 0, so `data-closed` hides the drawer.
+   * Unlike `!#open`, not set at a peek. Also set until the first measure.
    */
   #hidden = true;
   /**
    * `#open` as last reported through `@onOpen`/`@onClose`. The first value
-   * `#syncOpen` computes (on insertion, or at the first successful measure
-   * of a drawer inserted while hidden) counts as reported. See `#applyOpen`.
+   * counts as reported.
    */
   #reportedOpen = false;
-  /** Whether `#reportedOpen` has its first value, see `#syncOpen`. */
   #hasReportBaseline = false;
-  /** The element to focus again when the drawer closes. */
   #returnFocus?: HTMLElement | SVGElement;
-  /** Its ancestors when the drawer opened, see `#returnFocusAfterClose`. */
+  /** Its ancestors when the drawer opened. */
   #returnFocusPath: Element[] = [];
   /**
-   * Set while the drawer is open because keyboard focus moved it up from
-   * its peek (see `#onTrayFocusIn`): it is then not modal, and goes back
-   * to its peek when focus leaves it (see `#onRootFocusOut`). Set when the
-   * drawer opens while `#focusOpenPending`, cleared when it closes (to its
-   * peek or to `0`). A drag or an action that moves it between open snap
-   * points meanwhile keeps it; one that opens it from the peek doesn't set
-   * it, so the drawer is modal as before.
+   * Set while keyboard focus opened the drawer from its peek: it is then not
+   * modal, and goes back to its peek when focus leaves it. A move between
+   * open snap points keeps it; an open from the peek by other means doesn't
+   * set it.
    */
   #openedByFocus = false;
-  /**
-   * Set from a focus move from the peek until the drawer opens, or until
-   * the next task when a controlled parent doesn't take the new index.
-   */
+  /** Until the drawer opens, or the next task if the parent says no. */
   #focusOpenPending = false;
-  /**
-   * The last element outside the drawer that focus came from into the
-   * tray, to return focus to when a drawer opened by focus closes.
-   */
+  /** Where focus came from into the tray, for a drawer opened by focus. */
   #enteredFrom?: HTMLElement | SVGElement;
-  /** Set while a modal drawer moves focus in, see `#activateModal`. */
   #initialFocusing = false;
-  /**
-   * The element a modal drawer focused when it opened (see
-   * `#activateModal`), until focus moves to another element. Its keyboard
-   * focus doesn't hold the scroll reset, see `#focusHoldsReset`.
-   */
+  /** Its keyboard focus doesn't hold the scroll reset. */
   #initialFocused?: Element;
   /**
-   * The element in the tray that got focus last, also inside an open shadow
-   * root, and the input that focused it (see `focusInputOf`), read when it
-   * got focus: a later key press (e.g. typing, or Space on a tapped button)
-   * doesn't make it keyboard focus. See `#onTrayFocusIn`.
+   * The last focused element in the tray, with its input read at focus time:
+   * a later key press (typing, Space on a tapped button) doesn't change it.
    */
   #focused?: { element: Element; input: InputType };
-  /**
-   * Set when the drawer closed and `#applyOpen` has yet to return focus:
-   * whether focus was inside the drawer when it closed.
-   */
+  /** Whether focus was inside when the drawer closed, until it returns. */
   #closedWithFocusInside?: boolean;
   #applyQueued = false;
-  /** Undoes the modal behaviour while it is on. */
   #releaseModal?: () => void;
-  /**
-   * Undoes the `inert` part of the modal behaviour while it is on, see
-   * `#makeOutsideInert`.
-   */
   #releaseInert?: () => void;
   #warnedLabel = false;
   /**
-   * The pointer that went down on the backdrop, from its `pointerdown` until
-   * its click, its `pointercancel` or the next pointer down. `moved` once it
-   * went further than `TAP_SLOP`: its click then isn't a tap. `up` is where
-   * it lifted; only a click there belongs to it (see `onBackdropClick`).
+   * The pointer that went down on the backdrop, until its click, cancel or
+   * the next pointer. `moved` past `TAP_SLOP`: no tap. Only a click at `up`
+   * belongs to it.
    */
   #backdropPointer?: {
     pointerId: number;
@@ -1218,7 +845,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return this.args.modal !== false;
   }
 
-  /** Unset, the backdrop follows `@modal`. */
   get showBackdrop(): boolean {
     return this.args.backdrop ?? this.isModal;
   }
@@ -1232,10 +858,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * The active index into `@snapPoints`. An `@activeSnapPoint` that isn't a
-   * valid index (e.g. `@snapPoints` shrank before the parent updated
-   * `@activeSnapPoint`) is clamped to the nearest valid index, with a warning
-   * in development, rather than throwing during rendering.
+   * An invalid `@activeSnapPoint` (e.g. `@snapPoints` shrank first) is
+   * clamped with a warning, rather than throwing during rendering.
    */
   get activeSnapPoint(): number {
     const count = this.snapPoints.length;
@@ -1257,7 +881,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #warnOnce(message: string): void {
     if (message === this.#lastWarning) return;
     this.#lastWarning = message;
-    // `warn` from @ember/debug is a no-op in production builds of Ember.
     warn(message, false, { id: 'ember-mobile-drawer.invalid-snap-point' });
   }
 
@@ -1267,13 +890,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       Number.isInteger(index) && index >= 0 && index < this.snapPoints.length,
     );
     if (index === this.activeSnapPoint) {
-      // Already the active snap point: make sure the drawer is (moving)
-      // there, e.g. after a resize stopped an animation.
+      // E.g. after a resize stopped an animation.
       this.#moveToActive(true);
       return;
     }
     if (!this.isControlled) {
-      // Re-renders the lifecycle modifier, which animates to it.
+      // Re-renders the lifecycle modifier, whose `update` animates to it.
       this.#uncontrolledSnapPoint = index;
       this.uncontrolledVersion++;
     }
@@ -1281,12 +903,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * The yielded `Grabber`'s action, like the grabber of an iOS sheet: moves
-   * to the next larger open snap point (offset above `0`), and from the
-   * largest back to the smallest open one. It never closes the drawer.
-   * Returns the index it moved to, or `undefined` when there is nothing to
-   * move to: before the drawer is measured, during a drag, or with fewer
-   * than two open snap points.
+   * The `Grabber`'s action, like an iOS sheet's grabber: the next larger
+   * open snap point, from the largest back to the smallest. Never closes.
    */
   #cycle(): number | undefined {
     const layout = this.#layout;
@@ -1303,7 +921,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return index;
   }
 
-  /** What the yielded `Grabber` gets, see `grabber.gts`. */
   grabberOwner: GrabberOwner = {
     cycle: () => this.#cycle(),
     dragCount: () => this.#dragCount,
@@ -1395,14 +1012,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         close: this.close,
       });
       MobileDrawer.#syncNested();
-      // Where the yielded `Nested` renders by default. Tracked state, so not
-      // during rendering (and the drawers around this one are in the DOM
-      // by then).
+      // Tracked state, so not during rendering (and the drawers around this
+      // one are in the DOM by then).
       queueMicrotask(() => {
         if (!this.#destroyed) this.nestedParent = this.#nestedDestination();
       });
       this.#measure();
-      // Appear at the initial snap point without animating in.
       this.#moveToActive(false);
       this.#syncScrollLock();
       // A drawer with a text field opened in front: the lock is now the
@@ -1420,7 +1035,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         passive: true,
         signal,
       });
-      // Not passive: see `#onTrayTouchMove`.
       tray.addEventListener('touchmove', this.#onTrayTouchMove, {
         passive: false,
         signal,
@@ -1435,8 +1049,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         viewport: drawerEnvironment.visualViewport
           ? drawerEnvironment.visualViewport()
           : (window.visualViewport ?? null),
-        // Only a bottom drawer (a sheet) ends at the bottom of the screen
-        // and has its background there; only while it shows.
+        // Only a bottom drawer has its background at the screen's bottom.
         active: () =>
           !this.#destroyed &&
           this.placement === 'bottom' &&
@@ -1447,6 +1060,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#keyboardFill.sync();
 
       if (typeof ResizeObserver !== 'undefined') {
+        // Not the tray: the component sizes it, so the observer would fire
+        // on its own writes. A tray-only padding change waits for the next.
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
         this.#resizeObserver.observe(root);
         this.#resizeObserver.observe(this.#content);
@@ -1462,18 +1077,16 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#syncHeader();
       }
       this.#measure();
-      // The axis may have changed.
       this.#syncScrollLock();
       if (this.#drag) {
-        // The finger wins until it lets go; the release then picks a snap
-        // point (and asks the parent, when controlled). A new placement is a
-        // new axis, so that drag is over.
+        // The finger wins until it lets go. A new placement is a new axis, so
+        // that drag is over.
         if (!placementChanged) {
           this.#syncOpen();
           return;
         }
         const drag = this.#endDrag()!;
-        // Not during rendering. The drawer jumps to the active snap point.
+        // Not during rendering.
         queueMicrotask(() => {
           if (this.#destroyed) return;
           this.args.onDragEnd?.({
@@ -1483,8 +1096,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
           });
         });
       }
-      // A new placement is a different layout: jump instead of animating
-      // along the new axis from the old position.
+      // A new placement jumps instead of animating along the new axis.
       this.#moveToActive(!placementChanged);
       if (placementChanged) this.#keyboardFill?.sync();
     },
@@ -1516,8 +1128,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       trackInput(this, false);
       this.#focused = undefined;
       if (this.#root) setPageProgress(this.#root, 0);
-      // Undone right away, so nothing outlives the drawer. Focus can only
-      // move back once the drawer is gone from the DOM.
+      // Focus can only move back once the drawer is gone from the DOM.
       const wasModal = this.#releaseModal !== undefined;
       this.#deactivateModal();
       this.#endStatusBar();
@@ -1533,13 +1144,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Measures the container and the tray, resolves the snap points and sizes
-   * the tray so the largest snap point fits. Forces layout, so it only runs
-   * on setup, argument changes and resizes, never per frame.
-   *
-   * Returns `false`, leaving the previous layout and inline sizes in place,
-   * when the tray can't be measured (e.g. while hidden). The resize observer
-   * measures again once the drawer gets a size.
+   * Resolves the snap points and sizes the tray. Forces layout, so never per
+   * frame. `false` while the tray can't be measured (e.g. hidden): the resize
+   * observer measures again once it gets a size.
    */
   #measure(): boolean {
     const tray = this.#tray!;
@@ -1548,13 +1155,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const { style } = tray;
     const { height, width } = style;
 
-    // The tray's natural size.
     style.height = '';
     style.width = '';
     const content = measureLength(tray, vertical);
 
-    // The space the tray can open into: the root minus the opposite safe-area
-    // inset, or the tray's own max size.
+    // The root minus the opposite safe-area inset, or the tray's max size.
     style[size] = '100%';
     const available = measureLength(tray, vertical);
 
@@ -1574,7 +1179,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     let trayLength = natural;
     if (maxOffset > natural) {
-      // A snap point needs more than the content: grow the tray to it.
       style[size] = `${maxOffset - extra}px`;
       trayLength = maxOffset;
     } else {
@@ -1582,8 +1186,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
 
     this.#layout = { resolved, container, trayLength, maxOffset };
-    // The shadow and glass layers have the tray's length (bottom sheets
-    // only).
     const layerHeight = this.placement === 'bottom' ? `${trayLength}px` : '';
     if (this.#shadow) this.#shadow.style.height = layerHeight;
     if (this.#glass) this.#glass.style.height = layerHeight;
@@ -1606,14 +1208,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return maxOffset > 0 ? clamp(offset / maxOffset, 0, 1) : 0;
   }
 
-  /**
-   * Moves (or jumps) to the active snap point. Does nothing while dragging:
-   * the release moves to the active snap point.
-   */
+  /** Does nothing while dragging: the release moves to the active one. */
   #moveToActive(animate: boolean): void {
     const spring = this.#spring;
     const index = this.activeSnapPoint;
-    // Remember a controlled index, so dropping @activeSnapPoint keeps it.
+    // So dropping @activeSnapPoint keeps it.
     this.#uncontrolledSnapPoint = index;
     if (!spring || !this.#layout || this.#destroyed) return;
     this.#syncOpen();
@@ -1625,8 +1224,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#markExpanded(target);
 
     if (!animate) {
-      // A jump (setup, a new placement): the content starts where it starts
-      // at the target, see `#scrollToStart`.
       spring.stop();
       spring.set(target, 0);
       this.#render(target);
@@ -1636,29 +1233,22 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     this.#planScrollReset(target);
 
-    if (spring.isAnimating) return; // Retargeted; the run continues.
+    if (spring.isAnimating) return;
 
     void this.#startSpring(spring).then(() => {
       if (spring.isAnimating) return;
       this.#queueState({ isAnimating: false });
       this.#revealFocus();
     });
-    // With reduced motion the run ends synchronously.
+    // With reduced motion the run ended synchronously.
     this.#queueState({ isAnimating: spring.isAnimating });
-    // Show the drawer now rather than at the first frame, so focus can move
-    // into an opening drawer right away.
+    // Now rather than at the first frame, so focus can move in at once.
     if (spring.isAnimating) this.#setClosed(false);
   }
 
   /**
-   * Sets `data-expanded` on the root when the drawer rests at, or is
-   * animating to, its highest snap point (and that snap point is open at
-   * all), from `target`: where the drawer is headed. Only called when the
-   * target changes outside a drag, so the attribute keeps its value during
-   * a drag and while a touch holds the drawer: small movements at the top
-   * never flicker it, and a drag down from the top only removes it when it
-   * is released towards a lower snap point. Unlike the scroll lock (see
-   * `#syncScrollLock`), which follows the rendered position.
+   * `data-expanded` follows the target, not the rendered position, and only
+   * outside a drag, so small movements at the top never flicker it.
    */
   #markExpanded(target: number): void {
     const { maxOffset } = this.#layout!;
@@ -1666,46 +1256,25 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const expanded = maxOffset > 0 && target >= maxOffset - EPSILON;
     if (root.hasAttribute('data-expanded') === expanded) return;
     root.toggleAttribute('data-expanded', expanded);
-    // A theme may change the tray's colour with it, see `KeyboardFill`.
+    // A theme may change the tray's colour with it.
     this.#keyboardFill?.paint();
   }
 
   /**
-   * Plans the scroll reset for a run to `target`: below the highest snap
-   * point the tray of a vertical drawer goes back to its scroll start (the
-   * content start at the leading edge: `scrollTop` 0 for a bottom drawer,
-   * the end of the scroll range for a top drawer, whose leading edge is its
-   * bottom), where the content can't be scrolled. At the highest snap point
-   * the content starts at `scrollTop` 0 for every placement, so the tray
-   * is put there when it opens from closed to the highest snap point; a
-   * move up from a lower snap point keeps the position. Nothing changes
-   * for left and right drawers, whose tray isn't sized by the snap point
-   * along its scroll axis.
+   * Below the highest snap point a vertical drawer's content goes back to its
+   * scroll start (the end of the range for a top drawer), where it is locked.
+   * Opening from closed to the highest snap point starts at `scrollTop` 0.
+   * Not for side drawers: their tray isn't sized by the snap point along its
+   * scroll axis.
    *
-   * The reset never jumps while the tray shows:
-   * - towards closed (offset `0`), it waits until the tray is closed, when
-   *   nothing of it shows, so a closing sheet keeps its content in place;
-   * - when the tray is hidden (closed), at once;
-   * - when the tray has at least as far to go as the content (`span >=
-   *   distance`, up or down), in step with the tray in `#render`: the
-   *   content reaches its start when the tray reaches the target and never
-   *   moves faster than the tray, or back when the spring overshoots;
-   * - otherwise (the tray is near its target, e.g. released just past it,
-   *   or caught while closing and released below it), on a spring of its
-   *   own with the drawer's spring settings, from rest: it eases in, so no
-   *   frame moves the content far. A new plan while that spring runs (a
-   *   resize, a new target) keeps its velocity instead of starting over.
-   * With reduced motion both springs end at once, and so does the reset.
-   *
-   * Reads layout only here, so the render loop only writes. A drag or a
-   * touch that holds the drawer stops the reset where it is; the release
-   * plans a new one. A drag down from the top of a bottom drawer only
-   * starts when the tray is at its scroll start anyway (see `shouldDrag`);
-   * one with `@handleOnly` may start anywhere, and resets after its release.
+   * The reset never jumps while the tray shows: towards closed it waits until
+   * the tray is closed; when the tray has at least as far to go as the
+   * content, it follows the tray in `#render`, so the content never moves
+   * faster than the tray; otherwise it runs on a spring of its own from rest.
+   * Reads layout only here, so the render loop only writes.
    */
   #planScrollReset(target: number): void {
-    // A new plan while the reset's own spring runs (e.g. on each frame of
-    // a resize) keeps its speed, so the reset doesn't start over from rest.
+    // A new plan (e.g. each frame of a resize) keeps the running speed.
     const running = this.#scrollSpring?.isAnimating
       ? this.#scrollSpring
       : undefined;
@@ -1713,8 +1282,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#stopScrollReset();
     if (this.axis !== 'vertical') return;
     if (this.#isHighest(target)) {
-      // Opening from closed: start at the content start. A move up from a
-      // lower snap point keeps the position, so nothing jumps.
+      // A move up from a lower snap point keeps the position.
       if (this.#renderedOffset <= EPSILON) this.#scrollToStart(target);
       return;
     }
@@ -1724,9 +1292,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       ? Math.max(0, scroller.scrollHeight - scroller.clientHeight)
       : 0;
     let distance = Math.abs(scroller.scrollTop - start);
-    // The browser rounds scroll positions. Where the tray is still where
-    // the running spring put it, go on from the spring's exact position:
-    // otherwise a resize on every frame could keep the reset a pixel short.
+    // The browser rounds scroll positions: go on from the spring's exact
+    // value, or a resize on every frame could keep the reset a pixel short.
     if (running && Math.abs(distance - running.value) < 1) {
       distance = running.value;
     }
@@ -1740,7 +1307,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       fraction: 1,
     };
     if (distance <= EPSILON || open <= EPSILON) {
-      // Nothing (much) to do, or nothing of the tray shows: at once.
       this.#writeScroll(reset, 0);
       return;
     }
@@ -1765,10 +1331,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     });
   }
 
-  /**
-   * Moves the tray's scroll position along with the run in `#render`, for
-   * a reset that follows the tray (see `#planScrollReset`).
-   */
   #applyScrollReset(open: number): void {
     const reset = this.#scrollReset;
     if (!reset) return;
@@ -1776,7 +1338,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (reset.target <= EPSILON) {
       fraction = open <= EPSILON ? 0 : 1;
     } else {
-      // At least `distance`, which is more than EPSILON, when planned.
+      // At least `distance` (more than EPSILON) when planned.
       const span = Math.abs(reset.from - reset.target);
       fraction = clamp(Math.abs(open - reset.target) / span, 0, 1);
     }
@@ -1785,11 +1347,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (fraction === 0) this.#scrollReset = undefined;
   }
 
-  /**
-   * Scrolls the tray to `fraction` of the reset's distance from its scroll
-   * start, without reading layout. `behavior: 'instant'`, so an app's
-   * `scroll-behavior: smooth` doesn't turn each frame into a smooth scroll.
-   */
+  /** `instant`, so an app's `scroll-behavior: smooth` doesn't apply. */
   #writeScroll(reset: ScrollReset, fraction: number): void {
     reset.fraction = fraction;
     const top = reset.start + reset.sign * reset.distance * fraction;
@@ -1797,10 +1355,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Starts a run of `spring` and registers it with the test waiter, so
-   * `await settled()` waits until it ends (it comes to rest or is stopped).
-   * Not with an injected clock: the addon's own tests then run the frames
-   * themselves, and `settled()` would wait for frames that never come.
+   * Registers the run with the test waiter, but not with an injected clock:
+   * those tests run the frames themselves, so `settled()` would hang.
    */
   #startSpring(spring: Spring): Promise<void> {
     if (!spring.isAnimating) spring.configure(this.#springConfig());
@@ -1812,11 +1368,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return run;
   }
 
-  /**
-   * The spring parameters from `@spring`, with the defaults for the keys it
-   * leaves out. Development builds assert that every value is valid;
-   * production builds use the default instead of an invalid value.
-   */
+  /** Production builds use the default instead of an invalid value. */
   #springConfig(): MobileDrawerSpring {
     const { stiffness, damping, mass } = DEFAULT_SPRING_CONFIG;
     const config: MobileDrawerSpring = { stiffness, damping, mass };
@@ -1837,25 +1389,18 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return config;
   }
 
-  /** Stops a running scroll reset where it is. */
   #stopScrollReset(): void {
     this.#scrollReset = undefined;
     this.#scrollSpring?.stop();
     this.#scrollSpring = undefined;
   }
 
-  /** Whether `offset` is the highest snap point (when it is open at all). */
   #isHighest(offset: number): boolean {
     const { maxOffset } = this.#layout!;
     return maxOffset > 0 && offset >= maxOffset - EPSILON;
   }
 
-  /**
-   * Scrolls the tray of a vertical drawer at once to where its content
-   * starts at `target`: `scrollTop` 0 at the highest snap point (for every
-   * placement: the content starts at the top there and is read from the
-   * top down), and the scroll start below it (see `#planScrollReset`).
-   */
+  /** `scrollTop` 0 at the highest snap point, else the scroll start. */
   #scrollToStart(target: number): void {
     this.#stopScrollReset();
     if (this.axis !== 'vertical') return;
@@ -1868,19 +1413,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Whether focus in the tray holds a resize's scroll reset: focus on an
-   * editable element (see `isEditable`), or keyboard focus (focus after a
-   * key press, see `focusInputOf`) on any element in it, which the browser
-   * scrolled into view. Not the tray itself, which a modal drawer focuses
-   * when it opens. Also inside an open shadow root in the tray.
-   *
-   * Keyboard focus that the drawer gave itself (the initial focus of a
-   * modal drawer, see `#activateModal`) doesn't hold it: that focus doesn't
-   * scroll, so the content end of a top drawer stays at its leading edge.
-   * It holds it again when focus moves. An editable element always holds
-   * it: an on-screen keyboard can open for it. A `readonly` text field
-   * holds it like any other element: after a key press, not after a click
-   * or a tap.
+   * Whether focus in the tray holds a resize's scroll reset: the browser
+   * scrolled keyboard focus into view, and an editable element can open an
+   * on-screen keyboard. The drawer's own initial focus doesn't scroll, so it
+   * doesn't hold it.
    */
   #focusHoldsReset(): boolean {
     const tray = this.#tray!;
@@ -1896,10 +1432,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return this.#inputOf(active) === 'keyboard';
   }
 
-  /**
-   * The input that focused `element`, which has focus: as read when it got
-   * focus (see `#focused`), or now when the drawer didn't see that focus.
-   */
+  /** As read when it got focus, or now when the drawer didn't see that. */
   #inputOf(element: Element): InputType {
     const focused = this.#focused;
     return focused?.element === element ? focused.input : focusInputOf(element);
@@ -1908,9 +1441,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   #onResize(): void {
     const spring = this.#spring;
     if (!spring || this.#destroyed || !this.#measure()) return;
-    // While dragging or while a touch holds the drawer, it stays at the
-    // offset shown (re-rendered for the new tray length) until the finger
-    // moves or lifts.
+    // A drag or a hold stays at the offset shown until the finger moves.
     if (this.#drag || this.#hold) {
       this.#render(this.#drag?.offset ?? this.#renderedOffset);
       return;
@@ -1920,50 +1451,33 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const target = this.#offsetOf(this.activeSnapPoint);
     this.#queueState({ progress: this.#progressOf(target) });
     this.#markExpanded(target);
-    // From where the tray and its content are now. Also keeps a top drawer's
-    // content end at its leading edge below the top when the content changes.
-    // Not while a field in the tray has focus, or an element has keyboard
-    // focus: the browser may have scrolled it into view (e.g. above an
-    // Android keyboard that resizes the page, or on Tab), and the reset
-    // would move it out of view again. Other focused elements (e.g. a
-    // tapped button) don't hold the reset.
+    // Not when the browser may have scrolled focus into view (e.g. above an
+    // Android keyboard that resizes the page): the reset would hide it.
     if (!this.#focusHoldsReset()) this.#planScrollReset(target);
 
     if (spring.isAnimating) {
-      // Keep going from the current position to the new target.
       spring.retarget(target);
       this.#render(spring.value);
     } else {
-      // Stay at the same snap point. This runs before the next paint, so the
-      // drawer never shows at the old position with the new size.
+      // Before the next paint, so the old position never shows at the new
+      // size.
       spring.retarget(target);
       spring.set(target, 0);
       this.#render(target);
     }
   }
 
-  /**
-   * Writes the tray transform and backdrop progress for `offset` (px open).
-   * Runs every animation frame, so it only touches inline styles and never
-   * tracked state.
-   */
+  /** Runs every frame: only inline styles, never tracked state. */
   #render(offset: number): void {
     const layout = this.#layout;
     const root = this.#root;
     if (!layout || !root || this.#destroyed) return;
 
-    // Never push the tray further than fully closed. While dragging, the
-    // rubber-band may pull it off its open edge. Otherwise a fast spring can
-    // overshoot, but never pulls the tray further off its edge than where
-    // the finger left it.
     const max = this.#drag ? Infinity : layout.trayLength + this.#overshoot;
     let open = clamp(offset, 0, max);
-    // A spring that bounces comes back below its target after it overshoots
-    // it. At the highest snap point that would lock the content's scrolling
-    // again for a moment (and make a touch drag instead of scroll), so once a
-    // run towards the highest snap point gets there, the tray stays there
-    // for the rest of the run. The undershoot is a fraction of a percent of
-    // the move, so this doesn't show.
+    // A bouncing spring comes back below its target. At the highest snap
+    // point that would lock the content for a moment (and make a touch drag
+    // instead of scroll), so the tray stays there for the rest of the run.
     const spring = this.#spring!;
     if (
       this.#drag ||
@@ -1980,10 +1494,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#overshoot = clamp(open - layout.trayLength, 0, this.#overshoot);
     }
     this.#renderedOffset = open;
-    // Past the tray's length the tray stays at its edge; the content moves
-    // on inside it (see `#renderBounce`).
+    // Past the tray's length only the content moves.
     const distance = Math.max(0, layout.trayLength - open);
-    // Away from the edge, against the opening direction.
     const shift = -OPENING_DIRECTION[this.placement] * distance;
     const transform =
       this.axis === 'vertical'
@@ -1995,11 +1507,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#renderBounce(Math.max(0, open - layout.trayLength));
     const atTop = open >= layout.maxOffset - EPSILON;
     this.#paintExpand(open, atTop);
-    // A no-op while it keeps its value.
     root.toggleAttribute('data-at-highest', atTop && layout.maxOffset > 0);
     if (atTop !== this.#atTop) {
       this.#atTop = atTop;
-      // The content's momentum is for the highest snap point only.
       if (!atTop) this.#stopMomentum();
       // Only while the tray is a drag source (not with @handleOnly).
       if (this.#tray!.style.touchAction) {
@@ -2012,16 +1522,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const smallest = layout.resolved[0]!.offset;
     this.#backdropBlocks = open > smallest;
     this.#paintBackdrop();
-    // For themes whose bar colour follows the dim, see `#paintExpand`.
     this.#barTint?.style.setProperty(
       '--mobile-drawer-progress',
       String(this.#backdropProgress),
     );
-    // For the page behind (`data-mobile-drawer-page`, see
-    // `setPageProgress`): from the smallest snap point (0) to the largest
-    // (1), for modal bottom drawers only. A non-modal drawer leaves the page
-    // as it is, usable; and like on iOS, only a sheet from the bottom moves
-    // the page back, not a top or side drawer.
+    // Like on iOS, only a modal sheet from the bottom moves the page back.
     setPageProgress(
       root,
       this.isModal && this.placement === 'bottom' && layout.maxOffset > smallest
@@ -2029,48 +1534,32 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         : 0,
     );
     this.#setClosed(open <= 0 && !this.#spring!.isAnimating && !this.#drag);
-    // At rest without the modal behaviour (closed, or at a peek): no
-    // transparent status bar until the drawer locks the page again.
+    // At rest without the modal behaviour: no transparent status bar.
     if (!this.#releaseModal && !this.#spring!.isAnimating && !this.#drag) {
       this.#endStatusBar();
     }
   }
 
-  /**
-   * Sets or removes `data-closed` on the root and on the portals of the
-   * yielded `Nested`, so a nested drawer rendered outside the tray hides
-   * with this drawer, like one inside it.
-   */
+  /** Also on the `Nested` portals, so they hide with this drawer. */
   #setClosed(closed: boolean): void {
     const root = this.#root!;
     const changed = root.hasAttribute('data-closed') !== closed;
     root.toggleAttribute('data-closed', closed);
-    // The next open reads the inset again, see `#paintSink`.
+    // The next open reads the inset again.
     if (closed) this.#below = false;
     for (const portal of this.#portals) {
       portal.toggleAttribute('data-closed', closed);
     }
-    // Shows or hides the sheet's colour below the root, see `KeyboardFill`.
     if (changed) this.#keyboardFill?.sync();
   }
 
   /**
-   * Moves the shadow layer (`.mobile-drawer__shadow`, see styles.css) with
-   * the tray: the same `transform` as the tray. Its body
-   * (`.mobile-drawer__shadow-body`) gets the opposite transform, so it
-   * stays at the sheet's bottom edge while the layer around it moves. Both
-   * are transforms only, so a theme's shadow on them is not painted again
-   * while the drawer moves. The glass layer (`.mobile-drawer__glass`, in
-   * the sheet) gets the tray's `transform` too, so a theme's blur on it
-   * stays under the tray. Only for bottom drawers: the layers are only
-   * used for a floating bottom sheet.
-   *
-   * Below the lowest open snap point a floating sheet moves down as one
-   * piece, see `#paintSink`; the shadow body moves with it.
+   * The shadow and glass layers move with the tray; the shadow body gets the
+   * opposite transform, so it stays at the sheet's bottom edge. Transforms
+   * only, so a theme's shadow is not painted again while the drawer moves.
    */
   #paintShadow(transform: string, distance: number, sink: number): void {
-    // Also for the other placements: that clears a move that a bottom
-    // drawer left before its placement changed.
+    // Also for other placements, to clear a bottom drawer's move.
     const moved = this.#paintSink(sink);
     if (this.placement !== 'bottom') return;
     if (this.#glass) this.#glass.style.transform = transform;
@@ -2083,19 +1572,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Moves a floating bottom sheet down by `sink` px (see `#sinkOf`) with an
-   * inline `translate`, and with it its clip (the bottom edge with a
-   * theme's inset and bottom radius). The tray and the glass layer get the
-   * opposite `translate`, so they stay where their `transform` puts them.
-   * Transforms only, so a frame doesn't lay out or paint again. The
-   * properties are only written when the value changes, so at and above
-   * the lowest open snap point an inline `translate` of the app on the tray
-   * stays. A sheet without an inset (`--mobile-drawer-inset: 0px`, the
-   * default) doesn't move: its clip would cut the tray's top shadow. The
-   * inset is read once when the drawer goes below the lowest open snap
-   * point, and again after a close (a style read, no layout), so an inset
-   * that the app or the theme changes (e.g. the iOS page scale) applies to
-   * the next move. Returns the px the sheet is moved.
+   * Moves a floating sheet, and with it its clip, down by `sink` px; the tray
+   * and glass get the opposite `translate`. Only written on a change, so an
+   * app's inline `translate` on the tray stays above the lowest open snap
+   * point. A sheet without an inset doesn't move: its clip would cut the
+   * tray's top shadow. The inset is read once per move below, so a change
+   * (e.g. the iOS page scale) applies to the next one.
    */
   #paintSink(sink: number): number {
     const below = sink > 0;
@@ -2112,7 +1594,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return value;
   }
 
-  /** Whether the sheet floats: a `--mobile-drawer-inset` that isn't 0. */
   #isFloating(): boolean {
     const inset = getComputedStyle(this.#sheet!)
       .getPropertyValue('--mobile-drawer-inset')
@@ -2121,11 +1602,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * How far (px) a bottom sheet moves down as one piece at `open` (px
-   * open): the distance below the lowest open snap point, else 0. Below
-   * that snap point the sheet's clip moves with the tray, as a native iOS
-   * sheet does when it closes (#142); without it the bottom edge stays and
-   * the visible sheet gets shorter until it is gone.
+   * Below the lowest open snap point the sheet moves down as one piece, as a
+   * native iOS sheet does when it closes, instead of getting shorter.
    */
   #sinkOf(open: number): number {
     if (this.placement !== 'bottom' || !this.#layout) return 0;
@@ -2136,17 +1614,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Writes the expand progress for `open` (px open) as
-   * `--mobile-drawer-expand-progress` on the sheet: `0` at or below the
-   * second-highest snap point (or closed, for a drawer with one open snap
-   * point), `1` at the highest snap point and past it, linear in between.
-   * Themes move the sheet from its floating look to its full-height look
-   * with it (see `--mobile-drawer-inset` in styles.css). Only the sheet gets
-   * it, not the root: the property is registered as not inherited, and only
-   * the tray takes it from the sheet, so the content isn't styled again on
-   * every frame. The bar tint and, in `#paintBackdrop`, the backdrop and its
-   * tint (all three empty elements) get it too, for a dim and bar colours
-   * that follow it. Only written when it changes.
+   * Not on the root: the property is not inherited and only the tray takes
+   * it from the sheet, so the content isn't styled again on every frame.
    */
   #paintExpand(open: number, atTop: boolean): void {
     const { resolved, maxOffset } = this.#layout!;
@@ -2164,23 +1633,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#sheet?.style.setProperty('--mobile-drawer-expand-progress', value);
     this.#barTint?.style.setProperty('--mobile-drawer-expand-progress', value);
     this.#shadow?.style.setProperty('--mobile-drawer-expand-progress', value);
-    // A theme may change the tray's colour with it (e.g. the iOS theme's
-    // glass that becomes opaque), see `KeyboardFill`.
+    // A theme may change the tray's colour with it.
     this.#keyboardFill?.paint();
   }
 
   /**
-   * Moves the content `bounce` px past fully open, in the opening direction,
-   * with an inline `translate` on `.mobile-drawer__content` (the individual
-   * property, so it composes with an app `transform` there). The tray stays
-   * at its edge and clips the content. Pinned elements (`PINNED_ATTRIBUTE`)
-   * get the opposite `translate`, so they stay at the tray's edge; their own
-   * inline `translate` is put back after the bounce. Runs every
-   * frame; it only writes inline styles. While the content is moved it gets
-   * `will-change: translate` (its own layer, so a frame doesn't paint it
-   * again) and scrolling along the axis is locked (`#syncScrollLock`): the
-   * moved content widens the scrollable overflow of a top or left tray for
-   * the moment, and no scroll may start on top of the bounce.
+   * Moves the content past fully open with `translate`, which composes with
+   * an app `transform`. Scrolling is locked meanwhile: the moved content
+   * widens a top or left tray's scrollable overflow, and no scroll may start
+   * on top of the bounce.
    */
   #renderBounce(bounce: number): void {
     const content = this.#content;
@@ -2220,25 +1681,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Locks scrolling along the axis below the highest snap point, so the
-   * content and the drag never fight there: the tray and the marked scroll
-   * containers in it (`data-mobile-drawer-scroll`, not those of a nested
-   * drawer) get an inline `overflow-y: hidden` (`overflow-x` for left and
-   * right), which is removed again at the highest snap point. `hidden`
-   * keeps them scroll containers, so their scroll position is kept. Also
-   * with `@handleOnly`: the content only scrolls when the drawer is fully
-   * open, so a handle never scrolls out of reach below the top.
-   *
-   * Inline styles rather than a CSS rule keyed on a state attribute: the
-   * marked elements are the app's, and their `overflow` usually comes from
-   * unlayered app CSS, which beats every rule in the drawer's cascade layer;
-   * and it must follow the rendered position, also mid-drag. The previous
-   * inline value is put back on unlock. Runs when `#atTop` flips, on
-   * install, on argument changes and on teardown; a marked element added
-   * while locked, or whose inline style the app rewrote, is locked when a
-   * pointer goes down, a wheel turns or focus moves in it (`#onTrayInput`).
-   * After a placement change during a drag, the lock follows the new
-   * layout from the next frame.
+   * Below the highest snap point the scroll containers get an inline
+   * `overflow: hidden` along the axis, so content and drag never fight.
+   * `hidden` keeps their scroll position. Inline, not a CSS rule: their
+   * `overflow` usually comes from unlayered app CSS, which beats the
+   * drawer's layer, and the lock must follow the rendered position.
    */
   #syncScrollLock(): void {
     const tray = this.#tray;
@@ -2250,11 +1697,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#scrollLockProperty = lock ? property : undefined;
     for (const [element, saved] of this.#scrollLock) {
       if (!element.isConnected) {
-        // Removed from the page: nothing to put back.
         this.#scrollLock.delete(element);
       } else if (!lock || saved.property !== property) {
-        // Puts back the inline value from before the lock, unless the app
-        // has set a value of its own since, which is then kept.
+        // Keeps a value the app has set since.
         this.#scrollLock.restore(element, 'hidden');
       }
     }
@@ -2265,12 +1710,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     );
   }
 
-  /**
-   * Locks the tray, the content in the header mode (it is the scroll
-   * container then) and the elements of `marked` that are marked scroll
-   * containers (`data-mobile-drawer-scroll`) of this tray, not of a nested
-   * drawer's. See `#lockScroll`.
-   */
+  /** Not the scroll containers of a nested drawer. */
   #lockContainers(tray: HTMLElement, marked: Iterable<Element>): void {
     this.#lockScroll(tray);
     if (this.#header) this.#lockScroll(this.#content!);
@@ -2285,11 +1725,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  /**
-   * Locks `element` with the current lock property, or locks it again if
-   * the app has rewritten its inline style since: the app's value is then
-   * the one to put back.
-   */
+  /** If the app has rewritten the inline style, its value is put back. */
   #lockScroll(element: HTMLElement): void {
     const property = this.#scrollLockProperty;
     if (!property) return;
@@ -2305,13 +1741,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Writes the progress of the last render on the backdrop, if there is one:
-   * `--mobile-drawer-progress` for its opacity (also on the backdrop tint,
-   * for the iOS Safari 26 bar colour), and `pointer-events: none`
-   * at or below the smallest snap point. So an invisible backdrop (e.g.
-   * while the drawer closes, before `data-closed` hides it) never blocks the
-   * page, and neither does the backdrop of a "peek" drawer (smallest snap
-   * point above 0) resting at its peek.
+   * `pointer-events: none` at or below the smallest snap point, so an
+   * invisible (closing) backdrop or a peek's backdrop never blocks the page.
    */
   #paintBackdrop(): void {
     const backdrop = this.#backdrop;
@@ -2335,15 +1766,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * The backdrop is optional (`@backdrop`), so it registers itself. It is a
-   * pointer convenience and deliberately not focusable or a button: a
-   * keyboard closes the drawer with Escape or the app's own controls, so its
-   * listeners are added here rather than with `{{on}}`.
+   * The backdrop is a pointer convenience, deliberately not focusable or a
+   * button: a keyboard closes with Escape or the app's own controls.
    */
   backdropHooks: LifecycleHooks = {
     install: (backdrop) => {
       this.#backdrop = backdrop;
-      // Rendered in the same block, after the backdrop.
       const tint = backdrop.nextElementSibling;
       this.#backdropTint =
         tint instanceof HTMLElement &&
@@ -2368,10 +1796,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Starts tracking a pointer on the backdrop, to tell a tap from a drag
-   * (or a scroll the browser took over) when its click arrives. Pointer
-   * events of a touch stay on the backdrop (implicit capture), those of a
-   * mouse don't, so movement is followed on the document.
+   * Tells a tap from a drag when the click arrives. A mouse has no implicit
+   * capture, so movement is followed on the document.
    */
   private onBackdropPointerDown = (event: PointerEvent): void => {
     if (!event.isPrimary) return;
@@ -2405,7 +1831,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   };
 
-  /** Marks the backdrop pointer as `moved` once it is at `x`/`y`. */
   #trackBackdropPointer(x: number, y: number): void {
     const pointer = this.#backdropPointer;
     if (!pointer) return;
@@ -2415,11 +1840,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * The pointer lifted: stop following it, but keep it (with where it
-   * lifted) for the click that may follow, which reads `moved`. A click
-   * elsewhere (e.g. a mouse dragged onto the tray) never reaches the
-   * backdrop; the record is then ignored by the next click, see
-   * `onBackdropClick`.
+   * Keeps the pointer for its click. A click elsewhere (e.g. a mouse dragged
+   * onto the tray) never comes; the next click then ignores the record.
    */
   #onBackdropPointerUp = (event: PointerEvent): void => {
     const pointer = this.#backdropPointer;
@@ -2447,12 +1869,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Closes the drawer on a tap on the backdrop. A click whose pointer moved
-   * past `TAP_SLOP` (a drag that happened to start on the backdrop) isn't a
-   * tap. The click a pointer causes lands where it lifted; any other click,
-   * e.g. one without a pointer (`element.click()`, assistive technology),
-   * is a tap, also when an earlier pointer's click never reached the
-   * backdrop.
+   * A click whose pointer moved isn't a tap. A pointer's click lands where
+   * it lifted; any other click (`element.click()`, assistive technology) is.
    */
   private onBackdropClick = (event: MouseEvent): void => {
     const pointer = this.#backdropPointer;
@@ -2467,10 +1885,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Notes whether the active snap point is above the smallest one, and
-   * queues `#applyOpen` for the modal behaviour and focus, which must not run
-   * during rendering. Called whenever the target may have changed (and on
-   * every argument change, which covers `@modal`).
+   * Queues `#applyOpen` for the modal behaviour and focus, which must not run
+   * during rendering. Runs on every argument change, which covers `@modal`.
    */
   #syncOpen(): void {
     const layout = this.#layout;
@@ -2485,8 +1901,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     trackInput(this, !this.#hidden);
     if (!this.#hasReportBaseline) {
-      // The first open state the drawer knows (on insertion, or once a
-      // drawer inserted while hidden is measured) is not a change.
+      // The first known open state is not a change.
       this.#hasReportBaseline = true;
       this.#reportedOpen = open;
     }
@@ -2509,8 +1924,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       }
       this.#openedByFocus = this.#focusOpenPending;
       this.#focusOpenPending = false;
-      // Focus is already inside: return it to where it came from into the
-      // tray, e.g. on Escape.
+      // Focus is already inside: return it to where it came from.
       const from = this.#enteredFrom;
       if (this.#openedByFocus && from?.isConnected && !this.#contains(from)) {
         this.#returnFocus = from;
@@ -2532,18 +1946,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Turns the modal behaviour on or off to match `#open` and `@modal`, and
-   * moves focus: into a modal drawer that opens, back to where it came from
-   * when the drawer closes. Then calls `@onOpen` or `@onClose` when `#open`
-   * differs from what was last reported, so a drawer that opens and closes
-   * again before this runs reports neither.
-   *
-   * The modal behaviour is off while the drawer is inside another drawer
-   * that is closed or closing, whose `data-closed` hides it (or soon will),
-   * so it never keeps the page inert and locked from inside a hidden
-   * drawer. It comes back when that drawer opens again. A drawer that rests
-   * at a peek (a smallest snap point above 0) is visible, so it does not
-   * count, see `#hidden`.
+   * A drawer that opens and closes again before this runs reports neither
+   * `@onOpen` nor `@onClose`. The modal behaviour is off inside a closed or
+   * closing drawer, so a hidden drawer never keeps the page inert and locked.
    */
   #applyOpen(): void {
     if (this.#destroyed) return;
@@ -2558,8 +1963,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#deactivateModal();
       if (insideClosed && this.#open) this.#moveFocusOutOfClosedDrawer();
     }
-    // Before focus returns: an open modal drawer inside this one would keep
-    // the element to return to inert.
+    // Before focus returns: a modal drawer inside would keep its target inert.
     this.#applyNested();
     const focusInside = this.#closedWithFocusInside;
     if (focusInside !== undefined) {
@@ -2581,7 +1985,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const root = this.#root!;
     const tray = this.#tray!;
     this.#makeOutsideInert();
-    // The tray, with the portals of the drawers nested in it.
     const releaseScroll = lockBodyScroll(
       (target) => logicallyContains(tray, target),
       {
@@ -2591,10 +1994,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       },
     );
     this.#syncStatusBar();
-    // Below the modal drawers inside this one (e.g. a peeking drawer that
-    // opens under its open nested drawer, also one rendered outside the
-    // tray with `Nested`): the nested drawer stays in front, so it keeps
-    // Escape and the Tab wrap.
+    // Below the modal drawers inside this one (e.g. a peek that opens under
+    // its open nested drawer), which keep Escape and the Tab wrap.
     const nested = modalStack.findIndex((other) =>
       logicallyContains(root, other.#root),
     );
@@ -2606,8 +2007,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       modalStack.splice(modalStack.indexOf(this), 1);
       MobileDrawer.#syncNested();
       releaseScroll();
-      // Not moving (e.g. a jump without animation): `#render` won't run
-      // again to end it.
+      // Not moving: `#render` won't run again to end it.
       if (!this.#spring?.isAnimating && !this.#drag) this.#endStatusBar();
       this.#releaseInert?.();
       this.#releaseInert = undefined;
@@ -2628,8 +2028,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
 
     if (!this.#hasFocus()) {
-      // The drawer's own focus never moves it (see `#onTrayFocusIn`): the
-      // app chose the snap point it opens at.
+      // The drawer's own focus never moves it: the app chose the snap point.
       this.#initialFocusing = true;
       try {
         const element = initialFocus(tray, tray);
@@ -2642,16 +2041,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * `@transparentStatusBar` (#113): while the scroll lock is the one for a
-   * transparent status bar (the first modal drawer decides, so a drawer
-   * nested in it follows), the root gets `data-status-bar="transparent"`
-   * (styles.css moves it 5px down and makes the backdrop transparent on
-   * iOS), and a drawer with a backdrop gets the dim layer (`PageDim`). Both
-   * stay until the drawer rests without the modal behaviour (closed, or at
-   * a peek, see `#render`), so the dim also fades out while it closes. They
-   * end at once when the lock changes to the fixed `<body>` (see
-   * `onLockChange`). Not for top drawers, and not for an embedded drawer (a
-   * root that isn't `position: fixed`).
+   * The first modal drawer's lock decides, so a nested drawer follows. Stays
+   * until the drawer rests without the modal behaviour, so the dim fades out
+   * while it closes. Not for an embedded (not `position: fixed`) root.
    */
   #syncStatusBar(): void {
     const root = this.#root;
@@ -2672,7 +2064,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  /** Undoes `#syncStatusBar`. */
   #endStatusBar(): void {
     if (!this.#statusBar) return;
     this.#statusBar = false;
@@ -2681,7 +2072,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#pageDim = undefined;
   }
 
-  /** Undoes `#activateModal`, if it is on. Leaves focus alone. */
+  /** Leaves focus alone. */
   #deactivateModal(): void {
     const release = this.#releaseModal;
     if (!release) return;
@@ -2692,12 +2083,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Where the yielded `Nested` renders by default: the parent element of
-   * the root, or, when this drawer is inside the tray of another drawer
-   * (also through a `Nested` of that drawer), the parent element of the
-   * outermost such drawer. A transformed tray is the containing block of the
-   * fixed drawers in it, so a nested drawer in the tray of any drawer
-   * around this one would be clipped by that tray again.
+   * The root's parent, or, inside another drawer's tray (also through its
+   * `Nested`), the outermost such drawer's parent: a transformed tray is the
+   * containing block of the fixed drawers in it, so it would clip.
    */
   #nestedDestination(): Element | undefined {
     let root = this.#root!;
@@ -2717,14 +2105,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Called when this drawer starts to close (see `#hidden`): closes the
-   * drawers in the portals of its `Nested` that show, like `close()`, so
-   * they move away together with this drawer. A drawer inside the tray
-   * moves with the tray; one in a portal would else stay on the screen
-   * until this drawer has closed, and then disappear at once. In a
-   * microtask: `close()` can call `@onSnapPointChange`, which must not run
-   * during rendering. A controlled drawer whose parent doesn't take the new
-   * index hides with this drawer (`data-closed` on the portal).
+   * Closes the drawers in the `Nested` portals with this drawer: unlike one
+   * in the tray, they would else stay on the screen and then vanish. In a
+   * microtask: `@onSnapPointChange` must not run during rendering.
    */
   #closePortaled(): void {
     if (this.#portals.size === 0) return;
@@ -2747,10 +2130,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     });
   }
 
-  /**
-   * The root of the nearest drawer around this one, also through portals
-   * (see `nesting.ts`).
-   */
   #closestDrawerRoot(): Element | undefined {
     for (
       let node = this.#root ? logicalParent(this.#root) : null;
@@ -2763,11 +2142,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Makes the page outside the drawer inert (see `inertOutside`), or
-   * updates that: everything except the root and the portals of the drawers
-   * nested in this one (see `nesting.ts`), which are a part of this drawer.
-   * The new `inert` attributes are set before the old ones are released, so
-   * an element that stays inert never loses it in between.
+   * Sets the new `inert` attributes before it releases the old ones, so an
+   * element that stays inert never loses it in between.
    */
   #makeOutsideInert(): void {
     const root = this.#root!;
@@ -2777,11 +2153,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Called when a portal of the yielded `Nested` is added or removed:
-   * updates what the open modal drawers make inert (a portal can be added
-   * in an element that is inert already), `data-nested`, and the open state
-   * of the drawers nested in the drawers. In a microtask: portals are added
-   * and removed during rendering, where the open state must not change.
+   * A portal can be added in an element that is inert already. In a
+   * microtask: portals change during rendering.
    */
   static #portalsChanged(): void {
     if (MobileDrawer.#portalsQueued) return;
@@ -2804,31 +2177,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  /**
-   * Whether `node` is inside the drawer: in its DOM, or in a portal of a
-   * drawer nested in it (see `nesting.ts`).
-   */
+  /** Also in a portal of a drawer nested in it. */
   #contains(node: Node | null | undefined): boolean {
     const root = this.#root;
     return !!root && logicallyContains(root, node);
   }
 
-  /** Whether focus is inside the drawer. */
   #hasFocus(): boolean {
     return this.#contains(document.activeElement);
   }
 
   /**
-   * Focuses the element that had focus when the drawer opened again, if
-   * focus was inside the drawer when it closed (or, for a modal drawer, was
-   * dropped onto `<body>`). Runs after the modal behaviour was undone, so the
-   * element is no longer inert.
-   *
-   * If that element has left the page (e.g. the drawer deleted the list item
-   * it was opened from), focus goes to the first tabbable element in the
-   * nearest of its former ancestors that is still on the page, outside the
-   * drawer, but never all the way up to `<body>`: focus then stays where the
-   * browser put it.
+   * Runs after the modal behaviour was undone, so the element isn't inert.
+   * If it has left the page (e.g. a deleted list item), focus goes into its
+   * nearest former ancestor still on the page, but never `<body>`.
    */
   #returnFocusAfterClose(focusInside: boolean, wasModal: boolean): void {
     const target = this.#returnFocus;
@@ -2851,10 +2213,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       ?.focus();
   }
 
-  /**
-   * The ancestors of `element` from its parent up to (not including)
-   * `<body>`, for the fallback in `#returnFocusAfterClose`.
-   */
   #ancestorsOf(element: Element): Element[] {
     const path: Element[] = [];
     for (
@@ -2867,10 +2225,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return path;
   }
 
-  /**
-   * Whether `element` is inside a drawer (other than this one) that is
-   * closed or closing, see `#hidden`.
-   */
   #hiddenByDrawer(element: Element): boolean {
     for (const other of mountedDrawers) {
       if (other !== this && other.#hidden && other.#contains(element)) {
@@ -2881,14 +2235,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Called when the modal behaviour turns off because a drawer around this
-   * one closes, while this drawer stays open. If focus is inside this
-   * drawer, which is now hidden (or soon will be), it moves to the element
-   * this drawer was opened from, if that is still on the page and not
-   * hidden too. Else focus leaves the drawer for `<body>`: the drawer
-   * around this one returns it from there if it was open (see
-   * `#returnFocusAfterClose`). `#returnFocus` is kept, for when this drawer
-   * closes after the drawer around it opens again.
+   * A drawer around this open one closes. Else focus goes to `<body>`, where
+   * the outer drawer returns it from. `#returnFocus` is kept, for when this
+   * drawer closes after the outer one opens again.
    */
   #moveFocusOutOfClosedDrawer(): void {
     if (!this.#hasFocus()) return;
@@ -2900,15 +2249,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     (document.activeElement as HTMLElement | SVGElement | null)?.blur();
   }
 
-  /**
-   * Sets `data-nested` on the root of every drawer that the front modal
-   * drawer (the last one in `modalStack`) covers, and removes it from the
-   * others: every drawer that shows (not closed or closing, see `#hidden`)
-   * except the front one and the drawers inside it, which are in front of
-   * it. Themes dim a covered sheet with it. Runs when the modal stack
-   * changes, when a drawer starts to show or hide, and when a drawer is
-   * inserted or removed.
-   */
+  /** `data-nested` on every shown drawer that the front modal one covers. */
   static #syncNested(): void {
     const front = modalStack[modalStack.length - 1];
     const frontRoot = front ? front.#root : undefined;
@@ -2925,7 +2266,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  /** Re-applies the open state of the drawers inside this one. */
   #applyNested(): void {
     const root = this.#root;
     if (!root) return;
@@ -2941,14 +2281,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Escape closes an open drawer while focus is inside it, modal or not.
-   * Events another handler already took care of (`preventDefault`) are left
-   * alone, so of nested drawers only the innermost one closes. Ignored while
-   * the drawer is dragged: the release decides where it goes, so the parent
-   * never sees a close and a reopen.
+   * `defaultPrevented` is left alone, so only the innermost nested drawer
+   * closes. Not during a drag: the release decides where it goes, so the
+   * parent never sees a close and a reopen.
    */
   #onKeyDown = (event: KeyboardEvent): void => {
-    // A key (e.g. one that scrolls) stops the content's momentum.
     this.#stopMomentum();
     if (
       event.key !== 'Escape' ||
@@ -2964,11 +2301,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.close();
   };
 
-  /**
-   * While modal, for the topmost modal drawer only: Escape closes the drawer
-   * also when focus is outside it (e.g. on `<body>` after a click on the
-   * backdrop), and Tab and Shift+Tab wrap around inside the tray.
-   */
+  /** Escape with focus outside (e.g. on `<body>`), and the Tab wrap. */
   #onDocumentKeyDown = (event: KeyboardEvent): void => {
     if (
       event.defaultPrevented ||
@@ -2978,7 +2311,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     if (event.key === 'Escape') {
-      // Not during a drag: the release decides where the drawer goes.
       if (event.isComposing || !this.#open || this.#drag) return;
       event.preventDefault();
       this.close();
@@ -2992,12 +2324,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   };
 
-  /**
-   * Keeps Tab inside the tray: from the last tabbable element (or from
-   * outside the tray) it moves to the first, Shift+Tab the other way round.
-   * In between the browser moves focus as usual; the rest of the page is
-   * inert, so focus can't leave the drawer.
-   */
+  /** Only wraps at the ends: the rest of the page is inert anyway. */
   #trapTab(event: KeyboardEvent): void {
     const tray = this.#tray!;
     const items = tabbables(tray);
@@ -3005,9 +2332,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const inside = !!active && tray.contains(active);
     const first = items[0];
     const last = items[items.length - 1];
-    // Whether a tabbable element comes after (or before) the focused one,
-    // also when that isn't tabbable itself (e.g. a focused `tabindex="-1"`
-    // status message after the last button).
+    // The focused element may not be tabbable itself (`tabindex="-1"`).
     const any = (position: number) =>
       !!active &&
       items.some((item) => active.compareDocumentPosition(item) & position);
@@ -3032,10 +2357,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Screen px per px of drawer offset along the axis: `1`, unless an
-   * ancestor is scaled (e.g. a scaled preview). Pointer coordinates are in
-   * screen px, offsets in the drawer's own px, so this keeps the drawer under
-   * the finger. Measured once per drag; it forces layout.
+   * Screen px per px of drawer offset: not `1` under a scaled ancestor.
+   * Forces layout, so once per drag.
    */
   #screenScale(): number {
     const layout = this.#layout!;
@@ -3045,17 +2368,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return Number.isFinite(scale) && scale > 0 ? scale : 1;
   }
 
-  /** The pointer coordinate along the drawer axis. */
   #positionOf(data: PanData): number | undefined {
     const position = this.axis === 'vertical' ? data.current.y : data.current.x;
     return Number.isFinite(position) ? position : undefined;
   }
 
   /**
-   * The time of `event` in ms, for the release velocity: the event's own
-   * time stamp, which is when the input happened even if the main thread was
-   * busy. With an injected clock (tests) the clock's time instead, since
-   * event time stamps can't be set.
+   * The event's time stamp is when the input happened, also when the main
+   * thread was busy. Tests can't set it, so they use the injected clock.
    */
   #timeOf(event: Event | undefined): number {
     const { dragTime } = drawerEnvironment;
@@ -3064,13 +2384,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return event?.timeStamp ?? performance.now();
   }
 
-  /**
-   * Where the drag puts the drawer after the finger moved `delta` px (in
-   * drawer px, positive opens) since the drag started: 1:1 inside the snap
-   * range and back towards it, rubber-banded outside it (stiff past fully
-   * open like an iOS sheet's content, see `OPEN_RUBBER_BAND_RATIO`). See
-   * `dragOffset`.
-   */
   #dragOffset(drag: Drag, delta: number): number {
     const { resolved, container, trayLength } = this.#layout!;
     return dragOffset(
@@ -3085,24 +2398,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     );
   }
 
-  /**
-   * The tray's `touch-action`. Below the highest snap point every gesture
-   * along the axis drags, so the browser may only pan across it. At the
-   * highest snap point the content may scroll along the axis too; gestures
-   * that drag cancel their `touchmove` events instead. Read when a touch
-   * starts, so it is kept up to date in `#render`.
-   */
+  /** Read when a touch starts, so `#render` keeps it up to date. */
   private trayTouchAction = (): string => {
     if (this.#atTop) return 'pan-x pan-y';
     return this.axis === 'vertical' ? 'pan-x' : 'pan-y';
   };
 
-  /**
-   * Decides whether a gesture on the tray drags the drawer or scrolls (see
-   * the class docs). A gesture that starts on a handle always drags, one
-   * that starts in a nested drawer never does. Called once per gesture,
-   * after a touch on a moving drawer has held it.
-   */
+  /** Once per gesture, after a touch on a moving drawer has held it. */
   private shouldDrag = (movement: number, target: Element | null): boolean => {
     const layout = this.#layout;
     const tray = this.#tray;
@@ -3115,13 +2417,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     );
   };
 
-  /**
-   * The scroll containers that take part in a gesture that starts at
-   * `target`: the marked ones (`data-mobile-drawer-scroll`) between it and
-   * the tray, innermost first, and the drawer's scroll container (see
-   * `#scroller`): the tray, or in the header mode the content, if the
-   * gesture starts in it. A gesture on the header has no scroll container.
-   */
+  /** Innermost first. A gesture on the header has none. */
   #scrollChain(target: Element | null): HTMLElement[] {
     const tray = this.#tray;
     const scroller = this.#scroller;
@@ -3144,20 +2440,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * The tray's `onScroll`, for every `touchmove` of a gesture that scrolls
-   * the content (see `dragSource`): whether a drag takes it over, the scroll
-   * handoff of a native sheet. That is when the finger moves `step` px
-   * towards close and no scroll container of the gesture (see
-   * `#scrollChain`) can scroll that way any more: the content is at its
-   * scroll start (for a bottom drawer). The drag then follows the finger
-   * from where it is. Only while the finger is down: momentum that carries
-   * the content to its start after the finger lifted doesn't move the
-   * drawer. Not for a gesture in a nested drawer.
-   *
-   * Before that, so the content doesn't bounce at its start (iOS) and then
-   * jump back when the drag locks it, the scroll containers of the gesture
-   * that are nearer the end a pull towards close scrolls to than the other
-   * end get `overscroll-behavior: none` along the axis, see `#setOverscroll`.
+   * The scroll handoff of a native sheet: a drag takes over a scroll that
+   * reaches its scroll start while the finger pulls towards close. Only
+   * while the finger is down: momentum never moves the drawer. Before that,
+   * `overscroll-behavior: none` near that end, so the content doesn't bounce
+   * (iOS) and then jump back when the drag locks it.
    */
   private onTrayScroll = (step: number, target: Element | null): boolean => {
     const layout = this.#layout;
@@ -3165,7 +2452,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return false;
     }
     const vertical = this.axis === 'vertical';
-    // The finger moving this way closes the drawer.
     const closing = -OPENING_DIRECTION[this.placement];
     const chain = this.#scrollChain(target);
     for (const element of chain) {
@@ -3177,16 +2463,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return !chain.some((element) => canScroll(element, vertical, step));
   };
 
-  /** The tray's `onScrollEnd`: puts back the overscroll behaviour. */
   private onTrayScrollEnd = (): void => {
     this.#overscroll.restoreAll();
   };
 
-  /**
-   * Sets (`none`) an inline `overscroll-behavior-y` (`-x` for left and
-   * right) on `element`, or puts back the inline value it had before. iOS
-   * applies a change during a scroll.
-   */
+  /** iOS applies a change during a scroll. */
   #setOverscroll(element: HTMLElement, none: boolean): void {
     const property =
       this.axis === 'vertical'
@@ -3198,11 +2479,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Whether `target` is in one of this drawer's handles (not a nested
-   * drawer's). A gesture that starts there always drags. A text field in a
-   * handle (see `isTextField`) is not part of it, so text selection in it
-   * keeps working: without `@handleOnly` a gesture there follows the rules
-   * of the rest of the tray, with it a gesture there doesn't drag.
+   * Not a nested drawer's handle. A text field in a handle is not part of
+   * it, so text selection in it keeps working.
    */
   #onHandle(target: Element | null): boolean {
     const tray = this.#tray;
@@ -3219,28 +2497,20 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * The handles' `shouldDrag`: a gesture on a handle drags (see
-   * `#onHandle`). With it the handle's drag source also cancels the
-   * touchmoves of a drag, so the browser can't scroll the tray under it,
-   * also with `@handleOnly`, where the tray isn't a drag source.
+   * So the handle's drag source cancels the touchmoves too, also with
+   * `@handleOnly`, where the tray isn't a drag source.
    */
   private shouldHandleDrag = (_movement: number, target: Element | null) =>
     this.#onHandle(target);
 
-  /**
-   * Whether `target` is in a drawer nested in this one (in its tray, a
-   * handle or its backdrop): its gestures belong to that drawer only, see
-   * the class docs.
-   */
+  /** Its gestures belong to the nested drawer only. */
   #inNested(target: EventTarget | null): boolean {
     const root = this.#root;
     if (!root || !(target instanceof Element) || !root.contains(target)) {
       return false;
     }
-    // The root of a mounted drawer, not any element with the
-    // `mobile-drawer` class (e.g. an app element that reuses it). A drawer
-    // nested with `Nested` is not in this drawer's DOM: its events never get
-    // here.
+    // A mounted drawer's root, not any element with the `mobile-drawer`
+    // class (an app element may reuse it).
     for (
       let element: Element | null = target;
       element && element !== root;
@@ -3261,11 +2531,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * A touch on a drag source holds a running animation right away, like
-   * native sheets, instead of only once a pan is recognised (past didPan's
-   * threshold). If no drag starts, lifting the finger resumes the animation,
-   * so taps on content keep working. Not a touch in a nested drawer (see
-   * `#inNested`).
+   * A touch holds a running animation at once, like native sheets, not only
+   * once a pan is recognised. Lifting without a drag resumes it, so taps on
+   * content keep working.
    */
   private onPointerDown = (event: PointerEvent): void => {
     const spring = this.#spring;
@@ -3291,15 +2559,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * While scrolling is locked, locks the marked scroll containers around
-   * the target of a `pointerdown`, `wheel` or `focusin` on the tray before
-   * the browser scrolls them: those added after the lock, and those whose
-   * inline style the app has rewritten since (see `#lockScroll`). Listens
-   * on the tray itself, so it works with `@handleOnly` and any pointer type.
+   * Locks scroll containers added, or rewritten by the app, after the lock,
+   * before the browser scrolls them. On the tray itself, so it works with
+   * `@handleOnly` and any pointer type.
    */
   #onTrayInput = (event: Event): void => {
-    // A new touch, a wheel or focus stops the content's momentum, as in a
-    // native scroll view.
+    // As in a native scroll view.
     this.#stopMomentumOnInput(event);
     const tray = this.#tray;
     const { target } = event;
@@ -3318,43 +2583,19 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Keyboard focus on an element in the tray that isn't fully visible at
-   * the active snap point moves a visible drawer below its highest snap
-   * point to its highest snap point, like `open`: uncontrolled it moves
-   * there, controlled it asks the parent through `@onSnapPointChange`, as
-   * after a drag. Below the highest snap point the content can't scroll
-   * along the axis, so this is the only way to show it. Modal or not: the
-   * focused element is hidden either way. Also at a peek (a smallest snap
-   * point above `0`), where Tab reaches the content from the page: the
-   * drawer then opens, so `@onOpen` is called, but it doesn't become modal
-   * (see `#openedByFocus`): Tab goes on through the drawer and out to the
-   * page, and the drawer goes back to its peek when focus leaves it (see
-   * `#onRootFocusOut`). Not while the drawer closes to `0`. When the drawer arrives, the tray scrolls the
-   * element into view if the browser didn't (see `#revealFocus`).
-   *
-   * Only keyboard focus (focus after a key press, see `focusInputOf`, also
-   * programmatic focus after a key press, such as the Tab wrap): a tap
-   * focuses what is under the finger, which shows. Not the initial focus of
-   * a modal drawer (see `#activateModal`): the drawer moves focus in itself,
-   * and the app chose the snap point it opens (or is inserted) at, so that
-   * one is kept. Also any focus on a field the user types in (see
-   * `isTypingField`): a tap on a text field that is only partly visible
-   * moves the drawer too, which shows the field above an on-screen keyboard.
-   * Not a tap on a `readonly` text field, which opens no keyboard. Not
-   * during a drag or while a touch holds the drawer, and not for the tray
-   * itself or for the content of a drawer nested in this one, whose own tray
-   * handles it.
-   *
-   * Visibility is checked where the element will be once the drawer rests
-   * at its active snap point, not where it is now: a drawer that is still
-   * on its way there (e.g. one that opens) must not move for an element
-   * that will show. Visible means inside both the tray and the root (the space
-   * the tray opens into), along the axis.
+   * Keyboard focus on an element that isn't fully visible moves the drawer
+   * to its highest snap point: below it the content can't scroll, so this is
+   * the only way to show it. From a peek the drawer opens but isn't modal.
+   * A tap shows what it focuses, so only keyboard focus, and any focus on a
+   * typing field (to show it above the on-screen keyboard). Not the drawer's
+   * own initial focus: the app chose that snap point. Visibility is checked
+   * at the active snap point, so an opening drawer doesn't move for an
+   * element that will show.
    */
   #onTrayFocusIn = (event: FocusEvent): void => {
     const tray = this.#tray;
     const { target, relatedTarget: from } = event;
-    // The focused element itself, also inside an open shadow root.
+    // Also inside an open shadow root.
     const element = event.composedPath()[0];
     if (element instanceof Element) {
       this.#focused = { element, input: focusInputOf(element) };
@@ -3388,7 +2629,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const offset = this.#offsetOf(this.activeSnapPoint);
     if (this.#isHighest(offset) || this.#isVisibleAt(element, offset)) return;
     this.#reveal = element;
-    // Not during rendering (an app may focus an element as it renders).
+    // An app may focus an element as it renders.
     queueMicrotask(() => {
       if (
         this.#destroyed ||
@@ -3401,9 +2642,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       }
       this.#resetRootScroll();
       if (!this.#open) {
-        // From the peek: the drawer opens, but not as a modal dialog. A
-        // controlled parent that doesn't take the new index in this task
-        // doesn't get a drawer that is not modal later.
+        // Not modal. A controlled parent that doesn't take the new index in
+        // this task doesn't get a non-modal drawer later.
         this.#focusOpenPending = true;
         setTimeout(() => (this.#focusOpenPending = false));
       }
@@ -3412,19 +2652,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * A drawer that keyboard focus opened from its peek (see
-   * `#openedByFocus`) goes back to its peek when focus moves to an element
-   * outside it, e.g. Tab past its last element: like a peek that only shows
-   * what has focus. Not when focus goes nowhere (`relatedTarget` `null`,
-   * e.g. the window loses focus or a click on something that can't take
-   * focus), nor during a drag. Like `close`, so through
-   * `@onSnapPointChange` when controlled. Also forgets the initial focus of
-   * a modal drawer when focus moves on from it (see `#focusHoldsReset`).
+   * A drawer that focus opened goes back to its peek when focus moves out,
+   * but not when it goes nowhere (`relatedTarget` `null`: the window lost
+   * focus, or a click on something that can't take it).
    */
   #onRootFocusOut = (event: FocusEvent): void => {
     const to = event.relatedTarget;
-    // Focus moved on from the modal drawer's initial focus (not only the
-    // window that lost focus), see `#focusHoldsReset`.
+    // Not when only the window lost focus.
     if (to && event.target === this.#initialFocused) {
       this.#initialFocused = undefined;
     }
@@ -3452,19 +2686,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Scrolls the sheet and the root back to their start. Both are
-   * `overflow: hidden` and never meant to scroll, but a browser that scrolls
-   * a focused element into view scrolls them too: below the highest snap
-   * point part of the tray is outside the sheet, so the browser moves the
-   * tray up in the sheet to show the element, and the tray leaves its
-   * edge, while the drawer stays at its snap point. The sheet takes that
-   * scroll, so it doesn't go on to the page behind. (The root only scrolls
-   * if something else in it overflows.) Called before a move for keyboard
-   * focus (Chrome scrolls before the focus events), and on every `scroll`
-   * of the sheet or the root (`#onRootScroll`), for browsers that scroll
-   * after them and for focus that doesn't move the drawer (a tap on a
-   * partly visible button, a peek of a drawer whose parent declines the
-   * move).
+   * The sheet and root are `overflow: hidden`, but a browser that scrolls a
+   * focused element into view scrolls them too, and the tray leaves its
+   * edge. Chrome scrolls before the focus events, others after, so this
+   * runs both before a focus move and on every `scroll`.
    */
   #resetRootScroll(): void {
     for (const element of [this.#sheet!, this.#root!]) {
@@ -3479,13 +2704,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * The part of the root that the tray covers along the axis, in screen px,
-   * with the tray moved by `shift` px from where it is rendered: where the
-   * content can show. The sheet clips the tray too: a floating sheet (see
-   * `--mobile-drawer-inset`) ends above the root's bottom edge. A scroll of
-   * the root moves the sheet; that is undone, like `shift` undoes it for
-   * the tray (see `#isVisibleAt`). `sheetShift` moves the sheet the same
-   * way (a bottom sheet below its lowest open snap point, see `#sinkOf`).
+   * Where the content can show, in screen px, with the tray moved by
+   * `shift`: the tray, the root and the sheet (a floating sheet ends above
+   * the root's edge) clip it. A scroll of the root is undone.
    */
   #visibleRange(shift: number, sheetShift = 0): { start: number; end: number } {
     const vertical = this.axis === 'vertical';
@@ -3509,18 +2730,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     };
   }
 
-  /**
-   * Whether `element` is fully inside the visible part of the tray along
-   * the axis (see `#visibleRange`) once the drawer is at `offset` (px open).
-   * Forces layout, so only for focus changes.
-   */
+  /** Forces layout, so only for focus changes. */
   #isVisibleAt(element: Element, offset: number): boolean {
     const root = this.#root!;
     const sheet = this.#sheet!;
     const vertical = this.axis === 'vertical';
-    // Also undoes a scroll of the sheet or the root (see
-    // `#resetRootScroll`), which moves the tray and the element alike, but
-    // not the root.
+    // Also undoes a scroll of the sheet or the root, which moves the tray
+    // and the element alike, but not the root.
     const shift =
       (OPENING_DIRECTION[this.placement] * (offset - this.#renderedOffset) +
         (vertical
@@ -3538,14 +2754,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Called when a run of the spring ends. If keyboard focus moved the drawer
-   * to its highest snap point (see `#onTrayFocusIn`), the drawer rests there
-   * and the element still has focus, scrolls the tray of a vertical drawer
-   * so the element shows: below the highest snap point the tray was locked,
-   * and the browser may not have scrolled it (e.g. focus that came with
-   * `preventScroll`, such as the initial focus of a modal drawer). Only the
-   * tray scrolls, not the page. Left and right drawers scroll across their
-   * axis, which isn't locked, so the browser already did.
+   * After focus moved the drawer up: the tray was locked, so the browser
+   * may not have scrolled the element into view (e.g. `preventScroll`).
+   * Side drawers scroll across their axis, which isn't locked.
    */
   #revealFocus(): void {
     const element = this.#reveal;
@@ -3570,15 +2781,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const visible = this.#visibleRange(0);
     const header = this.#header;
     if (header) {
-      // The header doesn't scroll; the content shows below (or, for a top
-      // drawer, above) it only.
+      // The header doesn't scroll.
       if (header.contains(element)) return;
       const box = this.#content!.getBoundingClientRect();
       visible.start = Math.max(visible.start, box.top);
       visible.end = Math.min(visible.end, box.bottom);
     }
     const rect = element.getBoundingClientRect();
-    // Show the element's end if it is below, but its start first of all.
+    // Its start first of all.
     let delta = Math.max(0, rect.bottom - visible.end);
     delta = Math.min(delta, rect.top - visible.start);
     if (Math.abs(delta) <= EPSILON) return;
@@ -3601,8 +2811,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     this.#lockedTouch = undefined;
     const touch = event.changedTouches[0];
-    // A touch in a nested drawer belongs to that drawer (see `#inNested`):
-    // this drawer's lock doesn't cancel it, so its content can scroll (#119).
+    // A nested drawer's content can scroll.
     if (
       !touch ||
       !this.handleOnly ||
@@ -3620,18 +2829,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * With `@handleOnly` below the highest snap point, the content can't
-   * scroll along the axis, and the content isn't a drag source, so nothing
-   * else would cancel a swipe along the axis: iOS then skips the locked tray
-   * and scrolls the page behind it, whatever `overscroll-behavior` says.
-   * So such a swipe has its touchmoves cancelled, decided as in
-   * `dragSource`: once the finger has moved `DECISION_SLOP` px along the
-   * axis and further along it than across it, and released to the browser
-   * if it turns sideways before it has moved `TAP_SLOP` px along the axis.
-   * It never drags the drawer. Swipes across the axis (a carousel, a side
-   * drawer's list) are left alone, and so are swipes that start in a
-   * nested drawer (see `#onNestedTouchMove`). Without `@handleOnly`,
-   * `dragSource` does this as part of dragging.
+   * With `@handleOnly` below the highest snap point nothing else cancels a
+   * swipe along the axis on the locked content, and iOS then scrolls the
+   * page behind it, whatever `overscroll-behavior` says. Decided as in
+   * `dragSource`; never drags.
    */
   #onTrayTouchMove = (event: TouchEvent): void => {
     const gesture = this.#lockedTouch;
@@ -3666,10 +2867,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   };
 
-  /**
-   * Adds (or removes) the listeners of `#onNestedTouchMove` and
-   * `#onNestedWheel` on the tray or a portal of the yielded `Nested`.
-   */
   #listenNested(element: HTMLElement, add: boolean): void {
     if (!add) {
       element.removeEventListener('touchstart', this.#onNestedTouchStart);
@@ -3682,7 +2879,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     element.addEventListener('touchstart', this.#onNestedTouchStart, {
       passive: true,
     });
-    // Not passive: see `#onNestedTouchMove`.
     element.addEventListener('touchmove', this.#onNestedTouchMove, {
       passive: false,
     });
@@ -3691,10 +2887,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     element.addEventListener('wheel', this.#onNestedWheel, { passive: false });
   }
 
-  /**
-   * The root of the outermost drawer nested in this one that `target` is
-   * in: in this drawer's DOM (its tray) or in a portal of its `Nested`.
-   */
+  /** The outermost nested drawer that `target` is in. */
   #nestedRoot(target: EventTarget | null): Element | undefined {
     const root = this.#root;
     let found: Element | undefined;
@@ -3711,12 +2904,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return undefined;
   }
 
-  /**
-   * The elements a touch or wheel `event` in the nested drawer `root` went
-   * through, from its target up to `root`. From `composedPath()`, so the
-   * elements in an open shadow root count too (the target outside it is
-   * the host).
-   */
+  /** `composedPath()`, so elements in an open shadow root count too. */
   #nestedPath(event: Event, root: Element): Element[] {
     const path: Element[] = [];
     for (const node of event.composedPath()) {
@@ -3749,8 +2937,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         own = true;
         break;
       }
-      // `hidden` too: a locked scroll container can be unlocked during the
-      // gesture. `canScroll` reads the live style.
+      // `hidden` too: a locked scroll container can be unlocked meanwhile.
       if (
         /auto|scroll|hidden/.test(style.overflowX) ||
         /auto|scroll|hidden/.test(style.overflowY)
@@ -3768,23 +2955,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * A gesture that starts in a drawer nested in this one never scrolls this
-   * drawer (or the page): its touchmoves are cancelled unless something in
-   * the nested drawer can scroll the way the finger moves. Else iOS Safari
-   * scrolls the nearest ancestor that can scroll, also past
-   * `overscroll-behavior: contain` on a nested element that has nothing to
-   * scroll or is locked (`overflow: hidden`), e.g. on the nested drawer's
-   * backdrop, or across the nested drawer's axis (#119).
-   *
-   * Decided once per gesture, as in `dragSource`: when the finger has moved
-   * `DECISION_SLOP` px from where it went down, along the main direction of
-   * that movement. Touchmoves before that are never cancelled. A gesture
-   * that starts on an element that handles its own gestures (see
-   * `handlesOwnGesture`: a range slider, a text field, `touch-action:
-   * none`, ...) is left alone. Multi-touch (pinch-zoom) too. The nested
-   * drawer's own drag sources still cancel the touchmoves of its drags.
-   * Listens on the tray and on the portals of `Nested`, so it also covers
-   * a nested drawer rendered with it.
+   * A gesture in a nested drawer never scrolls this drawer or the page:
+   * unless something in the nested drawer can scroll that way, it is
+   * cancelled. Else iOS Safari scrolls the nearest ancestor that can, also
+   * past `overscroll-behavior: contain` on an element with nothing to scroll
+   * or that is locked. Decided once per gesture, as in `dragSource`.
    */
   #onNestedTouchMove = (event: TouchEvent): void => {
     const gesture = this.#nestedTouch;
@@ -3817,18 +2992,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   };
 
-  /**
-   * As `#onNestedTouchMove` for a wheel: a wheel in a nested drawer that
-   * can't scroll anything in it (e.g. on the nested drawer's backdrop, or
-   * on a list at its end) is cancelled, so it doesn't scroll this drawer
-   * either. Not a pinch-zoom (`ctrlKey`).
-   */
+  /** As `#onNestedTouchMove` for a wheel. `ctrlKey` is a pinch-zoom. */
   #onNestedWheel = (event: WheelEvent): void => {
     if (event.ctrlKey || !event.cancelable) return;
     const root = this.#nestedRoot(event.target);
     if (!root) return;
-    // A wheel scrolls the content down (`deltaY` > 0) as a finger moving up
-    // does.
+    // `deltaY` > 0 scrolls as a finger moving up does.
     const dx = -event.deltaX;
     const dy = -event.deltaY;
     if (dx === 0 && dy === 0) return;
@@ -3858,31 +3027,26 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       !this.#layout ||
       this.#destroyed ||
       position === undefined ||
-      // One drag at a time: a second finger on another handle is ignored.
+      // One drag at a time.
       this.#drag
     ) {
       return;
     }
 
-    // Catch a running animation where it is on screen: the rendered offset,
-    // not the spring's value, which may be past an edge the render clamps.
+    // The rendered offset, not the spring's value, which the render clamps.
     spring.stop();
     this.#stopScrollReset();
     this.#stopMomentum();
     this.#endHold();
     const offset = this.#renderedOffset;
-    // didPan recognises the pan once the finger has moved past its threshold.
-    // Anchored at the touchdown the tray would jump by that distance, so the
-    // tray starts where it is and catches up with the finger over the first
-    // frames (`#follow`). Anchored on the offset shown, also when that is
-    // past an end (`dragOffset`).
+    // Anchored at the touchdown the tray would jump by didPan's threshold,
+    // so it starts where it is and catches up over the first frames.
     const scale = this.#screenScale();
     const initial = data.initial;
     let down = this.axis === 'vertical' ? initial?.y : initial?.x;
     let recognisedAt =
       (OPENING_DIRECTION[this.placement] * (position - (down ?? NaN))) / scale;
     if (!Number.isFinite(recognisedAt)) {
-      // No usable touchdown: follow from here, without a catch-up.
       down = position;
       recognisedAt = 0;
     }
@@ -3916,13 +3080,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     this.#drag = drag;
     this.#dragCount++;
-    // The browser still scrolls a handed-off gesture: stop it at once.
+    // The browser still scrolls a handed-off gesture.
     if (drag.handoff) this.#syncScrollLock();
     this.#velocity.reset();
     this.#scrollVelocity.reset();
     this.#queueState({ isDragging: true });
     this.#follow(drag, drag.lagStart);
-    // The velocity of the finger (see `onPan`), not of the catch-up.
+    // The finger's velocity, not the catch-up's.
     this.#addVelocity(drag, data);
     this.args.onDragStart?.({ snapPoint: this.activeSnapPoint, offset });
   };
@@ -3940,7 +3104,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
 
-    // How far the finger moved since it went down, in drawer px.
     const delta =
       (OPENING_DIRECTION[this.placement] * (position - drag.startPosition)) /
       drag.scale;
@@ -3953,7 +3116,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     const way = Math.sign(drag.lagFrom);
     if (drag.holding) {
       if (lag === 0) {
-        // The finger reached the tray: 1:1 from here.
         drag.holding = false;
       } else if (step * lag > 0) {
         // On again, away from the tray: ease the gap from here.
@@ -3962,7 +3124,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         drag.holding = false;
         drag.peak = delta;
       } else {
-        // Holds until the finger reaches it.
         const drawn =
           way > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
         drag.lagFrom = delta - drawn;
@@ -3971,11 +3132,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       lag !== 0 &&
       (drag.peak - delta) * way > TURN_SLOP / drag.scale
     ) {
-      // Back towards the tray during the catch-up, further than a jitter of
-      // the finger: the tray holds still until the finger reaches it, and
-      // then follows it. Easing on would take it against the finger, and
-      // past it. A jitter doesn't stop the easing: the tray then stays
-      // behind the finger by the lag.
+      // Back towards the tray, further than a jitter: the tray holds still
+      // until the finger reaches it. Easing on would take it past the finger.
       const drawn =
         way > 0 ? Math.min(drag.drawn, delta) : Math.max(drag.drawn, delta);
       drag.lagFrom = delta - drawn;
@@ -3992,10 +3150,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * Samples the release velocities: of the drawer where the finger puts it
-   * (after resistance), so a release past an end doesn't hand the spring
-   * more speed than the tray had, and the catch-up adds none; and of the
-   * content that the drag scrolls, for its momentum (see `#splitDrag`).
+   * After resistance, so a release past an end doesn't hand the spring more
+   * speed than the tray had, and the catch-up adds none.
    */
   #addVelocity(drag: Drag, data: PanData): void {
     const time = this.#timeOf(data.originalEvent);
@@ -4005,20 +3161,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  /** The time (ms) on the clock that runs the frames. */
   #now(): number {
     return (this.#clock ?? browserClock).now();
   }
 
   /**
-   * Renders the drag at `time`: the tray follows the finger 1:1, but at the
-   * start of the drag it is behind it by the catch-up lag (`catchUpLag`),
-   * which eases from the distance moved before the pan was recognised to
-   * `0`. While it lags it is also moved every frame, so it catches up when
-   * the finger holds still. It is never past the finger: while the finger
-   * comes back towards it, it holds still (`holding`, see `onPan`). Past
-   * the highest snap point the content that the drag scrolls (see
-   * `#splitDrag`) lags the same way.
+   * While it lags, the tray also moves every frame, so it catches up when
+   * the finger holds still. It is never past the finger.
    */
   #follow(drag: Drag, time: number): void {
     const lag = drag.holding
@@ -4041,21 +3190,11 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Splits `delta` (drawer px towards open, see `Drag`) into the part that
-   * moves the tray and the part that scrolls the content: `[tray, scroll]`.
-   *
-   * A drag from the tray (not a handle, not in a nested drawer) that
-   * reaches the highest snap point while the finger moves on towards open
-   * scrolls the content from script from there, like a native sheet. In
-   * iOS Safari a native scroll can't start in a gesture whose touchmoves
-   * were cancelled (see `onTrayScroll`), so the drag sets the scroll
-   * position itself, 1:1 with the finger. Once the content has reached its
-   * end, the rest moves the tray past fully open as before (the content
-   * bounces, see `#renderBounce`). Back towards close, the content scrolls
-   * back first, to its content start, and then the tray moves. So once the
-   * drag has reached the content (see `#reachContent`), the split only
-   * depends on `delta`: the tray stays at the highest snap point while the
-   * content scrolls.
+   * `[tray, scroll]`. A drag past the highest snap point scrolls the content
+   * from script: in iOS Safari a native scroll can't start in a gesture
+   * whose touchmoves were cancelled. Back towards close the content scrolls
+   * back first. Once the content is reached, the split only depends on
+   * `delta`.
    */
   #splitDrag(drag: Drag, delta: number): [number, number] {
     const at = drag.scrollAt;
@@ -4065,12 +3204,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return [delta - scrolled, scrolled];
   }
 
-  /**
-   * Looks up the content that a drag scrolls (see `#splitDrag`), once the
-   * tray it draws gets past the highest snap point: the innermost scroll
-   * container of the gesture (see `#scrollChain`) that can scroll the way
-   * the finger pushes the content. Reads layout once per drag.
-   */
+  /** Reads layout once per drag. */
   #reachContent(drag: Drag): void {
     if (
       drag.scroll !== undefined ||
@@ -4081,7 +3215,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
     drag.scroll = null;
     const vertical = this.axis === 'vertical';
-    // A finger moving towards open moves the position this way.
     const sign = -OPENING_DIRECTION[this.placement] as 1 | -1;
     for (const element of this.#scrollChain(drag.from)) {
       if (!(scrollRange(element, vertical) > EPSILON)) continue;
@@ -4105,11 +3238,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     }
   }
 
-  /**
-   * The computed style `element` has without the scroll lock (see
-   * `#syncScrollLock`), which may still be on for this frame, or for a
-   * handed-off drag. Reads layout.
-   */
+  /** The lock may still be on for this frame, or for a handed-off drag. */
   #unlockedStyle(element: HTMLElement): {
     overflowX: string;
     overflowY: string;
@@ -4123,11 +3252,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return { overflowX, overflowY, direction };
   }
 
-  /**
-   * Scrolls the content of a drag to `scrolled` (see `#splitDrag`): one
-   * write, no layout read of its own. `behavior: 'instant'`, so an app's
-   * `scroll-behavior: smooth` doesn't smooth it.
-   */
+  /** `instant`, as `#writeScroll`. */
   #writeContentScroll(drag: Drag, scrolled: number): void {
     const scroll = drag.scroll;
     if (!scroll || scrolled === drag.written) return;
@@ -4144,21 +3269,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * After the release of a drag that scrolled the content, while the tray
-   * stays at the highest snap point: the content goes on with the
-   * release velocity and slows down like a native scroll view (see
-   * `Momentum`), driven by animation frames. It stops at the content's end
-   * or start, never moves the page or the tray, and stops when a pointer
-   * goes down on the tray (see `#onTrayInput`; that tap doesn't click, see
-   * `#swallowClick`), a wheel turns on it, focus moves into it, a key is
-   * pressed in the drawer, a drag starts or the tray leaves the highest
-   * snap point. None with reduced
-   * motion: the content stays where the finger left it.
+   * The content of a drag goes on after the release like a native scroll
+   * view, since it was scrolled from script. Any input on the tray stops it.
    */
   #startMomentum(drag: Drag, velocity: number): void {
     const scroll = drag.scroll;
     if (!scroll) return;
-    // px/s along the finger's opening direction to scroll px/ms.
+    // px/s towards open to scroll px/ms.
     const speed = (scroll.sign * velocity) / 1000;
     if (
       Math.abs(speed) < MIN_MOMENTUM_VELOCITY ||
@@ -4183,20 +3300,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     this.#momentum = momentum;
   }
 
-  /** Stops the content's momentum; returns whether one was running. */
+  /** Returns whether one was running. */
   #stopMomentum(): boolean {
     const momentum = this.#momentum;
     momentum?.stop();
     return momentum !== undefined;
   }
 
-  /**
-   * A pointer that went down on the tray stopped the content's momentum:
-   * as in a native scroll view, that tap doesn't click. The next `click` in
-   * the tray is cancelled (capture phase, once), unless it comes later than
-   * `SWALLOW_CLICK_TIME` or after a pointer went down again once this one
-   * lifted.
-   */
+  /** As in a native scroll view, a tap that stops momentum doesn't click. */
   #swallowClick(): void {
     this.#endSwallowClick();
     const tray = this.#tray;
@@ -4228,13 +3339,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     document.removeEventListener('touchend', swallow.release, true);
   }
 
-  /**
-   * Stops the content's momentum on input on the tray (see
-   * `#startMomentum`); a pointer that stopped it doesn't click.
-   */
   #stopMomentumOnInput(event: Event): void {
     if (event.type === 'pointerdown' || event.type === 'touchstart') {
-      // A new tap: a click after it is its own.
       if (this.#clickSwallow?.released) this.#endSwallowClick();
       if (this.#stopMomentum()) this.#swallowClick();
     } else {
@@ -4249,9 +3355,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * A frame of the catch-up. At the time on the clock, not the frame's time
-   * stamp: input of the same frame is handled after that time stamp, and
-   * going back to it would move the tray back a little.
+   * The clock's time, not the frame's time stamp: input of the same frame is
+   * handled after it, so the tray would move back a little.
    */
   #catchUpFrame = (): void => {
     const drag = this.#drag;
@@ -4259,7 +3364,6 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     drag.frame = undefined;
     const now = this.#now();
     if (drag.holding && !drag.moved) {
-      // The finger stopped before it reached the tray: catch up from here.
       drag.holding = false;
       drag.lagFrom = drag.delta - drag.drawn;
       drag.lagStart = now;
@@ -4271,17 +3375,14 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
   private onPanEnd = (data: PanData, source: HTMLElement): void => {
     if (this.#drag?.source !== source) return;
-    // A cancelled pointer (e.g. the browser took over the gesture) has no
-    // meaningful position or velocity: settle from where the drawer is.
+    // A cancelled pointer has no meaningful position or velocity.
     const type = data.originalEvent?.type;
     const cancelled = type === 'pointercancel' || type === 'touchcancel';
     if (!cancelled) this.onPan(data, source);
     const drag = this.#endDrag()!;
     const time = this.#timeOf(data.originalEvent);
-    // Released while the content scrolls (the tray at the highest snap
-    // point): the content goes on (see `#startMomentum`), and the tray stays
-    // where it is. Its velocity from before the handoff (in the last
-    // samples) would carry it past the snap point while the content moves.
+    // Released while the content scrolls: the tray's velocity from before
+    // (in the last samples) would carry it past the snap point.
     const scroll = drag.scroll;
     const scrolling =
       scroll &&
@@ -4296,10 +3397,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   };
 
   /**
-   * The pan modifier of `source` was torn down (its element removed, or,
-   * for the tray, `@handleOnly` changed). If it owned the drag, its pointer
-   * events won't arrive any more: settle from where the drawer is, as on
-   * `pointercancel`.
+   * Its pointer events won't arrive any more: settle as on `pointercancel`.
    * Teardown happens during rendering, so the release waits for a microtask.
    */
   private onDragSourceTeardown = (source: HTMLElement): void => {
@@ -4322,15 +3420,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Hands the release to the spring and settles on the snap point the
-   * projection picks. Uncontrolled, that becomes the active snap point.
-   * Controlled, the drawer asks the parent through `@onSnapPointChange` and
-   * meanwhile heads for the active snap point: the parent always wins, so the
-   * drawer turns towards the new one once (and only if) the parent passes it
-   * in. A parent that answers synchronously does so before the next frame.
-   * The spring starts at `offset`, where the tray is; the snap point is
-   * picked for `released`, where the finger put it (ahead of `offset` while
-   * the tray still catches up, see `#follow`), which `@onDragEnd` reports.
+   * Controlled, the drawer heads for the active snap point until the parent
+   * passes the new one in: the parent always wins. The spring starts at
+   * `offset`, where the tray is; the snap point is picked for `released`,
+   * where the finger put it (ahead while the tray catches up).
    */
   #release(offset: number, velocity: number, released = offset): void {
     const spring = this.#spring;
@@ -4355,10 +3448,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * Updates tracked state in a microtask. The lifecycle hooks run during
-   * rendering, where writing tracked state that was already rendered is an
-   * error, and batching keeps the state coarse (a run that starts and ends in
-   * the same task never flips `isAnimating`).
+   * In a microtask: the hooks run during rendering, where writing rendered
+   * tracked state is an error. Batching keeps it coarse: a run that starts
+   * and ends in one task never flips `isAnimating`.
    */
   #queueState(state: PendingState): void {
     const flush = !this.#pendingState;
@@ -4477,9 +3569,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
               )
               as |drawer|
             }}
-              {{! The header is at the leading edge, in the DOM order too:
-                  before the content of bottom and right drawers, after it
-                  for top and left drawers. }}
+              {{! The header is at the leading edge, in the DOM order too. }}
               {{#if (has-block "header")}}
                 {{#if this.headerFirst}}
                   <div class="mobile-drawer__header">

@@ -1,37 +1,23 @@
 /**
- * A reference-counted body scroll lock for modal drawers.
+ * A reference-counted body scroll lock for modal drawers: the page scrolls
+ * again only once the last lock is released.
  *
  * Adapted from ember-mobile-menu's `utils/body-scroll-lock.js` (MIT, Nick
- * Schot), which in turn adapts https://github.com/willmcpo/body-scroll-lock
- * (MIT License, Copyright (c) 2018 Will Po). Unlike those, every lock is
- * counted: the page only scrolls again once the last lock is released, so
- * drawers can open and close in any order.
+ * Schot), which adapts https://github.com/willmcpo/body-scroll-lock (MIT
+ * License, Copyright (c) 2018 Will Po).
  *
- * - Everywhere: `overflow: hidden` on the root element (`<html>`), whose
- *   value applies to the viewport, so the page stops scrolling also when the
- *   app sets `overflow` on `<html>` itself. While a classic scrollbar
- *   disappears, the body is padded by its width so the page doesn't shift.
- * - iOS Safari ignores `overflow: hidden` for touch scrolling, so there the
- *   body is also fixed in place at its current scroll position (restored on
- *   unlock), and `touchmove`s outside the allowed elements (the trays of the
- *   locked drawers and the portals of the drawers nested in them) are
- *   cancelled, so the viewport doesn't rubber-band behind the drawer.
- * - For a transparent status bar (`transparentStatusBar`, #113), iOS gets
- *   a lock that doesn't fix `<body>` (a fixed `<body>` makes Safari 26+
- *   paint the status bar in one solid colour). `overflow: hidden` and
- *   `overscroll-behavior: none` go on `<html>` and `<body>`, and touchmoves
- *   are cancelled outside the allowed elements and also inside them when no
- *   element between the touch and the allowed element can scroll further in
- *   the direction of the swipe, so the swipe can't chain to (or rubber-band)
- *   the page. The page keeps its scroll position: a scroll of the page
- *   while locked is undone at once, and again on unlock. Not while a text
- *   field in a drawer has focus (the on-screen keyboard): iOS scrolls the
- *   visual viewport to show the field, which moves the fixed drawer with
- *   it, as with the fixed `<body>`. The page goes back when the field loses
- *   focus or the keyboard closes. But a drawer that contains a text field
- *   gets the fixed `<body>` (see `hasTypingField`, #116), also when it
- *   opens while the overflow lock is on: the lock then changes to the fixed
- *   `<body>` until the last lock is released (see `onLockChange`).
+ * - Everywhere: `overflow: hidden` on `<html>`, whose value applies to the
+ *   viewport (also when the app sets `overflow` on `<html>`), and the body is
+ *   padded by the width of a classic scrollbar so the page doesn't shift.
+ * - iOS ignores `overflow: hidden` for touch scrolling: `<body>` is fixed at
+ *   its scroll position, and touchmoves outside the allowed elements are
+ *   cancelled so the viewport doesn't rubber-band.
+ * - Transparent status bar: a fixed `<body>` makes Safari 26+ paint the
+ *   status bar in one solid colour, so iOS gets the "overflow lock" instead.
+ *   Touchmoves are also cancelled inside the allowed elements when nothing
+ *   there can scroll further in the swipe's direction, and a page scroll is
+ *   undone at once, except while the on-screen keyboard is open. A drawer
+ *   with a text field still gets the fixed `<body>` (see `lock`).
  *
  * @module
  * @internal
@@ -43,7 +29,7 @@ import { containsTypingField } from '../fields.ts';
 interface Saved {
   htmlOverflow: string;
   bodyPaddingRight: string;
-  /** Only with the iOS overflow lock (a transparent status bar, #113). */
+  /** Only with the iOS overflow lock. */
   overflow?: {
     bodyOverflow: string;
     htmlOverscroll: string;
@@ -62,10 +48,7 @@ interface Saved {
   };
 }
 
-/**
- * Checks for the elements inside which touchmoves aren't cancelled (iOS
- * only), one per lock.
- */
+/** One per lock: where touchmoves are not cancelled (iOS). */
 const allowed: ((target: Node) => boolean)[] = [];
 let saved: Saved | undefined;
 
@@ -89,16 +72,10 @@ const onTouchMove = (event: TouchEvent): void => {
   if (event.cancelable) event.preventDefault();
 };
 
-/** The last touch position, for the direction of a swipe (overflow lock). */
 let lastTouch: { x: number; y: number } | undefined;
-/** The page's scroll position while the overflow lock is on. */
 let pinned: { x: number; y: number } | undefined;
 
-/**
- * Whether the on-screen keyboard is (or is about to be) open: the visual
- * viewport is shorter than the layout viewport (pinch zoom aside), or a
- * field the user types in has focus in one of the locked drawers.
- */
+/** The keyboard is open, or about to open (a field in a drawer has focus). */
 function keyboardOpen(): boolean {
   const viewport = window.visualViewport;
   if (viewport && viewport.height * viewport.scale < window.innerHeight - 1) {
@@ -107,7 +84,6 @@ function keyboardOpen(): boolean {
   return typingFieldFocused();
 }
 
-/** Whether a field the user types in has focus in a locked drawer. */
 function typingFieldFocused(): boolean {
   const active = document.activeElement;
   return (
@@ -119,7 +95,6 @@ function typingFieldFocused(): boolean {
   );
 }
 
-/** Scrolls the page back to where it was when it was locked. */
 function restorePinned(): void {
   if (!pinned) return;
   const { x, y } = pinned;
@@ -129,26 +104,16 @@ function restorePinned(): void {
 }
 
 /**
- * iOS still scrolls the page with `overflow: hidden`: to show a focused text
- * field above the on-screen keyboard, it moves the visual viewport (and with
- * it `scrollY`) so that the field is in the middle of the part that the
- * keyboard doesn't cover. The fixed drawer moves with the visual viewport, so
- * that is what shows the field (the #71 lock gets the same scroll, see
- * #116). Thus while the keyboard is open, the scroll stays: scrolling it back
- * hid the field and made the sheet jump. Any other scroll of the page is
- * undone at once. Also on a `resize` of the visual viewport: when the
- * keyboard closes, the page goes back to its position.
+ * Undoes any page scroll, except while the keyboard is open: iOS scrolls the
+ * page to show a focused field, and the fixed drawer moves with it. Scrolling
+ * back would hide the field. The viewport `resize` restores it on close.
  */
 const onViewportChange = (): void => {
   if (!pinned || keyboardOpen()) return;
   restorePinned();
 };
 
-/**
- * Focus left a field in a drawer, and not for another one: put the page back
- * at once, as iOS does with the #71 lock, and not only once the keyboard
- * has closed.
- */
+/** Puts the page back as soon as focus leaves the fields, as iOS does. */
 const onFocusOut = (): void => {
   // `activeElement` is the new focus only after the focusout.
   setTimeout(() => {
@@ -176,9 +141,8 @@ function canScroll(element: Element, dx: number, dy: number): boolean {
 }
 
 /**
- * The overflow lock's touchmove filter: allowed only when an element from the
- * target up through the allowed elements (see `allowed`) can still scroll in
- * the swipe's direction.
+ * Allows a touchmove only when an element from the target up through the
+ * allowed element can still scroll in the swipe's direction.
  */
 const onTouchMoveOverflow = (event: TouchEvent): void => {
   if (event.touches.length > 1) return;
@@ -206,26 +170,13 @@ const onTouchMoveOverflow = (event: TouchEvent): void => {
 };
 
 /**
- * Whether `element` contains a field the user types in (it opens the
- * on-screen keyboard), see `containsTypingField`.
- *
- * The overflow lock can't give the keyboard behaviour of the
- * fixed `<body>`. iOS shows a focused field by scrolling the visual viewport
- * so that the field is in the middle of the part that the keyboard doesn't
- * cover. With a fixed `<body>` the page can only scroll from 0 down to the
- * keyboard height, so iOS scrolls down (animated with the keyboard) or not
- * at all. With the tall page of the overflow lock, iOS also scrolls up, and
- * on a real iPhone the page and the drawer move apart. Fixing `<body>` only
- * when a field gets focus doesn't work: during the touch (`touchstart`,
- * `touchend`) the change of `scrollY` makes iOS drop the tap (no focus, no
- * caret under the finger); in `focusin` iOS shows the page background for
- * about 6 frames. Cancelling the tap and focusing with `preventScroll`
- * leaves a dark overlay on the field and breaks the caret placement. Thus a
- * drawer with such a field gets the fixed `<body>` from the start; the
- * status bar is then one solid colour (#113).
+ * A drawer with a text field gets the fixed `<body>` from the start: with the
+ * tall page of the overflow lock, iOS also scrolls up to show a focused field,
+ * and the page and the drawer move apart. Fixing `<body>` only on focus does
+ * not work: during the touch iOS drops the tap, and in `focusin` it flashes
+ * the page background. Cancelling the tap and focusing with `preventScroll`
+ * leaves a dark overlay on the field and breaks the caret placement.
  */
-const hasTypingField = containsTypingField;
-
 function lock(options: LockOptions): Saved {
   const html = document.documentElement;
   const body = document.body;
@@ -235,7 +186,7 @@ function lock(options: LockOptions): Saved {
     bodyPaddingRight: body.style.paddingRight,
   };
 
-  // Measured before hiding the overflow, which removes a classic scrollbar.
+  // Before hiding the overflow, which removes a classic scrollbar.
   const scrollbar = window.innerWidth - html.clientWidth;
   if (scrollbar > 0) {
     const padding = parseFloat(getComputedStyle(body).paddingRight) || 0;
@@ -245,7 +196,7 @@ function lock(options: LockOptions): Saved {
   if (
     ios &&
     options.transparentStatusBar &&
-    !options.fields?.some(hasTypingField)
+    !options.fields?.some(containsTypingField)
   ) {
     const { scrollX: x, scrollY: y } = window;
     result.overflow = {
@@ -319,37 +270,26 @@ function unlock(state: Saved): void {
 }
 
 export interface LockOptions {
-  /**
-   * The elements to look for a text field in (iOS overflow lock only): with
-   * one, iOS gets the fixed `<body>` (see `hasTypingField`).
-   */
+  /** Where to look for a text field: one forces the fixed `<body>`. */
   fields?: HTMLElement[];
   /**
-   * iOS gets the overflow lock (no fixed `<body>`), so the status bar can
-   * show the page (#113), unless a text field is in `fields`. The first
-   * lock decides; later locks share it, except that a later lock with a
-   * text field changes it to the fixed `<body>` (see `onLockChange`).
+   * iOS gets the overflow lock. The first lock decides; a later lock with a
+   * text field changes it to the fixed `<body>`.
    */
   transparentStatusBar?: boolean;
 }
 
 const lockChangeListeners = new Set<() => void>();
 
-/**
- * Calls `listener` when the lock that is on changes from the overflow lock
- * to the fixed `<body>` (a drawer with a text field opened while the
- * overflow lock was on). Returns a function that removes the listener.
- */
+/** Called when the overflow lock changes to the fixed `<body>`. */
 export function onLockChange(listener: () => void): () => void {
   lockChangeListeners.add(listener);
   return () => lockChangeListeners.delete(listener);
 }
 
 /**
- * Locks body scrolling until the returned function is called. Touch scrolling
- * on the nodes `allow` returns `true` for keeps working on iOS (a drawer
- * allows its tray and the portals of the drawers nested in it). Calling the
- * returned function more than once does nothing.
+ * Locks body scrolling until the returned (idempotent) function is called.
+ * Touch scrolling on the nodes `allow` accepts keeps working on iOS.
  */
 export function lockBodyScroll(
   allow: (target: Node) => boolean,
@@ -357,9 +297,8 @@ export function lockBodyScroll(
 ): () => void {
   if (allowed.length === 0) {
     saved = lock(options);
-  } else if (saved?.overflow && options.fields?.some(hasTypingField)) {
-    // The on-screen keyboard needs the fixed `<body>` (#116). The page goes
-    // back to where it was locked, and is fixed there.
+  } else if (saved?.overflow && options.fields?.some(containsTypingField)) {
+    // The keyboard needs the fixed `<body>`.
     unlock(saved);
     saved = lock({});
     for (const listener of [...lockChangeListeners]) listener();
@@ -378,11 +317,7 @@ export function lockBodyScroll(
   };
 }
 
-/**
- * Whether the lock that is on is the iOS overflow lock for a transparent
- * status bar (#113): `<body>` isn't fixed, and the drawers move
- * their fixed elements away from the top edge (`data-status-bar`).
- */
+/** Whether the iOS overflow lock (no fixed `<body>`) is on. */
 export function transparentStatusBarLock(): boolean {
   return saved?.overflow !== undefined;
 }

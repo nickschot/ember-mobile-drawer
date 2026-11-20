@@ -1,29 +1,21 @@
 import type { Placement } from '../types.ts';
 
 /**
- * What the test-support helpers need from a rendered drawer. They only get
- * the DOM, so each drawer registers this for its root element.
+ * What the test-support helpers need from a rendered drawer, by root.
  *
  * @internal Not public API; see `ember-mobile-drawer/test-support`.
  */
 export interface DrawerHandle {
-  /** The `.mobile-drawer` root element. */
   readonly root: HTMLElement;
-  /** The `.mobile-drawer__tray` element. */
   readonly tray: HTMLElement;
   placement(): Placement;
   /** Whether a drag is in progress (synchronous, unlike `isDragging`). */
   isDragging(): boolean;
-  /** How far open the tray is rendered, in px. */
   offset(): number;
-  /**
-   * The offset (px open) of the snap point at `index`, or `undefined` before
-   * the drawer has been measured or for an index that doesn't exist.
-   */
+  /** `undefined` before the drawer is measured. */
   offsetOf(index: number): number | undefined;
   /** Screen px per px of drawer offset. Forces layout. */
   screenScale(): number;
-  /** The yielded `open` and `close` actions. */
   open(): void;
   close(): void;
 }
@@ -38,18 +30,12 @@ export function unregisterDrawer(root: Element): void {
   drawers.delete(root);
 }
 
-/**
- * Whether `element` is the root of a drawer in the DOM, not just any element
- * with the `mobile-drawer` class (e.g. an app element that reuses it).
- */
+/** Not just any element with the `mobile-drawer` class. */
 export function isDrawerRoot(element: Element): boolean {
   return drawers.has(element);
 }
 
-/**
- * The drawer whose root is `element` or contains it: the innermost one, for
- * nested drawers.
- */
+/** The innermost drawer whose root is or contains `element`. */
 export function drawerFor(element: Element): DrawerHandle | undefined {
   for (let node: Element | null = element; node; node = node.parentElement) {
     const handle = drawers.get(node);

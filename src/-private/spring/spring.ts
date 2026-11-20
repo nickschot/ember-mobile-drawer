@@ -1,92 +1,53 @@
 /**
- * A small damped-spring primitive, used to animate the drawer towards a snap
- * point after a gesture is released.
+ * A damped spring, solved in closed form: the result depends only on elapsed
+ * time, not on the frame rate, and stays stable for large time steps (e.g.
+ * the first frame after a background tab becomes visible).
  *
- * The spring is solved analytically (closed-form solution of the damped
- * harmonic oscillator), so the result only depends on elapsed time, never on
- * the frame rate, and it stays stable for arbitrarily large time steps such as
- * the first frame after a backgrounded tab becomes visible again.
- *
- * Units: positions are in px, velocities in px/s, time in ms (as given by the
- * clock). Stiffness, damping and mass are in the usual "per second" units
- * (`F = -stiffness * x - damping * v`, `a = F / mass`).
+ * Units: px, px/s, and ms from the clock; stiffness, damping and mass are per
+ * second.
  *
  * @module
  */
 
-/**
- * Source of time and animation frames. The default uses `performance.now()`
- * and `requestAnimationFrame`; tests inject a fake one.
- */
+/** Source of time and animation frames; tests inject a fake one. */
 export interface FrameClock {
-  /** The current time in ms. */
   now(): number;
-  /**
-   * Schedules `callback` for the next frame. The callback receives the frame
-   * time in ms, on the same time base as {@link FrameClock.now}.
-   */
+  /** The callback gets the frame time on the same time base as `now`. */
   requestFrame(callback: (time: number) => void): number;
-  /** Cancels a frame scheduled with {@link FrameClock.requestFrame}. */
   cancelFrame(handle: number): void;
 }
 
-/**
- * Physical parameters of a spring. All values must be finite and greater than
- * zero; the {@link Spring} constructor throws a `RangeError` otherwise.
- */
+/** All values must be finite and greater than zero. */
 export interface SpringConfig {
-  /** Spring constant `k`. Higher is snappier. Default `400`. */
   stiffness: number;
   /**
-   * Damping coefficient `c`. The defaults are critically damped
-   * (`damping = 2 * sqrt(stiffness * mass)`): the spring does not oscillate,
-   * but it can still overshoot the target once when it starts with a velocity
-   * towards the target (with the defaults: faster than about 20 × the
-   * distance, in px/s). Lower values bounce. Must be greater than zero, since
-   * an undamped spring never comes to rest. Default `40`.
+   * The defaults are critically damped: no oscillation, but a fast start
+   * towards the target can still overshoot once. Zero would never rest.
    */
   damping: number;
-  /** Mass `m`. Higher is more sluggish. Default `1`. */
   mass: number;
-  /**
-   * The spring is at rest once it is within this distance (px) of its target
-   * and slower than {@link SpringConfig.restVelocityThreshold}. It then snaps
-   * exactly onto the target. Default `0.1`.
-   */
+  /** Px; with `restVelocityThreshold`, the spring then snaps onto target. */
   restDisplacementThreshold: number;
-  /** See {@link SpringConfig.restDisplacementThreshold}, in px/s. Default `1`. */
+  /** Px/s. */
   restVelocityThreshold: number;
 }
 
-/** Position and velocity of a spring at one point in time. */
 export interface SpringState {
-  /** Current position in px. */
   value: number;
-  /** Current velocity in px/s. */
   velocity: number;
 }
 
 export interface SpringOptions extends Partial<SpringConfig> {
   /**
-   * Called on every animation frame with the new state, and once more when
-   * the spring snaps onto its target (after the run has ended, so it may
-   * start a new run). Not called on {@link Spring.stop}. If it throws, the
-   * run ends and the error is rethrown.
+   * Called every frame, and once more when the spring snaps onto its target
+   * (after the run ended, so it may start a new one). Not on `stop`.
    */
   onUpdate?: (state: SpringState) => void;
-  /** Time and frame source. Default: `performance.now` + `requestAnimationFrame`. */
   clock?: FrameClock;
-  /**
-   * Whether the user prefers reduced motion. Checked when a run starts
-   * ({@link Spring.start} while idle); when it returns `true` the spring
-   * jumps straight to its target. A run already in progress is not affected
-   * if the preference changes. Default: the
-   * `(prefers-reduced-motion: reduce)` media query.
-   */
+  /** Checked when a run starts; `true` jumps straight to the target. */
   prefersReducedMotion?: () => boolean;
 }
 
-/** Default physical parameters, see {@link SpringConfig}. */
 export const DEFAULT_SPRING_CONFIG: Readonly<SpringConfig> = Object.freeze({
   stiffness: 400,
   damping: 40,
@@ -95,14 +56,12 @@ export const DEFAULT_SPRING_CONFIG: Readonly<SpringConfig> = Object.freeze({
   restVelocityThreshold: 1,
 });
 
-/** `performance.now` + `requestAnimationFrame`. */
 export const browserClock: FrameClock = {
   now: () => performance.now(),
   requestFrame: (callback) => requestAnimationFrame(callback),
   cancelFrame: (handle) => cancelAnimationFrame(handle),
 };
 
-/** Whether the `prefers-reduced-motion: reduce` media query matches. */
 export function browserPrefersReducedMotion(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -127,11 +86,7 @@ function assertPositive(name: string, value: number): void {
   }
 }
 
-/**
- * `base` with the defined values of `overrides`, validated and frozen.
- *
- * @throws RangeError when a value is not a finite number greater than 0.
- */
+/** `base` with the defined values of `overrides`, validated and frozen. */
 function mergeConfig(
   base: Readonly<SpringConfig>,
   overrides: Partial<SpringConfig>,
@@ -146,8 +101,7 @@ function mergeConfig(
 }
 
 /**
- * Advances a damped spring by `dt` seconds using the closed-form solution.
- * `displacement` is the position relative to the target.
+ * Advances by `dt` seconds. `displacement` is relative to the target.
  *
  * @internal exported for tests
  */
@@ -167,7 +121,6 @@ export function stepSpring(
   const v0 = velocity;
 
   if (Math.abs(zeta - 1) < 1e-6) {
-    // Critically damped.
     const decay = Math.exp(-omega0 * dt);
     const b = v0 + omega0 * x0;
     return {
@@ -177,7 +130,6 @@ export function stepSpring(
   }
 
   if (zeta < 1) {
-    // Under-damped: oscillates around the target.
     const omegaD = omega0 * Math.sqrt(1 - zeta * zeta);
     const a = zeta * omega0;
     const decay = Math.exp(-a * dt);
@@ -190,8 +142,7 @@ export function stepSpring(
     };
   }
 
-  // Over-damped: sum of two decaying exponentials. r2 is computed directly
-  // and r1 from r1 * r2 = omega0², which avoids cancellation for large zeta.
+  // Over-damped. r1 from r1 * r2 = omega0² avoids cancellation for large zeta.
   const r2 = -omega0 * (zeta + Math.sqrt(zeta * zeta - 1));
   const r1 = (omega0 * omega0) / r2;
   const c2 = (v0 - r1 * x0) / (r2 - r1);
@@ -205,26 +156,9 @@ export function stepSpring(
 }
 
 /**
- * A one-dimensional damped spring driven by animation frames. It starts at
- * rest at `0`; use {@link Spring.set} and {@link Spring.retarget} to give it
- * a position, velocity and target.
- *
- * It holds no tracked state: consumers apply {@link SpringState.value} in
- * `onUpdate` (e.g. to a CSS transform) themselves.
- *
- * Positions and velocities must be finite: {@link Spring.retarget} and
- * {@link Spring.set} throw a `RangeError` (without changing any state)
- * otherwise. If a frame still produces a non-finite value, the run ends and
- * the last finite state is kept.
- *
- * ```ts
- * const spring = new Spring({
- *   onUpdate: ({ value }) => (el.style.transform = `translateY(${value}px)`),
- * });
- * spring.set(currentOffset, releaseVelocity);
- * spring.retarget(snapPoint);
- * await spring.start();
- * ```
+ * A one-dimensional damped spring driven by animation frames. It holds no
+ * tracked state: consumers apply the value in `onUpdate`. If a frame produces
+ * a non-finite value, the run ends and the last finite state is kept.
  */
 export class Spring {
   #config: Readonly<SpringConfig>;
@@ -254,48 +188,31 @@ export class Spring {
     this.#prefersReducedMotion = prefersReducedMotion;
   }
 
-  /**
-   * Changes physical parameters; keys that are left out or `undefined` keep
-   * their current value. Position, velocity and target are kept. A run in
-   * progress continues with the new parameters from its next frame.
-   *
-   * @throws RangeError when a value is not a finite number greater than 0;
-   *   the parameters are then unchanged.
-   */
+  /** A run in progress uses the new parameters from its next frame. */
   configure(overrides: Partial<SpringConfig>): void {
     this.#config = mergeConfig(this.#config, overrides);
   }
 
-  /** Current position in px. */
   get value(): number {
     return this.#value;
   }
 
-  /** Current velocity in px/s. */
   get velocity(): number {
     return this.#velocity;
   }
 
-  /** Position the spring is moving towards, in px. */
   get target(): number {
     return this.#target;
   }
 
-  /** Whether a run started with {@link Spring.start} is in progress. */
   get isAnimating(): boolean {
     return this.#run !== undefined;
   }
 
   /**
-   * Starts moving towards the target and returns a promise for the end of
-   * this run. The promise never rejects; it resolves once the spring rests
-   * at its target (also after any {@link Spring.retarget} calls), or when
-   * the run ends early: {@link Spring.stop} was called, `onUpdate` threw, or
-   * the simulation produced a non-finite value.
-   *
-   * Calling `start()` while already animating returns the current run's
-   * promise. With reduced motion, or when already at rest on the target, the
-   * spring snaps to the target synchronously and the promise resolves.
+   * Returns a promise for the end of the run (also an early end); it never
+   * rejects. While animating, returns the current run's promise. With reduced
+   * motion or at rest, it snaps to the target synchronously.
    */
   start(): Promise<void> {
     if (this.#run) {
@@ -320,11 +237,7 @@ export class Spring {
     return promise;
   }
 
-  /**
-   * Stops animating, leaving the spring at its current position and velocity.
-   * A pending {@link Spring.start} promise resolves.
-   * Does nothing when not animating.
-   */
+  /** Keeps position and velocity; the pending `start` promise resolves. */
   stop(): void {
     if (this.#frame !== undefined) {
       this.#clock.cancelFrame(this.#frame);
@@ -333,27 +246,12 @@ export class Spring {
     this.#endRun();
   }
 
-  /**
-   * Changes the target. Position and velocity are kept, so an animation in
-   * progress continues smoothly towards the new target and the pending
-   * {@link Spring.start} promise now resolves when that target is reached.
-   * Does not start the spring when it is idle.
-   *
-   * @throws RangeError when `to` is not finite; the target is then unchanged.
-   */
+  /** Keeps position and velocity. Does not start an idle spring. */
   retarget(to: number): void {
     assertFinite('target', to);
     this.#target = to;
   }
 
-  /**
-   * Sets position and velocity directly, e.g. to hand over a gesture's
-   * position and release velocity before calling {@link Spring.start}. When
-   * called while animating, the animation continues from the new state.
-   *
-   * @throws RangeError when `value` or `velocity` is not finite; the state is
-   *   then unchanged.
-   */
   set(value: number, velocity = 0): void {
     assertFinite('value', value);
     assertFinite('velocity', velocity);
