@@ -345,8 +345,8 @@ By default the drawer is modal (`@modal={{true}}`), like a dialog. While it is o
 - Tab and Shift+Tab stay inside the drawer, wrapping around at the ends;
 - the rest of the page is [`inert`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert): the siblings of the drawer and of each of its ancestors, up to `<body>` (see the limits below);
 - the page doesn't scroll. On iOS the body is fixed in place at its scroll position, which is restored on close;
-- Escape closes it, like `close()` (so through `@onSnapPointChange` when `@activeSnapPoint` is set). Not while the drawer is being dragged: the release decides where it goes.
-- the Android back gesture (and the TalkBack back action) closes it in the same way, through a [`CloseWatcher`](https://developer.mozilla.org/en-US/docs/Web/API/CloseWatcher). This works only in Chromium browsers; in other browsers back goes to the previous page as before. With several modal drawers open, back closes the top one.
+- Escape closes it, like `close()` (so through `@onSnapPointChange` when `@activeSnapPoint` is set). Not while the drawer is being dragged: the release decides where it goes. In browsers with `CloseWatcher` (today Chromium), an Escape `keydown` that isn't cancelled is a close request, as for a native modal `<dialog>`, and closes the drawer even when the drawer's own handlers don't get it. So a widget in the drawer that handles Escape itself (for example a dropdown that closes its list) must call `preventDefault()` on the `keydown` to keep the drawer open: `stopPropagation()` isn't enough there.
+- the Android back gesture (and the TalkBack back action) closes it in the same way, through a [`CloseWatcher`](https://developer.mozilla.org/en-US/docs/Web/API/CloseWatcher). This works only in browsers with `CloseWatcher` (today Chromium); in other browsers back goes to the previous page as before. With several modal drawers open, back closes the top one. Apps can't turn this off, and a controlled drawer whose app refuses the close catches each back press.
 
 When it closes, focus returns to the element that had it when the drawer opened. If that element is no longer on the page (for example, the drawer deleted the list item it was opened from), focus goes to the first focusable element in the nearest of its former ancestors that is still on the page, but not all the way up to `<body>`; if there is none, focus stays where the browser puts it. Move focus yourself after the close if you want it somewhere else.
 
@@ -356,7 +356,7 @@ The drawer only removes the `inert` attributes it added. An element that was alr
 
 The root gets `role="dialog"`, and `aria-modal="true"` while open. Give it a name with `aria-labelledby` (pointing at a heading in the drawer) or `aria-label`; a modal drawer without one logs a warning in development. A closed drawer is hidden (`visibility: hidden`), also from assistive technology.
 
-Always show a close button in a modal drawer. Escape needs a keyboard, a tap on the backdrop needs a pointer (the backdrop is not focusable), and the grabber never closes the drawer, so a touch screen reader user has no other way out. The Android back gesture closes the drawer only in Chromium browsers (see above). Also give the button that opens the drawer `aria-expanded` (`"true"` while the drawer is open) and `aria-controls` (the drawer's `id`):
+Always show a close button in a modal drawer. Escape needs a keyboard, a tap on the backdrop needs a pointer (the backdrop is not focusable), and the grabber never closes the drawer, so a touch screen reader user has no other way out. The Android back gesture closes the drawer only in browsers with `CloseWatcher` (see above). Also give the button that opens the drawer `aria-expanded` (`"true"` while the drawer is open) and `aria-controls` (the drawer's `id`):
 
 ```gts
 import Component from '@glimmer/component';

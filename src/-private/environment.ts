@@ -32,4 +32,6 @@ export const drawerEnvironment: {
    * Read when a drawer becomes modal.
    */
   CloseWatcher?: CloseWatcherConstructor | null;
+  /** `navigator.userActivation.isActive`, read when a drawer becomes modal. */
+  userActivation?: () => boolean;
 } = {};

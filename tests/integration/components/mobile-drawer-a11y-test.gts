@@ -2,6 +2,7 @@ import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
 import {
   clearRender,
+  click,
   find,
   focus,
   render,
@@ -44,7 +45,10 @@ const active = () => document.activeElement;
 
 /** A `CloseWatcher`; `requestClose()` is the Android back gesture. */
 class FakeCloseWatcher {
+  /** In creation order. */
   static instances: FakeCloseWatcher[] = [];
+  /** As in a document that isn't fully active. */
+  static throws = false;
   static live = () =>
     FakeCloseWatcher.instances.filter((watcher) => !watcher.destroyed);
 
@@ -52,6 +56,9 @@ class FakeCloseWatcher {
   destroyed = false;
 
   constructor() {
+    if (FakeCloseWatcher.throws) {
+      throw new DOMException('Not fully active', 'InvalidStateError');
+    }
     FakeCloseWatcher.instances.push(this);
   }
 
@@ -1149,11 +1156,15 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
   module('CloseWatcher (back gesture)', function (hooks) {
     hooks.beforeEach(function () {
       FakeCloseWatcher.instances = [];
+      FakeCloseWatcher.throws = false;
       drawerEnvironment.CloseWatcher = FakeCloseWatcher;
+      drawerEnvironment.userActivation = () => false;
     });
 
     hooks.afterEach(function (assert) {
       delete drawerEnvironment.CloseWatcher;
+      delete drawerEnvironment.userActivation;
+      FakeCloseWatcher.throws = false;
       assert.deepEqual(FakeCloseWatcher.live(), [], 'no watcher left behind');
     });
 
@@ -1280,7 +1291,8 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
     });
 
     test("uses the browser's CloseWatcher, and none where there is none", async function (assert) {
-      delete drawerEnvironment.CloseWatcher;
+      // Unset or `undefined`: the browser's.
+      drawerEnvironment.CloseWatcher = undefined;
       const descriptor = Object.getOwnPropertyDescriptor(
         window,
         'CloseWatcher',
@@ -1330,6 +1342,149 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
       assert.strictEqual(FakeCloseWatcher.instances.length, 0);
       state.active = 0;
       await settle();
+    });
+
+    test('a close by Escape or by the backdrop destroys the watcher', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      assert.strictEqual(FakeCloseWatcher.live().length, 1);
+      await triggerKeyEvent('[data-test-first]', 'keydown', 'Escape');
+      await settle();
+      assert.dom('[data-test-active]').hasText('0', 'Escape closed it');
+      assert.deepEqual(FakeCloseWatcher.live(), [], 'after Escape');
+
+      await openFromTrigger(state);
+      assert.strictEqual(FakeCloseWatcher.live().length, 1);
+      await click('[data-test-drawer] .mobile-drawer__backdrop');
+      await settle();
+      assert.dom('[data-test-active]').hasText('0', 'the backdrop closed it');
+      assert.deepEqual(FakeCloseWatcher.live(), [], 'after the backdrop');
+      assert.strictEqual(FakeCloseWatcher.instances.length, 2);
+    });
+
+    test('removing a drawer behind the front one keeps the watcher', async function (assert) {
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      state.secondActive = 2;
+      await settle();
+      assert.dom('[data-test-second]').hasAttribute('aria-modal', 'true');
+      const [watcher] = FakeCloseWatcher.live();
+      assert.strictEqual(FakeCloseWatcher.instances.length, 1, 'shared');
+
+      state.shown = false;
+      await settle();
+      assert.deepEqual(FakeCloseWatcher.live(), [watcher], 'kept');
+
+      back();
+      await settle();
+      assert.dom('[data-test-second]').doesNotExist('the front one closed');
+      assert.deepEqual(FakeCloseWatcher.live(), []);
+    });
+
+    test('a drawer that becomes modal with a user activation renews the watcher', async function (assert) {
+      let activation = false;
+      drawerEnvironment.userActivation = () => activation;
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      const [first] = FakeCloseWatcher.instances;
+
+      // Without an activation the browser would group a new one with the
+      // old one: kept.
+      state.secondActive = 2;
+      await settle();
+      assert.deepEqual(FakeCloseWatcher.instances, [first], 'no activation');
+      back();
+      await settle();
+      assert.dom('[data-test-second]').doesNotExist();
+
+      // E.g. a tap in an app <dialog> in the drawer opens the second one:
+      // the new watcher is newer than the dialog's.
+      const before = FakeCloseWatcher.instances.length;
+      activation = true;
+      state.secondActive = 2;
+      await settle();
+      activation = false;
+      const live = FakeCloseWatcher.live();
+      assert.strictEqual(live.length, 1, 'one watcher');
+      assert.strictEqual(
+        FakeCloseWatcher.instances.indexOf(live[0]!),
+        before,
+        'a new one, the newest',
+      );
+
+      back();
+      await settle();
+      assert.dom('[data-test-second]').doesNotExist('the front one closed');
+      assert.dom('[data-test-active]').hasText('2', 'the first one stays');
+      back();
+      await settle();
+      assert.dom('[data-test-active]').hasText('0');
+    });
+
+    test('a watcher that the browser cannot create leaves the rest of the modal behaviour', async function (assert) {
+      FakeCloseWatcher.throws = true;
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      assert.dom('[data-test-drawer]').hasAttribute('aria-modal', 'true');
+      assert.strictEqual(active(), el('[data-test-first]'), 'focus moved in');
+      assert.strictEqual(bodyScrollLocks(), 1);
+      assert.deepEqual(FakeCloseWatcher.instances, [], 'no watcher');
+
+      state.active = 0;
+      await settle();
+      assert.dom('[inert]').doesNotExist('released');
+      assert.strictEqual(bodyScrollLocks(), 0);
+      assert.strictEqual(active(), el('[data-test-trigger]'));
+
+      FakeCloseWatcher.throws = false;
+      await openFromTrigger(state);
+      assert.strictEqual(FakeCloseWatcher.live().length, 1, 'next time');
+      back();
+      await settle();
+      assert.dom('[data-test-active]').hasText('0');
+    });
+
+    test("the browser's own CloseWatcher closes the drawer", async function (assert) {
+      if (!('CloseWatcher' in window)) {
+        assert.ok(true, 'this browser has no CloseWatcher');
+        return;
+      }
+      type Real = { requestClose(): void; destroy(): void };
+      const RealWatcher = (
+        window as unknown as { CloseWatcher: new () => Real }
+      ).CloseWatcher;
+      const made: Real[] = [];
+      const destroyed = new Set<Real>();
+      // Records each watcher, and which ones were destroyed.
+      function Spy(): Real {
+        const watcher = new RealWatcher();
+        made.push(watcher);
+        const destroy = watcher.destroy.bind(watcher);
+        watcher.destroy = () => {
+          destroyed.add(watcher);
+          destroy();
+        };
+        return watcher;
+      }
+      drawerEnvironment.CloseWatcher =
+        Spy as unknown as typeof FakeCloseWatcher;
+
+      const state = new State();
+      await renderDrawer(state);
+      await openFromTrigger(state);
+      assert.strictEqual(made.length, 1);
+      // Without an activation: `close` without `cancel`.
+      made[0]!.requestClose();
+      assert.deepEqual(state.changes, [0], 'close() was called');
+      await settle();
+      assert.dom('[data-test-active]').hasText('0');
+      assert.dom('[inert]').doesNotExist();
+      assert.strictEqual(made.length, 2, 'made again in onclose');
+      assert.true(destroyed.has(made[1]!), 'and destroyed with the drawer');
     });
   });
 });
