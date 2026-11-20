@@ -20,7 +20,7 @@ Try it in the [playground](https://nickschot.github.io/ember-mobile-drawer/). It
 - [Installation](#installation)
 - [Quick start](#quick-start): [bottom](#bottom-sheet), [top](#top-drawer), [left](#left-drawer), [right](#right-drawer)
 - [Usage](#usage): [snap points](#snap-points), [controlled and uncontrolled](#controlled-and-uncontrolled), [backdrop](#backdrop), [spring](#spring), [events](#events), [accessibility](#accessibility), [dragging](#dragging), [grabber](#grabber), [header](#header), [scrolling content](#scrolling-content), [nested drawers](#nested-drawers), [public imports](#public-imports), [TypeScript](#typescript)
-- [Styles](#styles): [state attributes](#state-attributes), [floating sheet](#floating-sheet), [iOS theme](#ios-theme)
+- [Styles](#styles): [state attributes](#state-attributes), [floating sheet](#floating-sheet), [iOS theme](#ios-theme), [writing a theme](#writing-a-theme)
 - [Testing](#testing)
 - [API reference](#api-reference)
 - [Development](#development)
@@ -385,7 +385,7 @@ Focus at the highest snap point doesn't move the drawer, and neither does focus 
 
 ### Dragging
 
-The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. A drag starts once the finger has moved about 10px; the drawer does not jump at that point, but catches up with that distance over the first frames of the drag (about 100ms). If the finger turns back by more than 2px before then, the drawer holds still until the finger reaches it, so it never gets ahead of the finger. Past fully open the tray stays at its edge. A drag on the content then scrolls the content when it can (see [Scrolling content](#scrolling-content)); otherwise the content bounces, like the content of an iOS sheet. The bounce follows the classic UIScrollView rubber band, `(1 − 1 / (x × 0.55 / d + 1)) × d` for a pull of `x` px, with `d` = 0.55 × the tray's length (measured in the iOS simulator, see [#51](https://github.com/nickschot/ember-mobile-drawer/issues/51)). The component moves the content with an inline `translate` on `.mobile-drawer__content`, so an app `transform` on it still applies; don't set `translate` on it. Put `data-mobile-drawer-pinned` on an element in the content that must stay at the tray's edge during the bounce, such as a sticky grabber or header. The component writes the opposite inline `translate` on it during the bounce, and puts back the element's own inline `translate` after. On release the content springs back with the drawer's spring. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
+The drawer can be dragged with touch or pen input along its axis: up and down for `bottom` and `top`, sideways for `left` and `right`. It follows the finger, with resistance past the first and last snap point. A drag starts once the finger has moved about 10px; the drawer does not jump at that point, but catches up with that distance over the first frames of the drag (about 100ms). If the finger turns back by more than 2px before then, the drawer holds still until the finger reaches it, so it never gets ahead of the finger. Past fully open the tray stays at its edge. A drag on the content then scrolls the content when it can (see [Scrolling content](#scrolling-content)); otherwise the content bounces, like the content of an iOS sheet. The bounce follows the classic UIScrollView rubber band, `(1 − 1 / (x × 0.55 / d + 1)) × d` for a pull of `x` px, with `d` = 0.55 × the tray's length (measured in the iOS simulator, see [#51](https://github.com/nickschot/ember-mobile-drawer/issues/51)). The component moves the content with an inline `translate` on `.mobile-drawer__content`, so an app `transform` on it still applies; don't set `translate` on it. The bounce needs the individual transform properties (Safari 14.1+, Chrome 104+, Firefox 72+); in older browsers the content doesn't move. Put `data-mobile-drawer-pinned` on an element in the content that must stay at the tray's edge during the bounce, such as a sticky grabber or header. The component writes the opposite inline `translate` on it during the bounce, and puts back the element's own inline `translate` after. On release the content springs back with the drawer's spring. When you let go it settles on a snap point: the nearest one after a slow drag, further along after a flick. Touching a moving drawer stops it where it is.
 
 When `@activeSnapPoint` is set, letting go calls `@onSnapPointChange` with the snap point the drag ended on. Until you pass that index back in, the drawer heads back to the current `@activeSnapPoint`; if you never do, it stays there.
 
@@ -643,7 +643,7 @@ The base styles are easy to override. Every selector is wrapped in `:where()` (z
 
   Placing the drawer's layer after `base` means a reset such as Tailwind's preflight (`* { padding: 0 }`) can't remove the safe-area padding on `.mobile-drawer__content`. Placing it before `components` and `utilities` means those still override the base styles. Without the declaration, the order in which the layers are first loaded decides, so the result can depend on import order.
 
-Cascade layers need Safari/iOS 15.4+, Chrome 99+ or Firefox 97+.
+Cascade layers need Safari/iOS 15.4+, Chrome 99+ or Firefox 97+. Older browsers ignore the whole stylesheet.
 
 When a snap point makes the tray larger than its content, the content sits against the tray's leading edge, the edge that comes into view first. A drawer that is partly open shows its content rather than empty space. Bottom and right drawers do this through normal block layout. For top and left drawers the tray is a flex container and `.mobile-drawer__content` gets an auto start margin (`margin-top: auto` for top, `margin-left: auto` for left). Content taller or wider than the tray still scrolls; below its highest snap point, a top drawer's tray is scrolled to the end of its content, so the end of the content is at its leading edge (see [Scrolling content](#scrolling-content)). To align the content differently, override `display` on `.mobile-drawer__tray` or `margin` on `.mobile-drawer__content`, for example:
 
@@ -921,7 +921,7 @@ Optional, and off by default: the iOS 17/18 look. While a modal bottom sheet is 
 </div>
 ```
 
-`data-mobile-drawer-page` tells the drawers to write their progress on the element (see "The page behind" in `styles.css`). The class makes the iOS theme use it. The element doesn't need to be inside the `mobile-drawer-theme-ios` class.
+`data-mobile-drawer-page` tells the drawers to write their progress on the element (see [Data attributes for your elements](#data-attributes-for-your-elements)). The class makes the iOS theme use it. The element doesn't need to be inside the `mobile-drawer-theme-ios` class.
 
 With the page class on a child of `<body>`, the theme also uses the rest of the iOS 17/18 look: it sets `--mobile-drawer-inset: 0px` and `--mobile-drawer-ios-partial-dim: 1`, so the sheet is edge-to-edge and dims at every snap point, and the toolbar area under it has the sheet colour. Not with `prefers-reduced-motion: reduce`, where the page doesn't scale either.
 
@@ -948,6 +948,17 @@ Settings, as custom properties on the page element or an ancestor of it:
 Like the rest of the theme, these values are approximations: Apple doesn't document them.
 
 The theme sets the custom properties from the table above on the element with the theme class, plus `backdrop-filter` and `transition` on the tray, `backdrop-filter` on the glass layer of a bottom sheet and `border-radius` on the sheet, in the same `ember-mobile-drawer` layer with zero-specificity selectors. The rules for properties that the base styles also set are an exception: the tray's `background`, the `box-shadow` of a bottom tray and of a nested tray, the backdrop's `opacity` and `filter`, and the tints' `background-color` have the specificity of one class, so they win over the base styles in either load order. Unlayered app CSS, and app CSS in a later layer, win over all of the theme. In the `ember-mobile-drawer` layer itself, app CSS needs more than one class (or must come later) to override those rules. To change a theme value, set the property on the element with the theme class or closer to the drawer, for example `.mobile-drawer-theme-ios { --mobile-drawer-radius: 16px; }`. A value on `:root` doesn't override the theme when the class is on a descendant of `:root`, such as `<body>`.
+
+### Writing a theme
+
+The [iOS theme](#ios-theme) follows these rules. Follow them in a theme of your own, so app CSS can still override it:
+
+- Put the theme in the `ember-mobile-drawer` cascade layer, so unlayered app CSS and app CSS in a later layer win over it.
+- Wrap every selector in `:where()` and scope it to a theme class that the app puts on an ancestor of the drawer, for example `:where(.my-theme .mobile-drawer__tray)`.
+- Set values through the base custom properties (see [CSS custom properties](#css-custom-properties)), declared on `:where(:root)` or on the `:where()`-wrapped theme class. Never declare `--mobile-drawer-*` on `.mobile-drawer` or the tray: a declaration on the element wins over the value it would inherit, so the app's values on `:root` or an ancestor stop working.
+- Rules that set real properties must load after the base styles to win by source order (a theme can `@import` the base styles first). Rules that only set custom properties don't depend on load order, because the base rules never declare those properties. For a real property that the base styles also set, a selector with the specificity of one class (for example `:where(.my-theme) .mobile-drawer__backdrop`) wins in either load order; the iOS theme does that.
+- The drawer has no CSS transitions: the component moves it with springs and handles `prefers-reduced-motion`. Put a transition that a theme adds in a `@media (prefers-reduced-motion: no-preference)` block.
+- To use the [page](#page-scale) properties (`--mobile-drawer-page-progress`, `--mobile-drawer-page-viewport-top`), use them without a fallback, so a rule only applies while a drawer writes them, and register them with `@property` as not inherited, so the page's content isn't styled again on every frame.
 
 ## Testing
 
