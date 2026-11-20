@@ -338,3 +338,152 @@ module('Unit | modal | scroll-lock (iOS overflow lock)', function (hooks) {
     assert.strictEqual(document.body.style.position, '');
   });
 });
+
+// A classic scrollbar goes away with `overflow: hidden` on <html> (#166).
+module('Unit | modal | scroll-lock (classic scrollbar)', function (hooks) {
+  let style: HTMLStyleElement;
+  let content: HTMLElement;
+  let fixed: HTMLElement;
+  const html = document.documentElement;
+  const { body } = document;
+
+  hooks.beforeEach(async function () {
+    // A custom scrollbar takes layout space also where the browser uses
+    // overlay scrollbars (macOS).
+    style = document.createElement('style');
+    style.textContent = `
+      html.lock-scrollbar::-webkit-scrollbar { width: 15px; }
+      html.lock-scrollbar::-webkit-scrollbar-thumb { background: gray; }
+      html.lock-gutter { scrollbar-gutter: stable; }
+    `;
+    document.head.append(style);
+    html.classList.add('lock-scrollbar');
+    content = document.createElement('div');
+    content.style.height = `${window.innerHeight + 2000}px`;
+    fixed = document.createElement('div');
+    fixed.style.cssText = 'position: fixed; top: 0; left: 0; right: 0;';
+    body.append(content, fixed);
+    // Chrome adds the custom scrollbar in the next frame.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+
+  hooks.afterEach(function (assert) {
+    content.remove();
+    fixed.remove();
+    html.classList.remove('lock-scrollbar', 'lock-gutter');
+    style.remove();
+    delete drawerEnvironment.isIOS;
+    assert.strictEqual(bodyScrollLocks(), 0, 'no lock left behind');
+  });
+
+  /**
+   * Whether the browser keeps the scrollbar's space for `scrollbar-gutter:
+   * stable` on <html> with `overflow: hidden`. Not with overlay scrollbars
+   * (macOS): there the custom scrollbar goes away.
+   */
+  function gutterHolds(): boolean {
+    const { overflow, scrollbarGutter } = html.style;
+    const width = html.getBoundingClientRect().width;
+    html.style.scrollbarGutter = 'stable';
+    html.style.overflow = 'hidden';
+    const holds = html.getBoundingClientRect().width === width;
+    html.style.overflow = overflow;
+    html.style.scrollbarGutter = scrollbarGutter;
+    return holds;
+  }
+
+  const right = (element: HTMLElement) => element.getBoundingClientRect().right;
+
+  const variants: [string, boolean, boolean][] = [
+    // name, iOS, transparentStatusBar
+    ['desktop', false, false],
+    ['iOS, fixed <body>', true, false],
+    ['iOS, overflow lock', true, true],
+  ];
+
+  for (const [name, ios, transparentStatusBar] of variants) {
+    const lock = () => {
+      drawerEnvironment.isIOS = () => ios;
+      return lockBodyScroll(() => false, { transparentStatusBar });
+    };
+
+    test(`${name}: the body is padded for the scrollbar`, function (assert) {
+      const scrollbar = window.innerWidth - html.clientWidth;
+      assert.true(scrollbar > 0, 'a scrollbar');
+      const before = right(content);
+      const release = lock();
+      assert.strictEqual(right(content), before, 'content in place');
+      assert.strictEqual(body.style.paddingRight, `${scrollbar}px`, 'padding');
+      assert.strictEqual(html.style.scrollbarGutter, '', 'no gutter set');
+      release();
+      assert.strictEqual(html.style.overflow, '');
+      assert.strictEqual(body.style.paddingRight, '');
+      assert.strictEqual(right(content), before);
+    });
+
+    test(`${name}: with scrollbar-gutter: stable on <html>`, function (assert) {
+      html.classList.add('lock-gutter');
+      assert.true(window.innerWidth - html.clientWidth > 0, 'a scrollbar');
+      const holds = gutterHolds();
+      // Only Chrome on macOS (overlay scrollbars) drops the gutter of the
+      // custom scrollbar; elsewhere the strict branch must run.
+      assert.true(
+        holds || navigator.platform.startsWith('Mac'),
+        'the gutter holds',
+      );
+      const before = { content: right(content), fixed: right(fixed) };
+      const release = lock();
+      assert.strictEqual(html.style.scrollbarGutter, '', 'left to the app');
+      assert.strictEqual(right(content), before.content, 'content in place');
+      if (holds) {
+        assert.strictEqual(body.style.paddingRight, '', 'no extra padding');
+        assert.strictEqual(right(fixed), before.fixed, 'fixed in place');
+      } else {
+        assert.notStrictEqual(body.style.paddingRight, '', 'padding');
+      }
+      release();
+      assert.strictEqual(html.style.overflow, '');
+      assert.strictEqual(body.style.paddingRight, '');
+      assert.strictEqual(right(content), before.content);
+    });
+  }
+
+  // Safari < 18.2, Chrome < 94, Firefox < 97.
+  test('without scrollbar-gutter support the body is padded', function (assert) {
+    const original = Object.getOwnPropertyDescriptor(
+      window,
+      'getComputedStyle',
+    )!;
+    const computed = (element: Element, pseudo?: string | null) =>
+      (original.value as typeof window.getComputedStyle).call(
+        window,
+        element,
+        pseudo,
+      );
+    window.getComputedStyle = (element, pseudo) =>
+      new Proxy(computed(element, pseudo), {
+        get(target, property): unknown {
+          if (property === 'scrollbarGutter') return undefined;
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function'
+            ? (value as (...args: unknown[]) => unknown).bind(target)
+            : value;
+        },
+      });
+    try {
+      drawerEnvironment.isIOS = () => false;
+      const scrollbar = window.innerWidth - html.clientWidth;
+      assert.true(scrollbar > 0, 'a scrollbar');
+      const before = right(content);
+      const release = lockBodyScroll(() => false);
+      assert.strictEqual(html.style.overflow, 'hidden', 'locked');
+      assert.strictEqual(body.style.paddingRight, `${scrollbar}px`, 'padding');
+      assert.strictEqual(right(content), before, 'content in place');
+      release();
+      assert.strictEqual(html.style.overflow, '');
+      assert.strictEqual(body.style.paddingRight, '');
+    } finally {
+      Object.defineProperty(window, 'getComputedStyle', original);
+    }
+  });
+});
