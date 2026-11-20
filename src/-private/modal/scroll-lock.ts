@@ -183,7 +183,8 @@ function lock(options: LockOptions): Saved {
   // The app keeps the scrollbar's space: pad only if the page gets wider.
   const gutter =
     scrollbar > 0 &&
-    getComputedStyle(html).scrollbarGutter.startsWith('stable');
+    // `undefined` without support (Safari < 18.2).
+    (getComputedStyle(html).scrollbarGutter ?? '').startsWith('stable');
   const width = gutter ? html.getBoundingClientRect().width : 0;
   if (scrollbar > 0 && !gutter) padBody(body, scrollbar);
 

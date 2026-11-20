@@ -425,6 +425,12 @@ module('Unit | modal | scroll-lock (classic scrollbar)', function (hooks) {
       html.classList.add('lock-gutter');
       assert.true(window.innerWidth - html.clientWidth > 0, 'a scrollbar');
       const holds = gutterHolds();
+      // Only Chrome on macOS (overlay scrollbars) drops the gutter of the
+      // custom scrollbar; elsewhere the strict branch must run.
+      assert.true(
+        holds || navigator.platform.startsWith('Mac'),
+        'the gutter holds',
+      );
       const before = { content: right(content), fixed: right(fixed) };
       const release = lock();
       assert.strictEqual(html.style.scrollbarGutter, '', 'left to the app');
@@ -441,4 +447,43 @@ module('Unit | modal | scroll-lock (classic scrollbar)', function (hooks) {
       assert.strictEqual(right(content), before.content);
     });
   }
+
+  // Safari < 18.2, Chrome < 94, Firefox < 97.
+  test('without scrollbar-gutter support the body is padded', function (assert) {
+    const original = Object.getOwnPropertyDescriptor(
+      window,
+      'getComputedStyle',
+    )!;
+    const computed = (element: Element, pseudo?: string | null) =>
+      (original.value as typeof window.getComputedStyle).call(
+        window,
+        element,
+        pseudo,
+      );
+    window.getComputedStyle = (element, pseudo) =>
+      new Proxy(computed(element, pseudo), {
+        get(target, property): unknown {
+          if (property === 'scrollbarGutter') return undefined;
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function'
+            ? (value as (...args: unknown[]) => unknown).bind(target)
+            : value;
+        },
+      });
+    try {
+      drawerEnvironment.isIOS = () => false;
+      const scrollbar = window.innerWidth - html.clientWidth;
+      assert.true(scrollbar > 0, 'a scrollbar');
+      const before = right(content);
+      const release = lockBodyScroll(() => false);
+      assert.strictEqual(html.style.overflow, 'hidden', 'locked');
+      assert.strictEqual(body.style.paddingRight, `${scrollbar}px`, 'padding');
+      assert.strictEqual(right(content), before, 'content in place');
+      release();
+      assert.strictEqual(html.style.overflow, '');
+      assert.strictEqual(body.style.paddingRight, '');
+    } finally {
+      Object.defineProperty(window, 'getComputedStyle', original);
+    }
+  });
 });
