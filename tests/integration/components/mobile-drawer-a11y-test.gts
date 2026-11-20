@@ -943,6 +943,100 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
       assert.dom('[data-test-active]').hasText('0', 'after the drag it works');
     });
 
+    module('opened by a tap that gave no focus (Safari)', function () {
+      /** A tap that, as in Safari, doesn't focus what it went down on. */
+      const tap = (element: Element) =>
+        element.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            composed: true,
+            pointerType: 'touch',
+          }),
+        );
+
+      const blur = () => (document.activeElement as HTMLElement | null)?.blur();
+
+      test('focus returns to the button the tap went down on', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        blur();
+        assert.strictEqual(active(), document.body);
+
+        tap(el('[data-test-trigger]'));
+        state.active = 2;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-first]'), 'focus moved in');
+
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-trigger]'));
+      });
+
+      test('a tap on an element in a button finds the button', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        blur();
+        const trigger = el('[data-test-trigger]');
+        const label = document.createElement('span');
+        label.textContent = 'Open';
+        trigger.append(label);
+
+        tap(label);
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), trigger);
+        label.remove();
+      });
+
+      test('an element that has focus at the open still wins', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        await focus('[data-test-outside-button]');
+
+        tap(el('[data-test-trigger]'));
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-outside-button]'));
+      });
+
+      test('an old tap, or one on nothing focusable, gives no target', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        blur();
+
+        tap(el('[data-test-trigger]'));
+        clock.time += 1000;
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.notStrictEqual(
+          active(),
+          el('[data-test-trigger]'),
+          'more than 1 s ago',
+        );
+
+        tap(el('[data-test-outside]'));
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.notStrictEqual(
+          active(),
+          el('[data-test-trigger]'),
+          'not on a button',
+        );
+      });
+    });
+
     test('focus falls back near the trigger when the trigger is gone', async function (assert) {
       const state = new State();
       await renderDrawer(state);

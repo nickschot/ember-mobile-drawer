@@ -436,7 +436,7 @@ Focus at the highest snap point doesn't move the drawer, and neither does focus 
 
 - **Content rendered elsewhere becomes inert.** Popovers, dropdowns and menus that belong to the drawer's content must be rendered inside the drawer. Addons that render into a `<body>`-level element (a "wormhole" or portal, such as ember-basic-dropdown and ember-power-select) put their content next to the drawer, where it is inert and can't be clicked. Render them in place (`@renderInPlace={{true}}` for ember-basic-dropdown and ember-power-select). Elements added to `<body>` after the drawer opened are not made inert. Rendering in place also matters for a drawer that keyboard focus opened from its peek (see [Keyboard focus and content off screen](#keyboard-focus-and-content-off-screen)): it isn't modal, so content rendered into `<body>` can be used, but focus that moves into it is outside the drawer, so the drawer goes back to its peek.
 - **The scroll lock assumes the document scrolls.** It sets `overflow: hidden` on `<html>`. If your app scrolls inside `<body>` or a wrapper element instead (common in app-like layouts), that element keeps scrolling; lock it yourself while the drawer is open. Fixed-position page elements are not adjusted for the scrollbar that disappears.
-- **Safari doesn't focus buttons on click**, so after opening a drawer with a mouse or touch there, no element gets focus back on close.
+- **Safari doesn't focus buttons on click**, so when a drawer opens with nothing focused, the drawer returns focus to the button, link or `tabindex` element that the last pointer went down on, if that was less than 1 second before the open. A drawer that your app opens later, or in another way, gets no element to return focus to.
 
 ### Dragging
 

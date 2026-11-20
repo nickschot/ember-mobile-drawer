@@ -219,6 +219,53 @@ function trackInput(drawer: object, shown: boolean): void {
 }
 
 /**
+ * The last pointer that went down while a drawer is on the page, also a
+ * closed one: Safari doesn't focus a button on click, so this is how a drawer
+ * opened by a tap there knows its trigger.
+ */
+let lastPointerDown: { target: EventTarget | null; time: number } | undefined;
+
+const onPointerDownTarget = (event: PointerEvent): void => {
+  lastPointerDown = { target: event.target, time: inputTime() };
+};
+
+function trackPointerDown(listen: boolean): void {
+  if (listen) {
+    document.addEventListener(
+      'pointerdown',
+      onPointerDownTarget,
+      INPUT_LISTENER,
+    );
+  } else {
+    document.removeEventListener(
+      'pointerdown',
+      onPointerDownTarget,
+      INPUT_LISTENER,
+    );
+    lastPointerDown = undefined;
+  }
+}
+
+/**
+ * The button, link or `tabindex` element that a pointer went down on less
+ * than `INPUT_WINDOW` ago, for when focus is on `<body>` at the open.
+ */
+function recentPointerTrigger(): HTMLElement | SVGElement | undefined {
+  if (!lastPointerDown || inputTime() - lastPointerDown.time >= INPUT_WINDOW) {
+    return undefined;
+  }
+  const { target } = lastPointerDown;
+  const trigger =
+    target instanceof Element
+      ? target.closest('button:not(:disabled), a[href], area[href], [tabindex]')
+      : null;
+  return (trigger instanceof HTMLElement || trigger instanceof SVGElement) &&
+    trigger.isConnected
+    ? trigger
+    : undefined;
+}
+
+/**
  * The input that gives `element` focus now: the recent input when there is
  * one, the same in every browser (Chrome gives a clicked `readonly` field
  * `:focus-visible`). Else, as for a screen reader or switch access, which
@@ -963,6 +1010,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         passive: true,
         signal,
       });
+      if (mountedDrawers.size === 0) trackPointerDown(true);
       mountedDrawers.add(this);
       registerDrawer({
         root,
@@ -1089,7 +1137,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#endSwallowClick();
       this.#syncScrollLock();
       this.onTrayScrollEnd();
-      mountedDrawers.delete(this);
+      if (mountedDrawers.delete(this) && mountedDrawers.size === 0) {
+        trackPointerDown(false);
+      }
       if (this.#root) unregisterDrawer(this.#root);
       MobileDrawer.#syncNested();
       trackInput(this, false);
@@ -1912,8 +1962,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#returnFocus = active;
         this.#returnFocusPath = this.#ancestorsOf(active);
       } else if (!reopened) {
-        this.#returnFocus = undefined;
-        this.#returnFocusPath = [];
+        // Nothing focused, e.g. after a tap on a button in Safari: the
+        // element the tap went down on.
+        const trigger =
+          !active || active === document.body
+            ? recentPointerTrigger()
+            : undefined;
+        const from = trigger && !this.#contains(trigger) ? trigger : undefined;
+        this.#returnFocus = from;
+        this.#returnFocusPath = from ? this.#ancestorsOf(from) : [];
       }
       this.#openedByFocus = this.#focusOpenPending;
       this.#focusOpenPending = false;
