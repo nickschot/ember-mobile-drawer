@@ -24,7 +24,8 @@
  */
 
 import { drawerEnvironment } from '../environment.ts';
-import { containsTypingField } from '../fields.ts';
+import { containsTypingField, isTypingField } from '../fields.ts';
+import { canScroll } from '../scroll-bounds.ts';
 
 interface Saved {
   htmlOverflow: string;
@@ -87,10 +88,8 @@ function keyboardOpen(): boolean {
 function typingFieldFocused(): boolean {
   const active = document.activeElement;
   return (
-    active instanceof HTMLElement &&
-    (active instanceof HTMLTextAreaElement ||
-      active instanceof HTMLInputElement ||
-      active.isContentEditable) &&
+    active !== null &&
+    isTypingField(active) &&
     allowed.some((allows) => allows(active))
   );
 }
@@ -126,18 +125,10 @@ const onTouchStart = (event: TouchEvent): void => {
   lastTouch = touch ? { x: touch.clientX, y: touch.clientY } : undefined;
 };
 
-function canScroll(element: Element, dx: number, dy: number): boolean {
-  const style = getComputedStyle(element);
-  if (Math.abs(dy) >= Math.abs(dx)) {
-    if (!/auto|scroll/.test(style.overflowY)) return false;
-    const max = element.scrollHeight - element.clientHeight;
-    // Finger down (dy > 0) scrolls towards the top.
-    return dy > 0 ? element.scrollTop > 0 : element.scrollTop < max - 1;
-  }
-  if (!/auto|scroll/.test(style.overflowX)) return false;
-  const max = element.scrollWidth - element.clientWidth;
-  const left = Math.abs(element.scrollLeft); // negative in RTL
-  return dx > 0 ? left > 0 : left < max - 1;
+/** Whether `element` can scroll along the swipe's main axis (also in RTL). */
+function canScrollSwipe(element: Element, dx: number, dy: number): boolean {
+  const vertical = Math.abs(dy) >= Math.abs(dx);
+  return canScroll(element, vertical, vertical ? dy : dx);
 }
 
 /**
@@ -158,7 +149,7 @@ const onTouchMoveOverflow = (event: TouchEvent): void => {
     let element: Element | null =
       target instanceof Element ? target : (target as Node).parentElement;
     while (element && allows(element)) {
-      if (canScroll(element, dx, dy)) {
+      if (canScrollSwipe(element, dx, dy)) {
         allow = true;
         break;
       }
