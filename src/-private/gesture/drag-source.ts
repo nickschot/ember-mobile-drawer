@@ -11,8 +11,8 @@ export interface PanData {
   /** Set on the `onPanStart` of a drag that took over a scroll. */
   handoff?: boolean;
   /**
-   * Set on `onPanStart` with arbitration (`shouldDrag`): where the gesture
-   * started, the element the finger went down on.
+   * Set on `onPanStart`: where the gesture started, the element the finger
+   * went down on.
    */
   target?: Element | null;
 }
@@ -31,14 +31,13 @@ interface DragSourceNamedArgs {
   /** Called when the modifier is torn down, e.g. in the middle of a drag. */
   onTeardown: (element: HTMLElement) => void;
   /**
-   * Turns on scroll arbitration (see `DragSourceModifier`): asked once per
+   * The scroll arbitration (see `DragSourceModifier`): asked once per
    * gesture whether it drags (`true`) or is left to the browser, e.g. to
    * scroll (`false`). `movement` is how far the finger had moved along the
    * axis when the gesture was decided, in client px (positive is down or
-   * right); `target` is where the gesture started. Without it every pan
-   * along the axis drags, as with plain `didPan`.
+   * right); `target` is where the gesture started.
    */
-  shouldDrag?: (movement: number, target: Element | null) => boolean;
+  shouldDrag: (movement: number, target: Element | null) => boolean;
   /**
    * The `touch-action` to use instead of `didPan`'s (`pan-x` for a vertical
    * axis, `pan-y` for a horizontal one). Called whenever `didPan` writes it.
@@ -130,10 +129,10 @@ const findTouch = (list: TouchList, id: number | undefined) =>
  * whose element is removed (or whose modifier is swapped out, e.g. when
  * `@handleOnly` changes) would never end.
  *
- * With `shouldDrag` it also arbitrates between dragging and native
- * scrolling. A gesture is decided once the finger has moved at least
- * `DECISION_SLOP` px along the axis and further along it than across it, or
- * at the latest when `didPan` recognises a pan. If it turns sideways before
+ * It also arbitrates between dragging and native scrolling (`shouldDrag`).
+ * A gesture is decided once the finger has moved at least `DECISION_SLOP`
+ * px along the axis and further along it than across it, or at the latest
+ * when `didPan` recognises a pan. If it turns sideways before
  * `didPan` recognises a pan, a drag decision is released to the browser.
  * Otherwise the gesture keeps its decision until its finger lifts, so a
  * scroll never turns into a drag mid-gesture or the other way around. Only
@@ -143,10 +142,9 @@ const findTouch = (list: TouchList, id: number | undefined) =>
  * cancelable `touchmove` events so the browser doesn't scroll (or start a
  * scroll of an ancestor), whatever the element's `touch-action` says: iOS
  * Safari doesn't reliably honour `touch-action` on a scroll container. That
- * needs a non-passive `touchmove` listener, which is only added with
- * `shouldDrag`. Touchmoves before the decision, and after a drag decision
- * was released to the browser, are never cancelled, so swipes across the
- * axis keep working. A gesture that doesn't drag never reaches
+ * needs a non-passive `touchmove` listener. Touchmoves before the decision,
+ * and after a drag decision was released to the browser, are never
+ * cancelled, so swipes across the axis keep working. A gesture that doesn't drag never reaches
  * `onPanStart` through `didPan`; usually the browser takes it over
  * (`pointercancel`) anyway.
  *
@@ -173,8 +171,6 @@ class DragSourceModifier extends DidPan {
   #element?: HTMLElement;
   #named?: DragSourceNamedArgs;
   #gesture?: Gesture;
-  /** Whether the arbitration listeners are on `#element`. */
-  #arbitrating = false;
 
   constructor(owner: unknown, args: unknown) {
     super(owner, args);
@@ -197,7 +193,6 @@ class DragSourceModifier extends DidPan {
       return;
     }
     element.addEventListener('pointerdown', this.#onPointerDown, PASSIVE);
-    if (!this.#arbitrating) return;
     element.addEventListener('pointermove', this.#onPointerMove, PASSIVE);
     element.addEventListener('touchstart', this.#onTouchStart, PASSIVE);
     // Not passive: a drag cancels its touchmoves so the browser won't scroll.
@@ -211,18 +206,16 @@ class DragSourceModifier extends DidPan {
     const named = this.#named;
     if (!element || !named?.pointerTypes.includes(event.pointerType as 'touch'))
       return;
-    if (this.#arbitrating) {
-      const gesture = this.#gesture;
-      if (!gesture) {
-        this.#startGesture({
-          pointerId: event.pointerId,
-          x: event.clientX,
-          y: event.clientY,
-          target: event.target as Element | null,
-        });
-      } else if (gesture.pointerId === undefined) {
-        gesture.pointerId = event.pointerId;
-      }
+    const gesture = this.#gesture;
+    if (!gesture) {
+      this.#startGesture({
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        target: event.target as Element | null,
+      });
+    } else if (gesture.pointerId === undefined) {
+      gesture.pointerId = event.pointerId;
     }
     named.onPointerDown(event, element);
   };
@@ -366,7 +359,7 @@ class DragSourceModifier extends DidPan {
   #decide(x: number, y: number, force = false): boolean | undefined {
     const gesture = this.#gesture;
     const named = this.#named;
-    if (!gesture || !named?.shouldDrag) return undefined;
+    if (!gesture || !named) return undefined;
     const vertical = named.axis === 'vertical';
     const along = vertical ? y - gesture.y : x - gesture.x;
     const across = vertical ? x - gesture.x : y - gesture.y;
@@ -401,8 +394,7 @@ class DragSourceModifier extends DidPan {
       axis: args.axis,
       pointerTypes: args.pointerTypes,
       onPanStart: (data: PanData) => {
-        // Decided here at the latest. Without a gesture (e.g. the pointer
-        // went down before arbitration was turned on) the pan drags.
+        // Decided here at the latest. Without a gesture the pan drags.
         const gesture = this.#gesture;
         const drags = gesture
           ? this.#decide(data.current.x, data.current.y, true)
@@ -426,13 +418,11 @@ class DragSourceModifier extends DidPan {
     // didPan has just written its own touch-action.
     if (args.touchAction) element.style.touchAction = args.touchAction();
 
-    const arbitrating = args.shouldDrag !== undefined;
     const installed = this.#element !== element;
-    if (installed || this.#arbitrating !== arbitrating) {
+    if (installed) {
       this.#endGesture();
       this.#listen(this.#element, false);
       this.#element = element;
-      this.#arbitrating = arbitrating;
       this.#listen(element, true);
     }
     this.#named = args;

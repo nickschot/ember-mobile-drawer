@@ -179,11 +179,6 @@ export class KeyboardFill {
     return this.#options.root;
   }
 
-  /** Whether the fill shows. */
-  get showing(): boolean {
-    return this.#element?.isConnected ?? false;
-  }
-
   /** Whether `node` belongs to this drawer. */
   contains(node: Node | null | undefined): boolean {
     return this.#options.contains(this.#options.root, node);

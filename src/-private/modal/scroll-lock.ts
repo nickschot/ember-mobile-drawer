@@ -38,6 +38,7 @@
  */
 
 import { drawerEnvironment } from '../environment.ts';
+import { containsTypingField } from '../fields.ts';
 
 interface Saved {
   htmlOverflow: string;
@@ -135,16 +136,10 @@ function restorePinned(): void {
  * that is what shows the field (the #71 lock gets the same scroll, see
  * #116). Thus while the keyboard is open, the scroll stays: scrolling it back
  * hid the field and made the sheet jump. Any other scroll of the page is
- * undone at once. When the keyboard closes, the page goes back to its
- * position (see `onViewportResize`).
+ * undone at once. Also on a `resize` of the visual viewport: when the
+ * keyboard closes, the page goes back to its position.
  */
-const onScroll = (): void => {
-  if (!pinned || keyboardOpen()) return;
-  restorePinned();
-};
-
-/** The keyboard closed: put the page back where it was. */
-const onViewportResize = (): void => {
+const onViewportChange = (): void => {
   if (!pinned || keyboardOpen()) return;
   restorePinned();
 };
@@ -210,23 +205,9 @@ const onTouchMoveOverflow = (event: TouchEvent): void => {
   if (!allow && event.cancelable) event.preventDefault();
 };
 
-/** `<input>` types that open no on-screen keyboard. */
-const NON_TEXT_INPUTS = new Set([
-  'button',
-  'checkbox',
-  'color',
-  'file',
-  'hidden',
-  'image',
-  'radio',
-  'range',
-  'reset',
-  'submit',
-]);
-
 /**
  * Whether `element` contains a field the user types in (it opens the
- * on-screen keyboard).
+ * on-screen keyboard), see `containsTypingField`.
  *
  * The overflow lock can't give the keyboard behaviour of the
  * fixed `<body>`. iOS shows a focused field by scrolling the visual viewport
@@ -243,26 +224,7 @@ const NON_TEXT_INPUTS = new Set([
  * drawer with such a field gets the fixed `<body>` from the start; the
  * status bar is then one solid colour (#113).
  */
-function hasTypingField(element: HTMLElement): boolean {
-  for (const field of element.querySelectorAll<HTMLElement>(
-    'input, textarea, [contenteditable]',
-  )) {
-    if (field instanceof HTMLInputElement) {
-      if (
-        !NON_TEXT_INPUTS.has(field.type) &&
-        !field.disabled &&
-        !field.readOnly
-      ) {
-        return true;
-      }
-    } else if (field instanceof HTMLTextAreaElement) {
-      if (!field.disabled && !field.readOnly) return true;
-    } else if (field.isContentEditable) {
-      return true;
-    }
-  }
-  return false;
-}
+const hasTypingField = containsTypingField;
 
 function lock(options: LockOptions): Saved {
   const html = document.documentElement;
@@ -297,8 +259,8 @@ function lock(options: LockOptions): Saved {
     html.style.overscrollBehavior = 'none';
     body.style.overscrollBehavior = 'none';
     pinned = { x, y };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.visualViewport?.addEventListener('resize', onViewportResize);
+    window.addEventListener('scroll', onViewportChange, { passive: true });
+    window.visualViewport?.addEventListener('resize', onViewportChange);
     document.addEventListener('focusout', onFocusOut);
     document.addEventListener('touchstart', onTouchStart, { passive: true });
     document.addEventListener('touchmove', onTouchMoveOverflow, {
@@ -326,8 +288,8 @@ function unlock(state: Saved): void {
   body.style.paddingRight = state.bodyPaddingRight;
   const { position, overflow } = state;
   if (overflow) {
-    window.removeEventListener('scroll', onScroll);
-    window.visualViewport?.removeEventListener('resize', onViewportResize);
+    window.removeEventListener('scroll', onViewportChange);
+    window.visualViewport?.removeEventListener('resize', onViewportChange);
     document.removeEventListener('focusout', onFocusOut);
     document.removeEventListener('touchstart', onTouchStart);
     document.removeEventListener('touchmove', onTouchMoveOverflow);
