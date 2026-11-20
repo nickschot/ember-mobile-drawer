@@ -463,11 +463,38 @@
    * inset), its clips cut the tray's sides, so only the top edge shows;
    * a theme can draw the sheet's shape on the shadow layer (the iOS theme
    * does). Forced colors keeps system colours, so CanvasText stays.
+   * - Not while the tray has keyboard focus: the browser's focus ring stays.
+   * - A browser paints an element's outline under its positioned children,
+   *   so the header (z-index 1) and app content such as a sticky header
+   *   with a background would cover the edge. The content and the header
+   *   go under the tray's outline with a negative z-index (the header stays
+   *   above the content). The tray isolates them, so they stay above its
+   *   background. `position: relative` makes the content the containing
+   *   block of absolutely positioned elements in it (the tray is that
+   *   otherwise); it adds no offset, so nothing moves.
    */
   @media (forced-colors: active) {
     :where(.mobile-drawer__tray) {
+      isolation: isolate;
+    }
+
+    :where(.mobile-drawer__tray:not(:focus-visible)) {
       outline: 1px solid CanvasText;
       outline-offset: -1px;
+    }
+
+    :where(
+      .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content
+    ) {
+      position: relative;
+      z-index: -2;
+    }
+
+    :where(
+      .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__header
+    ) {
+      position: relative;
+      z-index: -1;
     }
   }
 

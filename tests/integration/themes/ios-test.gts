@@ -468,6 +468,10 @@ module('Integration | themes/ios.css', function (hooks) {
         media.conditionText.includes('prefers-contrast: more'),
         'also for increased contrast',
       );
+      assert.true(
+        media.conditionText.includes('forced-colors: active'),
+        'also in forced colors mode, which keeps the alpha of the sheet colour',
+      );
       const style = applyReducedTransparency();
 
       try {
@@ -1579,7 +1583,7 @@ module('Integration | themes/ios.css', function (hooks) {
 
       // Reduced transparency alone doesn't change the bar or the rim.
       const reduced = applyMedia(
-        '(prefers-reduced-transparency: reduce), (prefers-contrast: more)',
+        themeMediaRule('prefers-reduced-transparency: reduce').conditionText,
       );
       try {
         finishTransitions();
@@ -1858,6 +1862,15 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
 
     const style = applyMedia('(forced-colors: active)');
     try {
+      // The modal tray has no focusable content, so it has the focus: the
+      // browser's focus ring stays.
+      assert.strictEqual(document.activeElement, tray, 'the tray has focus');
+      assert.strictEqual(
+        getComputedStyle(tray).outlineStyle,
+        tray.matches(':focus-visible') ? 'auto' : 'none',
+        "focused: the browser's focus ring",
+      );
+      tray.blur();
       assert.strictEqual(
         getComputedStyle(tray).outlineStyle,
         'none',

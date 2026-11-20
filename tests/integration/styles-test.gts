@@ -1155,5 +1155,122 @@ module('Integration | styles.css', function (hooks) {
         style.remove();
       }
     });
+
+    /*
+     * A browser paints an element's outline before its positioned children
+     * with a z-index of 0 or more (CSS 2 appendix E, and Chrome). So the
+     * header (z-index 1) and a sticky app header with a background would
+     * cover the edge. The tests can't read pixels, so they check the paint
+     * order: the tray is a stacking context, and the header and the content
+     * (with everything in it) are in it with a negative z-index, so they
+     * paint after the tray's background and before its outline.
+     */
+    test(`${placement}: forced colors keeps the edge above a header and sticky content`, async function (assert) {
+      await render(
+        <template>
+          <div
+            class="mobile-drawer"
+            data-placement={{placement}}
+            data-header
+            data-test-root
+          >
+            <div class="mobile-drawer__sheet">
+              <div class="mobile-drawer__tray" data-test-tray>
+                <div class="mobile-drawer__header" data-test-header>
+                  Header
+                </div>
+                <div class="mobile-drawer__content" data-test-content-wrapper>
+                  {{! template-lint-disable no-inline-styles }}
+                  <div
+                    style="position: sticky; top: 0; z-index: 1; background: Canvas"
+                    data-test-sticky
+                  >Sticky</div>
+                  <button type="button" data-test-button>Button</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>,
+      );
+      const tray = el('[data-test-tray]');
+      const header = el('[data-test-header]');
+      const content = el('[data-test-content-wrapper]');
+      tray.style.transform = 'none';
+      const boxes = () =>
+        [tray, header, content, el('[data-test-sticky]')].map(
+          (element) => element.getBoundingClientRect().toJSON() as unknown,
+        );
+      const before = boxes();
+      assert.strictEqual(
+        getComputedStyle(header).zIndex,
+        '1',
+        'without forced colors the header is above the content',
+      );
+
+      const inner = Array.from(forcedColorsRule().rule.cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+      try {
+        assert.strictEqual(getComputedStyle(tray).outlineStyle, 'solid');
+        assert.strictEqual(
+          getComputedStyle(tray).isolation,
+          'isolate',
+          'the tray is a stacking context, also without a transform',
+        );
+        const headerStyle = getComputedStyle(header);
+        const contentStyle = getComputedStyle(content);
+        assert.strictEqual(headerStyle.position, 'relative');
+        assert.strictEqual(contentStyle.position, 'relative');
+        assert.true(
+          Number(headerStyle.zIndex) < 0 && Number(contentStyle.zIndex) < 0,
+          'the header and the content paint before the tray outline',
+        );
+        assert.true(
+          Number(headerStyle.zIndex) > Number(contentStyle.zIndex),
+          'the header stays above the content',
+        );
+        assert.deepEqual(boxes(), before, 'nothing moves');
+
+        // The content still takes pointer events.
+        const button = el('[data-test-button]').getBoundingClientRect();
+        assert.strictEqual(
+          document.elementFromPoint(
+            button.left + button.width / 2,
+            button.top + button.height / 2,
+          ),
+          el('[data-test-button]'),
+          'the content gets the hits',
+        );
+      } finally {
+        style.remove();
+      }
+    });
   }
+
+  test('forced colors keeps the browser focus ring on a focused tray', async function (assert) {
+    await renderDrawer();
+    const tray = el('[data-test-tray]');
+    tray.tabIndex = -1;
+    const inner = Array.from(forcedColorsRule().rule.cssRules)
+      .map((rule) => rule.cssText)
+      .join('\n');
+    const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+    try {
+      assert.strictEqual(getComputedStyle(tray).outlineStyle, 'solid');
+      tray.focus();
+      assert.true(tray.matches(':focus-visible'), 'focus-visible');
+      const computed = getComputedStyle(tray);
+      assert.strictEqual(
+        computed.outlineStyle,
+        'auto',
+        "the browser's focus ring, not the edge",
+      );
+      assert.strictEqual(computed.outlineOffset, '0px');
+    } finally {
+      style.remove();
+    }
+  });
 });
