@@ -10,10 +10,7 @@ export interface PanData {
   originalEvent?: Event;
   /** Set on the `onPanStart` of a drag that took over a scroll. */
   handoff?: boolean;
-  /**
-   * Set on `onPanStart`: where the gesture started, the element the finger
-   * went down on.
-   */
+  /** Set on `onPanStart`: the element the finger went down on. */
   target?: Element | null;
 }
 
@@ -31,24 +28,15 @@ interface DragSourceNamedArgs {
   /** Called when the modifier is torn down, e.g. in the middle of a drag. */
   onTeardown: (element: HTMLElement) => void;
   /**
-   * The scroll arbitration (see `DragSourceModifier`): asked once per
-   * gesture whether it drags (`true`) or is left to the browser, e.g. to
-   * scroll (`false`). `movement` is how far the finger had moved along the
-   * axis when the gesture was decided, in client px (positive is down or
-   * right); `target` is where the gesture started.
+   * Asked once per gesture: drag (`true`) or leave it to the browser.
+   * `movement` is along the axis in client px (positive is down or right).
    */
   shouldDrag: (movement: number, target: Element | null) => boolean;
-  /**
-   * The `touch-action` to use instead of `didPan`'s (`pan-x` for a vertical
-   * axis, `pan-y` for a horizontal one). Called whenever `didPan` writes it.
-   */
+  /** Replaces `didPan`'s `touch-action` whenever `didPan` writes it. */
   touchAction?: () => string;
   /**
-   * Turns on the scroll handoff (see `DragSourceModifier`): called for every
-   * `touchmove` of a gesture that `shouldDrag` decided as a scroll, with how
-   * far the finger moved along the axis since the previous one (client px,
-   * positive is down or right) and where the gesture started. Returns
-   * whether a drag takes over the gesture from here.
+   * Per `touchmove` of a scrolling gesture, with the step along the axis
+   * since the previous one. Returns whether a drag takes the gesture over.
    */
   onScroll?: (step: number, target: Element | null) => boolean;
   /** Called once a gesture that `onScroll` was called for ends. */
@@ -60,11 +48,7 @@ export interface DragSourceSignature {
   Args: { Named: DragSourceNamedArgs };
 }
 
-/**
- * The part of ember-gesture-modifiers' `DidPanModifier` this extends: the
- * standard ember-modifier `modify` hook, called with `didPan`'s public named
- * arguments.
- */
+/** The part of `DidPanModifier` this extends. */
 interface DidPanModifier {
   modify(
     element: HTMLElement,
@@ -83,33 +67,26 @@ interface Gesture {
   /** The pointer that started it; more fingers don't start another one. */
   pointerId?: number;
   /**
-   * The touch that started it on the element, once touch events arrive. The
-   * gesture then lasts until that touch ends: after the browser takes over a
-   * scroll (`pointercancel`) touch events keep coming.
+   * The gesture lasts until this touch ends: touch events keep coming after
+   * the browser takes a scroll over (`pointercancel`).
    */
   touchId?: number;
   x: number;
   y: number;
   target: Element | null;
-  /** Whether it drags; `undefined` until it is decided. */
+  /** `undefined` until decided. */
   drags?: boolean;
   /** Whether `didPan` recognised a pan and the drag started. */
   panning: boolean;
-  /** Whether `shouldDrag` decided it as a scroll along the axis. */
   scrolls?: boolean;
-  /**
-   * Whether a drag took it over from a scroll (see `onScroll`): touch
-   * events drive the drag from then on, not `didPan`.
-   */
+  /** A drag took it over from a scroll; touch events drive the drag. */
   handoff?: boolean;
-  /** The finger's last position, from its last touch event. */
   lastX?: number;
   lastY?: number;
 }
 
 /**
- * How far (px) the finger must move along the axis, and further along it
- * than across it, before a gesture is decided. Below the browser's own touch
+ * Px along the axis before a gesture is decided. Below the browser's touch
  * slop, so the decision comes before native scrolling could start.
  */
 export const DECISION_SLOP = 4;
@@ -123,47 +100,27 @@ const findTouch = (list: TouchList, id: number | undefined) =>
     : Array.from(list).find((touch) => touch.identifier === id);
 
 /**
- * `didPan` that also tells the drawer which element a pan came from, when a
- * pointer goes down on it (before a pan is recognised) and when it is torn
- * down. `didPan` removes its listeners on teardown, so without that a drag
- * whose element is removed (or whose modifier is swapped out, e.g. when
- * `@handleOnly` changes) would never end.
+ * `didPan` that also reports pointerdown, install and teardown. `didPan`
+ * removes its listeners on teardown, so without `onTeardown` a drag whose
+ * element goes away (or whose modifier is swapped) would never end.
  *
- * It also arbitrates between dragging and native scrolling (`shouldDrag`).
- * A gesture is decided once the finger has moved at least `DECISION_SLOP`
- * px along the axis and further along it than across it, or at the latest
- * when `didPan` recognises a pan. If it turns sideways before
- * `didPan` recognises a pan, a drag decision is released to the browser.
- * Otherwise the gesture keeps its decision until its finger lifts, so a
- * scroll never turns into a drag mid-gesture or the other way around. Only
- * the touch that started on the element counts.
+ * It arbitrates between dragging and native scrolling (`shouldDrag`). A
+ * gesture is decided after `DECISION_SLOP` px along the axis, or at the
+ * latest when `didPan` recognises a pan, and keeps its decision until the
+ * finger lifts. Only a drag that turns sideways before the pan starts is
+ * released to the browser.
  *
- * Once a gesture is decided as a drag, it calls `preventDefault()` on its
- * cancelable `touchmove` events so the browser doesn't scroll (or start a
- * scroll of an ancestor), whatever the element's `touch-action` says: iOS
- * Safari doesn't reliably honour `touch-action` on a scroll container. That
- * needs a non-passive `touchmove` listener. Touchmoves before the decision,
- * and after a drag decision was released to the browser, are never
- * cancelled, so swipes across the axis keep working. A gesture that doesn't drag never reaches
- * `onPanStart` through `didPan`; usually the browser takes it over
- * (`pointercancel`) anyway.
+ * A drag cancels its `touchmove` events: iOS Safari does not reliably honour
+ * `touch-action` on a scroll container. Touchmoves before the decision are
+ * never cancelled, so swipes across the axis keep working.
  *
- * Scroll handoff (with `onScroll`): the browser keeps sending a scrolling
- * gesture's `touchmove` events (not cancelable) after it took the gesture
- * over, but no pointer events. For each of them `onScroll` decides whether
- * a drag takes the gesture over, e.g. once the content can't scroll further
- * the way the finger moves. The drag then starts where the finger is (so
- * the tray doesn't jump) and its touch events drive `onPanStart`, `onPan`
- * and `onPanEnd` (with the `touchend`, or a `touchcancel`) until the finger
- * lifts. `didPan`'s own callbacks are ignored during it. The gesture never
- * goes back to a scroll.
+ * Scroll handoff (`onScroll`): after the browser takes a scroll over, only
+ * (non-cancelable) touch events arrive. `onScroll` can then start a drag
+ * where the finger is; touch events drive it until the finger lifts, and
+ * `didPan`'s own callbacks are ignored.
  *
- * Extends the modifier class, so it uses `didPan`'s own modifier manager.
- * It relies only on that class being a class-based ember-modifier (its
- * `modify` hook and destructors) and on `didPan`'s documented arguments; the
- * callbacks go in through `onPanStart`/`onPan`/`onPanEnd`. The gesture tests
- * cover this, so a breaking change in a future ember-gesture-modifiers
- * shows up there.
+ * It relies only on `didPan` being a class-based ember-modifier and on its
+ * documented arguments; the gesture tests catch a breaking change.
  *
  * @internal
  */
@@ -287,7 +244,6 @@ class DragSourceModifier extends DidPan {
     if (drags !== false || !gesture.scrolls || !named?.onScroll) return;
     const step = named.axis === 'vertical' ? y - lastY : x - lastX;
     if (step === 0 || !named.onScroll(step, gesture.target)) return;
-    // From here the drag follows the finger, from where it is now.
     gesture.handoff = true;
     gesture.panning = true;
     if (event.cancelable) event.preventDefault();
@@ -302,7 +258,6 @@ class DragSourceModifier extends DidPan {
     );
   };
 
-  /** `didPan`-like event data for a touch at `x`/`y`. */
   #touchData(x: number, y: number, originalEvent: Event): PanData {
     return { current: { x, y }, originalEvent };
   }
@@ -351,11 +306,7 @@ class DragSourceModifier extends DidPan {
     document.removeEventListener('touchcancel', this.#onTouchEnd, CAPTURE);
   }
 
-  /**
-   * Whether the current gesture drags, deciding it now if the finger at
-   * `x`/`y` is past the slop, or when `force`d (`didPan` recognised a pan).
-   * `undefined` while undecided.
-   */
+  /** Decides the gesture once past the slop, or when `force`d by `didPan`. */
   #decide(x: number, y: number, force = false): boolean | undefined {
     const gesture = this.#gesture;
     const named = this.#named;
@@ -407,7 +358,6 @@ class DragSourceModifier extends DidPan {
         gesture.panning = true;
         args.onPanStart({ ...data, target: gesture.target }, element);
       },
-      // During a handoff the touch events drive the drag (see above).
       onPan: (data: PanData) => {
         if (!this.#gesture?.handoff) args.onPan(data, element);
       },

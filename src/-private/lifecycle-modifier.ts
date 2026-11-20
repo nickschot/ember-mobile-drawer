@@ -1,13 +1,10 @@
 import { capabilities, setModifierManager } from '@ember/modifier';
 import type { ModifierLike } from '@glint/template';
 
-/** Callbacks for {@link lifecycle}. */
 export interface LifecycleHooks {
-  /** Called once the element is in the DOM. */
   install(element: HTMLElement): void;
   /** Called when any of the other positional arguments changed. */
   update(): void;
-  /** Called when the element is about to be removed. */
   destroy(): void;
 }
 
@@ -28,16 +25,9 @@ function consume(args: Arguments): LifecycleHooks {
 }
 
 /**
- * A minimal element modifier with install/update/destroy hooks, so the addon
- * doesn't need a runtime dependency on `ember-modifier`:
- *
- * ```hbs
- * <div {{lifecycle this.hooks @foo @bar}}></div>
- * ```
- *
- * `update` runs when `@foo` or `@bar` (or anything tracked that `install` or
- * `update` read) changes. The hooks run during rendering, so they must not
- * write tracked state synchronously.
+ * A minimal modifier, to avoid a runtime dependency on `ember-modifier`:
+ * `{{lifecycle this.hooks @foo @bar}}`. The hooks run during rendering, so
+ * they must not write tracked state synchronously.
  *
  * @internal
  */

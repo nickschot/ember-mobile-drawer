@@ -1,26 +1,11 @@
 /**
- * The dim layer for a transparent iOS status bar (`@transparentStatusBar`,
- * #113).
+ * The dim layer for `@transparentStatusBar`. iOS Safari 26+ paints the status
+ * bar in one solid colour when a fixed or sticky element is within 4px of the
+ * top, or when `<body>` is fixed. So the dim is page content (absolute, as
+ * large as the document), and the transparent backdrop only takes pointers.
  *
- * iOS Safari 26+ paints the status bar in one solid colour when a fixed or
- * sticky element is within 4px of the top clip line, or when `<body>` is
- * fixed. With `@transparentStatusBar`, the root of a modal drawer starts 5px
- * below the top (see the iOS block of styles.css), the backdrop only takes
- * the pointer events (transparent), and `<body>` isn't fixed (the overflow
- * lock, see `scroll-lock.ts`). The visible dim is this element instead: page
- * content (`position: absolute`, as large as the document), outside every
- * fixed element. Safari then shows the dimmed page, with its gradual blur,
- * in the status bar, with no edge.
- *
- * The element is inserted just before the drawer's root, so it is in the
- * same stacking context with the same `z-index`, and paints below the root
- * (and above an outer drawer, for a nested one). It is moved to the
- * document's origin, whatever its containing block, and sized to the
- * document with a ResizeObserver.
- *
- * Limits: an ancestor of the root that clips (`overflow`) or that is a
- * stacking context below page content cuts or hides the dim. A scaled
- * ancestor scales it too, so it doesn't cover the whole document then.
+ * Inserted just before the root: same stacking context and `z-index`. An
+ * ancestor that clips, or a scaled one, cuts the dim.
  *
  * @module
  * @internal
@@ -48,7 +33,6 @@ export class PageDim {
 
   #onResize = (): void => this.#place();
 
-  /** Puts the element at the document's origin, at the document's size. */
   #place(): void {
     const { element } = this;
     const html = document.documentElement;
@@ -60,8 +44,7 @@ export class PageDim {
     style.height = '0px';
     style.width = `${Math.max(html.scrollWidth, window.innerWidth)}px`;
     style.height = `${Math.max(html.scrollHeight, window.innerHeight)}px`;
-    // The containing block can be any positioned ancestor of the root, also
-    // a scaled one (the scale of the width applies to the offsets too).
+    // The containing block can be any positioned (also scaled) ancestor.
     const rect = element.getBoundingClientRect();
     const scale = rect.width / element.offsetWidth || 1;
     const top = (-window.scrollY - rect.top) / scale;

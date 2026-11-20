@@ -1,8 +1,6 @@
 /**
- * Small focus helpers for the modal drawer's focus trap, instead of a
- * runtime dependency such as `focus-trap`/`tabbable`. They cover the common
- * cases: native interactive elements and `tabindex`; not shadow DOM, and
- * every radio button in a group counts as its own stop.
+ * Focus helpers for the focus trap, instead of a dependency such as
+ * `tabbable`. Not covered: shadow DOM; each radio button is its own stop.
  *
  * @module
  * @internal
@@ -33,7 +31,6 @@ function isVisible(element: HTMLElement): boolean {
   );
 }
 
-/** Whether `element` can be focused by the user and is in the tab order. */
 function isTabbable(element: HTMLElement): boolean {
   return (
     element.tabIndex >= 0 &&
@@ -45,7 +42,6 @@ function isTabbable(element: HTMLElement): boolean {
   );
 }
 
-/** The elements inside `container` that Tab moves through, in order. */
 export function tabbables(container: Element): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>(CANDIDATES)].filter(
     isTabbable,
@@ -53,11 +49,8 @@ export function tabbables(container: Element): HTMLElement[] {
 }
 
 /**
- * The element to focus when a modal drawer opens: the first element with
- * `autofocus`, else the first tabbable element that isn't a yielded
- * `Grabber` (`data-mobile-drawer-grabber`), else `fallback`. The grabber
- * comes first in a bottom drawer, but it is a control for the drawer, not
- * its content, so focus (and a screen reader) starts at the content.
+ * Skips the yielded `Grabber`: it comes first in a bottom drawer, but focus
+ * (and a screen reader) should start at the content.
  */
 export function initialFocus(
   container: Element,
@@ -75,7 +68,6 @@ export function initialFocus(
   );
 }
 
-/** `element.focus()` without scrolling to it. */
 export function focusWithoutScrolling(element: HTMLElement): void {
   element.focus({ preventScroll: true });
 }

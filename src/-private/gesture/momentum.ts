@@ -1,31 +1,21 @@
 /**
- * Scroll momentum after a drag scrolled the content from script (see
- * `MobileDrawer`), like the deceleration of a native iOS scroll view.
+ * Scroll momentum after a drag scrolled the content from script, like a
+ * native iOS scroll view.
  *
  * @module
  */
 
 import type { FrameClock } from '../spring/spring.ts';
 
-/**
- * How much of its velocity the scroll keeps per ms: UIScrollView's
- * `decelerationRate` `normal`.
- */
+/** Per ms: UIScrollView's `decelerationRate` `normal`. */
 export const DECELERATION_RATE = 0.998;
 
-/**
- * Below this speed (px/ms) the momentum stops. A release slower than this
- * has no momentum.
- */
+/** Px/ms. */
 export const MIN_MOMENTUM_VELOCITY = 0.02;
 
 const LN_RATE = Math.log(DECELERATION_RATE);
 
-/**
- * Where a momentum that starts at `velocity` (px/ms) is `elapsed` ms later,
- * relative to where it started, and how fast it goes then: the velocity
- * decays by {@link DECELERATION_RATE} per ms.
- */
+/** Distance from the start and velocity `elapsed` ms later. */
 export function momentumAt(
   velocity: number,
   elapsed: number,
@@ -40,23 +30,18 @@ export function momentumAt(
 
 export interface MomentumOptions {
   clock: FrameClock;
-  /** The position (px) it starts at. */
   from: number;
-  /** The velocity (px/ms) it starts with. */
+  /** Px/ms. */
   velocity: number;
-  /** The range the position stays in: it stops at an end. */
+  /** It stops at an end. */
   min: number;
   max: number;
-  /** Writes a position. Called once per frame; no layout read of its own. */
+  /** Once per frame; no layout read of its own. */
   write: (position: number) => void;
-  /** Called once when it stops, by itself or by `stop`. */
+  /** Also on `stop`. */
   onEnd?: () => void;
 }
 
-/**
- * A running momentum: one `write` per animation frame until it is slower
- * than {@link MIN_MOMENTUM_VELOCITY}, reaches `min` or `max`, or is stopped.
- */
 export class Momentum {
   #options: MomentumOptions;
   #start: number;
@@ -73,7 +58,6 @@ export class Momentum {
     return this.#running;
   }
 
-  /** Stops it where it is. */
   stop(): void {
     if (!this.#running) return;
     this.#running = false;
@@ -84,10 +68,8 @@ export class Momentum {
     this.#options.onEnd?.();
   }
 
-  /**
-   * A frame, at the time on the clock (as the drawer's catch-up frames):
-   * input of the same frame is handled after the frame's time stamp.
-   */
+  // The clock's time, not the frame's (as the catch-up): input of the same
+  // frame is handled after the frame's time stamp.
   #step = (): void => {
     this.#frame = undefined;
     if (!this.#running) return;
