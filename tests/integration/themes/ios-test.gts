@@ -1918,6 +1918,62 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
     }
   });
 
+  for (const placement of ['bottom', 'top'] as const) {
+    test(`${placement}: forced colors draws the edge of a sheet with a header once`, async function (assert) {
+      const state = new SheetState(placement);
+      await render(
+        <template>
+          <div class="mobile-drawer-theme-ios">
+            <MobileDrawer
+              @placement={{state.placement}}
+              @snapPoints={{SHEET_SNAP_POINTS}}
+              @activeSnapPoint={{state.active}}
+              @onSnapPointChange={{state.setActive}}
+            >
+              <:header as |drawer|>
+                <drawer.Grabber class="mobile-drawer-theme-ios__grabber" />
+              </:header>
+              <:default>
+                <button type="button">Content</button>
+              </:default>
+            </MobileDrawer>
+          </div>
+        </template>,
+      );
+      await frames();
+      state.active = 1;
+      await frames();
+      const root = find('.mobile-drawer')!;
+      const header = root.querySelector('.mobile-drawer__header')!;
+      // Focus elsewhere: the edge is not drawn while the tray has focus.
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      const style = applyMedia('(forced-colors: active)');
+      try {
+        const edge = getComputedStyle(header, '::before');
+        if (placement === 'bottom') {
+          assert.strictEqual(
+            edge.content,
+            'none',
+            'no header frame: the shadow layer draws the edge',
+          );
+          assert.strictEqual(
+            getComputedStyle(root.querySelector('.mobile-drawer__shadow-body')!)
+              .outlineStyle,
+            'solid',
+            'the shadow layer has the edge',
+          );
+        } else {
+          assert.notStrictEqual(edge.content, 'none', 'the header frame');
+          assert.strictEqual(edge.borderBottomStyle, 'solid');
+          assert.strictEqual(edge.borderBottomWidth, '1px');
+        }
+      } finally {
+        style.remove();
+      }
+    });
+  }
+
   /**
    * The shadow layer's boxes, in px relative to the root (the test container
    * may be scaled): the edge's clip, the body's clip and the body.

@@ -13,8 +13,9 @@
  * Rules for this file (see also "Writing a theme" in the README):
  *   - Everything is in the `ember-mobile-drawer` layer with :where().
  *     Rules for real properties that the base styles also set (the tray's
- *     `background`, `box-shadow` and forced colors `outline`, the
- *     backdrop's `opacity` and `filter`,
+ *     `background`, `box-shadow` and forced colors `outline`, the bottom
+ *     header's forced colors `::before`, the backdrop's `opacity` and
+ *     `filter`,
  *     the tints' `background-color`, the content and header padding, the
  *     header background, the shadow layer's `display`) have specificity
  *     0,1,0, so they win in either load order.
@@ -422,6 +423,19 @@
       )
       > .mobile-drawer__tray:where(:not(:focus-visible)) {
       outline: none;
+    }
+
+    /* Nor the base styles' edge on the header: the shadow layer draws it,
+       and the header's frame doesn't follow the inset. Specificity 0,1,0,
+       as the tray. */
+    :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-placement="bottom"]
+          > .mobile-drawer__sheet
+          > .mobile-drawer__tray
+      )
+      > .mobile-drawer__header::before {
+      content: none;
     }
 
     :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-edge)::before,
