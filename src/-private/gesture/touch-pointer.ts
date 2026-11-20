@@ -55,7 +55,7 @@ export class TouchPointer {
     this.#touchEvent('touchstart', true);
   }
 
-  /** Returns whether the `touchmove` was cancelled (the browser won't scroll). */
+  /** Whether the `touchmove` was cancelled, so the browser won't scroll. */
   move(dx: number, dy: number): boolean {
     this.x += dx;
     this.y += dy;

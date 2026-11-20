@@ -24,7 +24,7 @@ export interface GrabberSignature {
     owner: GrabberOwner;
     handle: ModifierLike<{ Element: HTMLElement }>;
     activeSnapPoint: number;
-    /** Indices per open resolved snap point, ascending; empty until measured. */
+    /** Indices per open snap point, ascending; empty until measured. */
     openSnapPoints: readonly (readonly number[])[];
   };
 }
@@ -82,6 +82,7 @@ export default class Grabber extends Component<GrabberSignature> {
     return [];
   }
 
+  /** Else 'Expanded', 'Partly expanded', 'Collapsed' or 'Closed'. */
   stateText(index: number): string {
     const custom = this.args.snapPointLabels?.[index];
     if (custom !== undefined) return custom;

@@ -193,10 +193,12 @@ export class KeyboardFill {
   strip(): Strip | undefined {
     const { viewport, root } = this.#options;
     if (!viewport || !this.#listening) return undefined;
+    // A pinch zoom also moves the visual viewport.
     if ((viewport.scale ?? 1) > 1.01) return undefined;
     const rect = root.getBoundingClientRect();
     if (viewport.height >= rect.height - MIN_STRIP) return undefined;
     const style = getComputedStyle(root);
+    // An embedded root is in the page; a page scroll can put it above.
     if (style.position !== 'fixed') return undefined;
     // Without the root's own `top`, its client top is the screen's top.
     const height = (parseFloat(style.top) || 0) - rect.top;

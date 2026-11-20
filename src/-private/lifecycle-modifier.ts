@@ -17,8 +17,8 @@ interface Arguments {
 }
 
 function consume(args: Arguments): LifecycleHooks {
-  // Read every positional argument, so a change to any of them (and only to
-  // them) triggers `updateModifier`.
+  // Read every positional argument, so a change to any of them triggers
+  // `updateModifier`. Tracked state that the hooks read triggers it too.
   const [hooks, ...deps] = args.positional;
   void deps;
   return hooks as LifecycleHooks;

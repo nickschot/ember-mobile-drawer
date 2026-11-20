@@ -6,8 +6,9 @@
  * Schot), which adapts https://github.com/willmcpo/body-scroll-lock (MIT
  * License, Copyright (c) 2018 Will Po).
  *
- * - Everywhere: `overflow: hidden` on `<html>`, and the body is padded by the
- *   width of a classic scrollbar so the page doesn't shift.
+ * - Everywhere: `overflow: hidden` on `<html>`, whose value applies to the
+ *   viewport (also when the app sets `overflow` on `<html>`), and the body is
+ *   padded by the width of a classic scrollbar so the page doesn't shift.
  * - iOS ignores `overflow: hidden` for touch scrolling: `<body>` is fixed at
  *   its scroll position, and touchmoves outside the allowed elements are
  *   cancelled so the viewport doesn't rubber-band.
@@ -173,7 +174,8 @@ const onTouchMoveOverflow = (event: TouchEvent): void => {
  * tall page of the overflow lock, iOS also scrolls up to show a focused field,
  * and the page and the drawer move apart. Fixing `<body>` only on focus does
  * not work: during the touch iOS drops the tap, and in `focusin` it flashes
- * the page background.
+ * the page background. Cancelling the tap and focusing with `preventScroll`
+ * leaves a dark overlay on the field and breaks the caret placement.
  */
 function lock(options: LockOptions): Saved {
   const html = document.documentElement;

@@ -791,7 +791,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * set it.
    */
   #openedByFocus = false;
-  /** Until the drawer opens, or the next task if a controlled parent says no. */
+  /** Until the drawer opens, or the next task if the parent says no. */
   #focusOpenPending = false;
   /** Where focus came from into the tray, for a drawer opened by focus. */
   #enteredFrom?: HTMLElement | SVGElement;
@@ -895,6 +895,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     if (!this.isControlled) {
+      // Re-renders the lifecycle modifier, whose `update` animates to it.
       this.#uncontrolledSnapPoint = index;
       this.uncontrolledVersion++;
     }
@@ -1059,6 +1060,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#keyboardFill.sync();
 
       if (typeof ResizeObserver !== 'undefined') {
+        // Not the tray: the component sizes it, so the observer would fire
+        // on its own writes. A tray-only padding change waits for the next.
         this.#resizeObserver = new ResizeObserver(() => this.#onResize());
         this.#resizeObserver.observe(root);
         this.#resizeObserver.observe(this.#content);
@@ -1261,6 +1264,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
    * Below the highest snap point a vertical drawer's content goes back to its
    * scroll start (the end of the range for a top drawer), where it is locked.
    * Opening from closed to the highest snap point starts at `scrollTop` 0.
+   * Not for side drawers: their tray isn't sized by the snap point along its
+   * scroll axis.
    *
    * The reset never jumps while the tray shows: towards closed it waits until
    * the tray is closed; when the tray has at least as far to go as the
@@ -2078,8 +2083,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   }
 
   /**
-   * The parent of the outermost drawer around this one: a transformed tray
-   * is the containing block of the fixed drawers in it, so it would clip.
+   * The root's parent, or, inside another drawer's tray (also through its
+   * `Nested`), the outermost such drawer's parent: a transformed tray is the
+   * containing block of the fixed drawers in it, so it would clip.
    */
   #nestedDestination(): Element | undefined {
     let root = this.#root!;
@@ -3246,6 +3252,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return { overflowX, overflowY, direction };
   }
 
+  /** `instant`, as `#writeScroll`. */
   #writeContentScroll(drag: Drag, scrolled: number): void {
     const scroll = drag.scroll;
     if (!scroll || scrolled === drag.written) return;
@@ -3300,7 +3307,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     return momentum !== undefined;
   }
 
-  /** As in a native scroll view, a tap that stops the momentum doesn't click. */
+  /** As in a native scroll view, a tap that stops momentum doesn't click. */
   #swallowClick(): void {
     this.#endSwallowClick();
     const tray = this.#tray;
