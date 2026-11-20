@@ -1,6 +1,14 @@
 import type { FrameClock } from './spring/spring.ts';
 import type { ViewportLike as KeyboardViewport } from './keyboard-fill.ts';
 
+/** The part of `CloseWatcher` (Chromium) the drawer uses. */
+export interface CloseWatcherLike {
+  onclose: ((event: Event) => void) | null;
+  destroy(): void;
+}
+
+export type CloseWatcherConstructor = new () => CloseWatcherLike;
+
 /**
  * Overrides for the environment the drawer runs in; unset fields use the
  * browser. Read when a drawer is inserted, so set it before rendering.
@@ -19,4 +27,9 @@ export const drawerEnvironment: {
   dragTime?: () => number;
   /** For `KeyboardFill`: no desktop browser has an on-screen keyboard. */
   visualViewport?: () => KeyboardViewport | null;
+  /**
+   * `CloseWatcher` for the back gesture, `null` for a browser without it.
+   * Read when a drawer becomes modal.
+   */
+  CloseWatcher?: CloseWatcherConstructor | null;
 } = {};

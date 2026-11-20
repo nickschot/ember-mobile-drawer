@@ -23,7 +23,11 @@ import {
   dragSource,
   type PanData,
 } from '../-private/gesture/drag-source.ts';
-import { drawerEnvironment } from '../-private/environment.ts';
+import {
+  drawerEnvironment,
+  type CloseWatcherConstructor,
+  type CloseWatcherLike,
+} from '../-private/environment.ts';
 import {
   lifecycle,
   type LifecycleHooks,
@@ -159,6 +163,49 @@ const CLICK_MATCH = 2;
  * and Tab.
  */
 const modalStack: MobileDrawer[] = [];
+
+/**
+ * One `CloseWatcher` while a modal drawer is open, so the Android back
+ * gesture closes the front one. Only where the browser has it (Chromium).
+ */
+let closeWatcher: CloseWatcherLike | undefined;
+
+function closeWatcherConstructor(): CloseWatcherConstructor | undefined {
+  if ('CloseWatcher' in drawerEnvironment) {
+    return drawerEnvironment.CloseWatcher ?? undefined;
+  }
+  return 'CloseWatcher' in window
+    ? (window as unknown as { CloseWatcher: CloseWatcherConstructor })
+        .CloseWatcher
+    : undefined;
+}
+
+/**
+ * Creates the watcher when a modal drawer is open, destroys it when none is.
+ * Only `onclose`: `oncancel` needs a user activation.
+ */
+function syncCloseWatcher(): void {
+  if (modalStack.length === 0) {
+    closeWatcher?.destroy();
+    closeWatcher = undefined;
+    return;
+  }
+  if (closeWatcher) return;
+  const Watcher = closeWatcherConstructor();
+  if (!Watcher) return;
+  const watcher = new Watcher();
+  closeWatcher = watcher;
+  watcher.onclose = () => {
+    // The browser destroyed it.
+    if (closeWatcher === watcher) closeWatcher = undefined;
+    // The front one, which is not always the last one that became modal.
+    modalStack[modalStack.length - 1]?.close();
+    // A new one for the next back gesture: modal drawers stay open, or a
+    // controlled drawer didn't take the close yet. Destroyed when the last
+    // one stops being modal.
+    syncCloseWatcher();
+  };
+}
 
 const mountedDrawers = new Set<MobileDrawer>();
 
@@ -1994,11 +2041,13 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     );
     modalStack.splice(nested === -1 ? modalStack.length : nested, 0, this);
     MobileDrawer.#syncNested();
+    syncCloseWatcher();
     document.addEventListener('keydown', this.#onDocumentKeyDown);
     this.#releaseModal = () => {
       document.removeEventListener('keydown', this.#onDocumentKeyDown);
       modalStack.splice(modalStack.indexOf(this), 1);
       MobileDrawer.#syncNested();
+      syncCloseWatcher();
       releaseScroll();
       // Not moving: `#render` won't run again to end it.
       if (!this.#spring?.isAnimating && !this.#drag) this.#endStatusBar();
@@ -2276,7 +2325,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * `defaultPrevented` is left alone, so only the innermost nested drawer
    * closes. Not during a drag: the release decides where it goes, so the
-   * parent never sees a close and a reopen.
+   * parent never sees a close and a reopen. Still cancelled then, or the
+   * `CloseWatcher` would close the drawer.
    */
   #onKeyDown = (event: KeyboardEvent): void => {
     this.#stopMomentum();
@@ -2285,13 +2335,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       event.defaultPrevented ||
       event.isComposing ||
       !this.#open ||
-      this.#drag ||
       this.#destroyed
     ) {
       return;
     }
     event.preventDefault();
-    this.close();
+    if (!this.#drag) this.close();
   };
 
   /** Escape with focus outside (e.g. on `<body>`), and the Tab wrap. */
@@ -2304,9 +2353,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     if (event.key === 'Escape') {
-      if (event.isComposing || !this.#open || this.#drag) return;
+      if (event.isComposing || !this.#open) return;
       event.preventDefault();
-      this.close();
+      if (!this.#drag) this.close();
     } else if (
       event.key === 'Tab' &&
       !event.altKey &&

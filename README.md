@@ -346,6 +346,7 @@ By default the drawer is modal (`@modal={{true}}`), like a dialog. While it is o
 - the rest of the page is [`inert`](https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert): the siblings of the drawer and of each of its ancestors, up to `<body>` (see the limits below);
 - the page doesn't scroll. On iOS the body is fixed in place at its scroll position, which is restored on close;
 - Escape closes it, like `close()` (so through `@onSnapPointChange` when `@activeSnapPoint` is set). Not while the drawer is being dragged: the release decides where it goes.
+- the Android back gesture (and the TalkBack back action) closes it in the same way, through a [`CloseWatcher`](https://developer.mozilla.org/en-US/docs/Web/API/CloseWatcher). This works only in Chromium browsers; in other browsers back goes to the previous page as before. With several modal drawers open, back closes the top one.
 
 When it closes, focus returns to the element that had it when the drawer opened. If that element is no longer on the page (for example, the drawer deleted the list item it was opened from), focus goes to the first focusable element in the nearest of its former ancestors that is still on the page, but not all the way up to `<body>`; if there is none, focus stays where the browser puts it. Move focus yourself after the close if you want it somewhere else.
 
