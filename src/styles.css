@@ -17,8 +17,9 @@
  *   - rules for themes: "Writing a theme".
  *
  * Rules for this file:
- *   - Every selector is in :where() (specificity 0,0,0) and in the
- *     `ember-mobile-drawer` layer, so app CSS always wins.
+ *   - Every selector is in :where() (specificity 0,0,0), except three
+ *     header-mode tray rules (0,1,0, see inline), and the whole file is in
+ *     the `ember-mobile-drawer` layer, so app CSS always wins.
  *   - Defaults are var() fallbacks, not declarations on the root, so a value
  *     on any ancestor (also :root) applies.
  *   - No transitions: the component moves the drawer with JS springs and

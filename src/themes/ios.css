@@ -14,8 +14,9 @@
  *   - Everything is in the `ember-mobile-drawer` layer with :where().
  *     Rules for real properties that the base styles also set (the tray's
  *     `background` and `box-shadow`, the backdrop's `opacity` and `filter`,
- *     the tints' `background-color`, the content and header padding and
- *     background) have specificity 0,1,0, so they win in either load order.
+ *     the tints' `background-color`, the content and header padding, the
+ *     header background, the shadow layer's `display`) have specificity
+ *     0,1,0, so they win in either load order.
  *   - Colours use light-dark() only inside @supports: a custom property
  *     with an unsupported light-dark() would not fall back.
  *   - Values are approximations, measured in the iOS 27.2 simulator where
