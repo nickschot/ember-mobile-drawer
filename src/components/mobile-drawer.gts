@@ -102,6 +102,15 @@ const POINTER_TYPES = Object.freeze(['touch', 'pen'] as const);
 /** A release this fast (px/s) moves at least to the next snap point. */
 const FLING_VELOCITY = 400;
 
+/**
+ * How far (px) past closed the spring aims when the drawer closes to offset
+ * 0. The run ends when the tray reaches 0, so the tray leaves the screen
+ * while it still moves (about 0.6 px/ms with `springPresets.ios`), as a
+ * native iOS sheet does, instead of creeping to the edge. A fixed distance,
+ * not a fraction of the move, so a short close does not creep either.
+ */
+const CLOSE_OVERSHOOT = 60;
+
 /** `1` when opening moves towards larger client coordinates, else `-1`. */
 const OPENING_DIRECTION: Record<Placement, 1 | -1> = {
   bottom: -1,
@@ -939,7 +948,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         ...this.#springConfig(),
         clock,
         prefersReducedMotion: drawerEnvironment.prefersReducedMotion,
-        onUpdate: ({ value }) => this.#render(value),
+        onUpdate: ({ value }) => this.#onSpringUpdate(value),
       });
       this.#placement = this.placement;
       this.#listeners = new AbortController();
@@ -1178,7 +1187,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
 
     const target = this.#offsetOf(index);
     this.#queueState({ progress: this.#progressOf(target) });
-    spring.retarget(target);
+    spring.retarget(animate ? this.#aimFor(target) : target);
     this.#markExpanded(target);
 
     if (!animate) {
@@ -1414,7 +1423,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!this.#focusHoldsReset()) this.#planScrollReset(target);
 
     if (spring.isAnimating) {
-      spring.retarget(target);
+      spring.retarget(this.#aimFor(target));
       this.#render(spring.value);
     } else {
       // Before the next paint, so the old position never shows at the new
@@ -1423,6 +1432,32 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       spring.set(target, 0);
       this.#render(target);
     }
+  }
+
+  /**
+   * Where the spring aims for `target`: past closed (`CLOSE_OVERSHOOT`) for
+   * a close to offset 0 while the tray is open by any amount, so the tray
+   * doesn't creep to the edge. Also in the last pixel of such a run, where a
+   * retarget to 0 (a resize, a changed argument) would give a long invisible
+   * tail. `#onSpringUpdate` ends that run at 0.
+   */
+  #aimFor(target: number): number {
+    return target <= 0 && this.#spring!.value > 0 ? -CLOSE_OVERSHOOT : target;
+  }
+
+  /**
+   * Ends a run aimed past closed when it reaches closed, at exactly 0 and at
+   * rest. Also after reduced motion jumped to that target.
+   */
+  #onSpringUpdate(value: number): void {
+    const spring = this.#spring!;
+    if (spring.target < 0 && value <= 0) {
+      spring.stop();
+      spring.retarget(0);
+      spring.set(0, 0);
+      value = 0;
+    }
+    this.#render(value);
   }
 
   /** Runs every frame: only inline styles, never tracked state. */
