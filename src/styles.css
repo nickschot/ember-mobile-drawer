@@ -455,6 +455,94 @@
   }
 
   /*
+   * Forced colors mode (#167) removes the tray's box-shadow and gives the
+   * tray the page's colour, so the edge is an outline. It is inside the
+   * box (offset -1px): the sheet's overflow doesn't cut it, and the clip of
+   * a bottom sheet without an inset cuts nothing. An outline doesn't change
+   * the layout or the measured sizes. While a bottom sheet floats (an
+   * inset), its clips cut the tray's sides, so only the top edge shows;
+   * a theme can draw the sheet's shape on the shadow layer (the iOS theme
+   * does). Forced colors keeps system colours, so CanvasText stays.
+   * - Not while the tray has keyboard focus: the browser's focus ring stays.
+   * - A browser paints an element's outline under its positioned children,
+   *   so the header (z-index 1, with a background) would cover the edge on
+   *   the leading side. The header's `::before` draws the edge there again:
+   *   a frame around the header, longer than it by the radius and 4px on
+   *   the side away from the leading edge, and clipped to the header. So
+   *   only the leading edge, its rounded corners and the sides show. It is
+   *   absolutely positioned, so nothing moves. App content with a background
+   *   on the leading edge (e.g. a sticky header) can still cover the edge:
+   *   give it a CanvasText border there.
+   */
+  @media (forced-colors: active) {
+    :where(.mobile-drawer__tray:not(:focus-visible)) {
+      outline: 1px solid CanvasText;
+      outline-offset: -1px;
+    }
+
+    :where(
+      .mobile-drawer[data-header]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      --_mobile-drawer-header-edge-room: calc(
+        var(--mobile-drawer-radius, 0px) + 4px
+      );
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      box-sizing: border-box;
+      height: calc(100% + var(--_mobile-drawer-header-edge-room));
+      border: 1px solid CanvasText;
+      border-radius: var(--mobile-drawer-radius, 0)
+        var(--mobile-drawer-radius, 0) 0 0;
+      clip-path: inset(0 0 var(--_mobile-drawer-header-edge-room) 0);
+      pointer-events: none;
+    }
+
+    :where(
+      .mobile-drawer[data-header][data-placement="top"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      inset: auto 0 0;
+      border-radius: 0 0 var(--mobile-drawer-radius, 0)
+        var(--mobile-drawer-radius, 0);
+      clip-path: inset(var(--_mobile-drawer-header-edge-room) 0 0 0);
+    }
+
+    :where(
+      .mobile-drawer[data-header][data-placement="left"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      inset: 0 0 0 auto;
+      width: calc(100% + var(--_mobile-drawer-header-edge-room));
+      height: auto;
+      border-radius: 0 var(--mobile-drawer-radius, 0)
+        var(--mobile-drawer-radius, 0) 0;
+      clip-path: inset(0 0 0 var(--_mobile-drawer-header-edge-room));
+    }
+
+    :where(
+      .mobile-drawer[data-header][data-placement="right"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      inset: 0 auto 0 0;
+      width: calc(100% + var(--_mobile-drawer-header-edge-room));
+      height: auto;
+      border-radius: var(--mobile-drawer-radius, 0) 0 0
+        var(--mobile-drawer-radius, 0);
+      clip-path: inset(0 var(--_mobile-drawer-header-edge-room) 0 0);
+    }
+  }
+
+  /*
    * iOS only (see "iOS Safari 26 bars" in the README): Safari 26 fills the
    * status bar and the toolbar with a colour that it samples from the fixed
    * element at each edge (WebKit's `LocalFrameView::fixedContainerEdges`).

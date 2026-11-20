@@ -13,7 +13,9 @@
  * Rules for this file (see also "Writing a theme" in the README):
  *   - Everything is in the `ember-mobile-drawer` layer with :where().
  *     Rules for real properties that the base styles also set (the tray's
- *     `background` and `box-shadow`, the backdrop's `opacity` and `filter`,
+ *     `background`, `box-shadow` and forced colors `outline`, the bottom
+ *     header's forced colors `::before`, the backdrop's `opacity` and
+ *     `filter`,
  *     the tints' `background-color`, the content and header padding, the
  *     header background, the shadow layer's `display`) have specificity
  *     0,1,0, so they win in either load order.
@@ -337,8 +339,11 @@
     }
   }
 
-  /* Reduce Transparency / Increase Contrast: back to the solid sheet. */
-  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  /* Reduce Transparency / Increase Contrast / forced colors: back to the
+     solid sheet. Forced colors keeps the alpha of the sheet colour. */
+  @media (prefers-reduced-transparency: reduce),
+    (prefers-contrast: more),
+    (forced-colors: active) {
     :where(.mobile-drawer-theme-ios) {
       --mobile-drawer-background: rgb(255 255 255);
     }
@@ -355,6 +360,91 @@
     ) {
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
+    }
+  }
+
+  /*
+   * Increase Contrast (#168): a stronger grabber bar and sheet edge. The
+   * sheet is solid here (see above). The bar is 60% of the text colour, not
+   * 25% (as native iOS): 5.7:1 against the white sheet and 6.8:1 against
+   * the dark sheet (WCAG 1.4.11 asks for 3:1). The rim and the edge line
+   * are 1px, not 0.5px, with a higher alpha. The rim of the light sheet is
+   * transparent: a light rim doesn't show on the solid white sheet. Not with
+   * reduced transparency alone.
+   */
+  @media (prefers-contrast: more) {
+    :where(.mobile-drawer-theme-ios) {
+      --_mobile-drawer-ios-rim-width: 1px;
+      --_mobile-drawer-ios-rim: transparent;
+      --_mobile-drawer-ios-tray-shadow:
+        inset 0 0 0 1px var(--_mobile-drawer-ios-rim),
+        0 0 0 1px rgb(0 0 0 / 0.45), 0 0 32px rgb(0 0 0 / 0.12);
+      --mobile-drawer-ios-shadow:
+        0 0 0 1px rgb(0 0 0 / 0.45), 0 7px 32px rgb(0 0 0 / 0.12);
+    }
+
+    @supports (color: light-dark(#000, #fff)) {
+      :where(.mobile-drawer-theme-ios) {
+        --_mobile-drawer-ios-rim: light-dark(
+          transparent,
+          rgb(255 255 255 / 0.5)
+        );
+        --_mobile-drawer-ios-tray-shadow:
+          inset 0 0 0 1px var(--_mobile-drawer-ios-rim),
+          0 0 0 1px light-dark(rgb(0 0 0 / 0.45), rgb(0 0 0 / 0.8)),
+          0 0 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.5));
+        --mobile-drawer-ios-shadow:
+          0 0 0 1px light-dark(rgb(0 0 0 / 0.45), rgb(0 0 0 / 0.8)),
+          0 7px 32px light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.18));
+      }
+    }
+
+    :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::before {
+      background: rgb(128 128 128);
+      background: color-mix(in srgb, currentcolor 60%, transparent);
+    }
+  }
+
+  /*
+   * Forced colors mode (#167): it removes box-shadows and forces the bar's
+   * colour to the sheet's. A bottom sheet's edge is an outline on the
+   * shadow layer, which has the sheet's shape (see "The outer shadow"
+   * below): outside the sheet, so the sheet doesn't cover it and its clips
+   * don't cut it. Not on the tray, whose sides the clips cut while the sheet
+   * floats. Specificity 0,1,0 for the tray, to win over the base outline in
+   * either order; not while the tray has keyboard focus, so the browser's
+   * focus ring stays. The bar is CanvasText: forced colors keeps system colours.
+   */
+  @media (forced-colors: active) {
+    :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-placement="bottom"]
+          > .mobile-drawer__sheet
+      )
+      > .mobile-drawer__tray:where(:not(:focus-visible)) {
+      outline: none;
+    }
+
+    /* Nor the base styles' edge on the header: the shadow layer draws it,
+       and the header's frame doesn't follow the inset. Specificity 0,1,0,
+       as the tray. */
+    :where(
+        .mobile-drawer-theme-ios
+          .mobile-drawer[data-placement="bottom"]
+          > .mobile-drawer__sheet
+          > .mobile-drawer__tray
+      )
+      > .mobile-drawer__header::before {
+      content: none;
+    }
+
+    :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-edge)::before,
+    :where(.mobile-drawer-theme-ios .mobile-drawer__shadow-body) {
+      outline: 1px solid CanvasText;
+    }
+
+    :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::before {
+      background: CanvasText;
     }
   }
 
@@ -534,7 +624,8 @@
       > .mobile-drawer__sheet
       > .mobile-drawer__tray
   ) {
-    --_mobile-drawer-ios-tray-default: inset 0 0 0 0.5px
+    --_mobile-drawer-ios-tray-default: inset 0 0 0
+      var(--_mobile-drawer-ios-rim-width, 0.5px)
       var(--_mobile-drawer-ios-rim, transparent);
   }
 
@@ -708,7 +799,8 @@
         > .mobile-drawer__content
         > .mobile-drawer-theme-ios__grabber
     )::after {
-      box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
+      box-shadow: inset 0 0 0 var(--_mobile-drawer-ios-rim-width, 0.5px)
+        var(--_mobile-drawer-ios-rim, transparent);
     }
 
     :where(
@@ -807,7 +899,8 @@
         > .mobile-drawer__tray
         > .mobile-drawer__header
     )::after {
-      box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
+      box-shadow: inset 0 0 0 var(--_mobile-drawer-ios-rim-width, 0.5px)
+        var(--_mobile-drawer-ios-rim, transparent);
       clip-path: inset(0 0 var(--mobile-drawer-radius, 0px) 0);
     }
 

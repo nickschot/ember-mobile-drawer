@@ -1064,4 +1064,272 @@ module('Integration | styles.css', function (hooks) {
       }
     });
   }
+
+  /**
+   * The base styles' `forced-colors: active` rule, and the layer it is in.
+   * Chrome in the test runner doesn't turn on forced colors, so the tests
+   * apply its rules unconditionally (the screenshots of #167 use Chrome's
+   * forced colors emulation).
+   */
+  function forcedColorsRule(): { rule: CSSMediaRule; layer?: string } {
+    const visit = (
+      rules: CSSRuleList,
+      layer: string | undefined,
+    ): { rule: CSSMediaRule; layer?: string } | undefined => {
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSMediaRule &&
+          rule.conditionText === '(forced-colors: active)' &&
+          !rule.cssText.includes('mobile-drawer-theme-ios')
+        ) {
+          return { rule, layer };
+        }
+        if (rule instanceof CSSGroupingRule) {
+          const found = visit(
+            rule.cssRules,
+            rule instanceof CSSLayerBlockRule ? rule.name : layer,
+          );
+          if (found) return found;
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      const found = visit(sheet.cssRules, undefined);
+      if (found) return found;
+    }
+    throw new Error('No forced-colors @media rule in the base styles');
+  }
+
+  test('forced colors: the rule is in the layer with zero specificity', async function (assert) {
+    await renderDrawer();
+
+    const { rule, layer } = forcedColorsRule();
+    assert.strictEqual(layer, 'ember-mobile-drawer');
+    for (const inner of Array.from(rule.cssRules)) {
+      assert.true(
+        inner instanceof CSSStyleRule &&
+          inner.selectorText.startsWith(':where('),
+        `${(inner as CSSStyleRule).selectorText} is in :where()`,
+      );
+    }
+
+    const tray = getComputedStyle(el('[data-test-tray]'));
+    assert.strictEqual(tray.outlineStyle, 'none', 'no outline without it');
+  });
+
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: forced colors draws the tray edge with an outline inside the box`, async function (assert) {
+      await renderDrawer(placement);
+      const tray = el('[data-test-tray]');
+      const content = el('[data-test-content-wrapper]');
+      tray.style.transform = 'none';
+      const boxes = () => ({
+        tray: tray.getBoundingClientRect().toJSON() as unknown,
+        content: content.getBoundingClientRect().toJSON() as unknown,
+        scrollHeight: tray.scrollHeight,
+      });
+      const before = boxes();
+
+      const inner = Array.from(forcedColorsRule().rule.cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+      try {
+        const computed = getComputedStyle(tray);
+        assert.strictEqual(computed.outlineStyle, 'solid');
+        assert.strictEqual(computed.outlineWidth, '1px');
+        // CanvasText outside forced colors: black in the light scheme.
+        assert.strictEqual(computed.outlineColor, 'rgb(0, 0, 0)');
+        assert.strictEqual(
+          computed.outlineOffset,
+          '-1px',
+          'inside the box, so the sheet and the clip do not cut it',
+        );
+        assert.deepEqual(
+          boxes(),
+          before,
+          'the layout and the measured sizes do not change',
+        );
+      } finally {
+        style.remove();
+      }
+    });
+
+    /*
+     * A browser paints an element's outline before its positioned children
+     * with a z-index of 0 or more (CSS 2 appendix E, and Chrome), so the
+     * header (z-index 1, with a background) covers the tray's edge on the
+     * leading side. The header's ::before draws the edge there again. The
+     * header and the content keep their stacking, so a fixed element in the
+     * content (a nested drawer, an app overlay) stays above the header.
+     */
+    test(`${placement}: forced colors draws the leading edge on the header, and keeps the stacking`, async function (assert) {
+      // The component renders the header on the leading side.
+      const headerFirst = placement === 'bottom' || placement === 'right';
+      await render(
+        <template>
+          {{! template-lint-disable no-inline-styles }}
+          <div
+            class="mobile-drawer"
+            data-placement={{placement}}
+            data-header
+            style="--mobile-drawer-radius: 10px"
+            data-test-root
+          >
+            <div class="mobile-drawer__sheet">
+              <div class="mobile-drawer__tray" data-test-tray>
+                {{#if headerFirst}}
+                  <div
+                    class="mobile-drawer__header"
+                    style="background: Canvas"
+                    data-test-header
+                  >Header</div>
+                {{/if}}
+                <div class="mobile-drawer__content" data-test-content-wrapper>
+                  <div style="width: 120px; height: 80px">Content</div>
+                  <div
+                    style="position: absolute; top: 3px; left: 5px; width: 7px; height: 7px"
+                    data-test-absolute
+                  ></div>
+                  <div
+                    style="position: fixed; inset: 0; z-index: 9999"
+                    data-test-overlay
+                  ></div>
+                </div>
+                {{#unless headerFirst}}
+                  <div
+                    class="mobile-drawer__header"
+                    style="background: Canvas"
+                    data-test-header
+                  >Header</div>
+                {{/unless}}
+              </div>
+            </div>
+          </div>
+        </template>,
+      );
+      const tray = el('[data-test-tray]');
+      const header = el('[data-test-header]');
+      const content = el('[data-test-content-wrapper]');
+      const absolute = el('[data-test-absolute]');
+      const overlay = el('[data-test-overlay]');
+      tray.style.transform = 'none';
+      const boxes = () =>
+        [tray, header, content, absolute, overlay].map(
+          (element) => element.getBoundingClientRect().toJSON() as unknown,
+        );
+      const stack = () => {
+        const r = header.getBoundingClientRect();
+        return document
+          .elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+          .filter((element) =>
+            [overlay, header].includes(element as HTMLElement),
+          );
+      };
+      const before = {
+        boxes: boxes(),
+        stack: stack(),
+        offsetParent: absolute.offsetParent,
+      };
+      assert.deepEqual(
+        before.stack,
+        [overlay, header],
+        'without forced colors the fixed overlay is above the header',
+      );
+      assert.strictEqual(before.offsetParent, tray);
+      assert.strictEqual(
+        getComputedStyle(header, '::before').content,
+        'none',
+        'no header edge without forced colors',
+      );
+
+      const inner = Array.from(forcedColorsRule().rule.cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+      try {
+        assert.strictEqual(getComputedStyle(tray).outlineStyle, 'solid');
+        assert.strictEqual(getComputedStyle(header).zIndex, '1');
+        assert.strictEqual(getComputedStyle(content).position, 'static');
+        assert.deepEqual(
+          stack(),
+          [overlay, header],
+          'the fixed overlay stays above the header',
+        );
+        assert.strictEqual(
+          absolute.offsetParent,
+          tray,
+          'the same containing block for absolutely positioned content',
+        );
+        assert.deepEqual(boxes(), before.boxes, 'nothing moves');
+
+        // The edge on the header: a CanvasText frame, flush with the
+        // header's leading edge, longer than the header by the radius and
+        // 4px on the other side (so the far border is well past the clip,
+        // also at a fractional size), and clipped to the header.
+        const edge = getComputedStyle(header, '::before');
+        assert.strictEqual(edge.position, 'absolute');
+        assert.strictEqual(edge.pointerEvents, 'none');
+        for (const side of SIDES) {
+          const name = side[0]!.toUpperCase() + side.slice(1);
+          const width = edge.getPropertyValue(`border-${side}-width`);
+          const color = edge.getPropertyValue(`border-${side}-color`);
+          assert.strictEqual(width, '1px', `${name} border`);
+          assert.strictEqual(color, 'rgb(0, 0, 0)', `${name}: CanvasText`);
+        }
+        const leading = OPPOSITE[placement];
+        assert.strictEqual(
+          edge.getPropertyValue(leading),
+          '0px',
+          `flush with the header's ${leading} edge`,
+        );
+        // Layout px: the test container may be scaled.
+        const size = getComputedStyle(header);
+        const vertical = placement === 'bottom' || placement === 'top';
+        assert.true(
+          Math.abs(
+            Number.parseFloat(vertical ? edge.height : edge.width) -
+              Number.parseFloat(vertical ? size.height : size.width) -
+              14,
+          ) < 0.01,
+          'longer by the radius and 4px',
+        );
+        const away = OPPOSITE[leading];
+        const clip = boxSides(/^inset\((.*)\)$/.exec(edge.clipPath)![1]!);
+        assert.strictEqual(clip[away], '14px', 'clipped to the header');
+        for (const side of SIDES.filter((s) => s !== away)) {
+          assert.strictEqual(clip[side], '0px', `not clipped on the ${side}`);
+        }
+      } finally {
+        style.remove();
+      }
+    });
+  }
+
+  test('forced colors keeps the browser focus ring on a focused tray', async function (assert) {
+    await renderDrawer();
+    const tray = el('[data-test-tray]');
+    tray.tabIndex = -1;
+    const inner = Array.from(forcedColorsRule().rule.cssRules)
+      .map((rule) => rule.cssText)
+      .join('\n');
+    const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+    try {
+      assert.strictEqual(getComputedStyle(tray).outlineStyle, 'solid');
+      tray.focus();
+      assert.true(tray.matches(':focus-visible'), 'focus-visible');
+      const computed = getComputedStyle(tray);
+      assert.strictEqual(
+        computed.outlineStyle,
+        'auto',
+        "the browser's focus ring, not the edge",
+      );
+      assert.strictEqual(computed.outlineOffset, '0px');
+    } finally {
+      style.remove();
+    }
+  });
 });
