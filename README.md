@@ -355,12 +355,67 @@ The drawer only removes the `inert` attributes it added. An element that was alr
 
 The root gets `role="dialog"`, and `aria-modal="true"` while open. Give it a name with `aria-labelledby` (pointing at a heading in the drawer) or `aria-label`; a modal drawer without one logs a warning in development. A closed drawer is hidden (`visibility: hidden`), also from assistive technology.
 
+Always show a close button in a modal drawer. Escape needs a keyboard, a tap on the backdrop needs a pointer (the backdrop is not focusable), and the grabber never closes the drawer, so a touch screen reader user has no other way out. The Android back gesture doesn't close the drawer today. Also give the button that opens the drawer `aria-expanded` (`"true"` while the drawer is open) and `aria-controls` (the drawer's `id`):
+
+```gts
+import Component from '@glimmer/component';
+import { tracked } from '@glimmer/tracking';
+import { on } from '@ember/modifier';
+import { fn } from '@ember/helper';
+import { MobileDrawer, type SnapPoint } from 'ember-mobile-drawer';
+
+export default class FiltersSheet extends Component {
+  snapPoints: SnapPoint[] = [0, '100%'];
+  @tracked active = 0;
+
+  get isOpen() {
+    return this.active > 0;
+  }
+
+  setActive = (index: number) => (this.active = index);
+
+  <template>
+    <button
+      type="button"
+      aria-expanded={{if this.isOpen "true" "false"}}
+      aria-controls="filters-sheet"
+      {{on "click" (fn this.setActive 1)}}
+    >Filters</button>
+
+    <MobileDrawer
+      @snapPoints={{this.snapPoints}}
+      @activeSnapPoint={{this.active}}
+      @onSnapPointChange={{this.setActive}}
+      id="filters-sheet"
+      aria-labelledby="filters-title"
+      as |drawer|
+    >
+      <h2 id="filters-title">Filters</h2>
+      <button type="button" {{on "click" drawer.close}}>Close</button>
+      ...
+    </MobileDrawer>
+  </template>
+}
+```
+
+For an uncontrolled drawer, set the open state from `@onOpen` and `@onClose`.
+
 With `@modal={{false}}` the drawer doesn't move focus, trap it, make the page inert or lock scrolling, and has no role (add one yourself if it fits, for example a `<nav>` inside a side drawer). Escape closes it while focus is inside it, and focus then returns to where it was when the drawer opened. Use it for drawers that sit next to the page, such as a peek drawer:
 
 ```gts
 <MobileDrawer @modal={{false}} @snapPoints={{array 120 "100%"}}>
   …
 </MobileDrawer>
+```
+
+A non-modal drawer has no role, so an `aria-label` or `aria-labelledby` on it names nothing. Put the label on your own element with a role inside the drawer, for example `<nav aria-label="Main">`.
+
+A non-modal peek drawer covers the bottom of the page while the page stays usable, so a focused element on the page can be under the peek. Set `scroll-padding-bottom` on the page's scroll container to at least the peek's height plus the safe area, so the browser scrolls focused elements clear of it ([WCAG 2.4.11](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum.html)). For a peek of `120`px and a page that the document scrolls:
+
+```css
+html {
+  scroll-padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
 ```
 
 A modal drawer with a smallest snap point above `0` is only modal above its peek.
