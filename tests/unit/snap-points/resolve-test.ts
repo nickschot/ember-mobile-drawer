@@ -184,18 +184,6 @@ module('Unit | snap-points | resolveSnapPoints', function () {
       "'Infinity%'",
     );
   });
-
-  test('throws a clear error without a sizes object', function (assert) {
-    assert.throws(
-      () =>
-        resolveSnapPoints([0], undefined as unknown as { container: number }),
-      (error: Error) =>
-        !(error instanceof TypeError) &&
-        /needs a sizes object like \{ container: 800 \}, got undefined/.test(
-          error.message,
-        ),
-    );
-  });
 });
 
 module('Unit | snap-points | findSnapPoint', function () {

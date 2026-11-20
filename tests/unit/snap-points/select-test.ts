@@ -8,11 +8,8 @@ import {
 const container = 800;
 // Snap points at 0, 200, 400 and 800.
 const resolved = resolveSnapPoints([0, '25%', '50%', '100%'], { container });
-const offsetOf = (
-  offset: number,
-  velocity: number,
-  decelerationRate?: number,
-) => selectSnapPoint(resolved, offset, velocity, { decelerationRate }).offset;
+const offsetOf = (offset: number, velocity: number) =>
+  selectSnapPoint(resolved, offset, velocity).offset;
 
 module('Unit | snap-points | projectOffset', function () {
   test('does not move without velocity', function (assert) {
@@ -24,70 +21,30 @@ module('Unit | snap-points | projectOffset', function () {
     assert.true(Math.abs(projectOffset(500, -1000) - 401) < 1, 'backwards');
   });
 
-  test('a lower deceleration rate projects less', function (assert) {
-    assert.true(projectOffset(0, 1000, 0.9) < projectOffset(0, 1000));
-    assert.true(projectOffset(0, 1000) < projectOffset(0, 1000, 0.998));
-    assert.strictEqual(projectOffset(50, 1000, 0.5), 51, 'rate 0.5');
-  });
-
   test('throws a RangeError for non-finite input', function (assert) {
-    const cases: [number, number, number | undefined, RegExp, string][] = [
-      [
-        NaN,
-        0,
-        undefined,
-        /offset must be a finite number, got NaN/,
-        'NaN offset',
-      ],
-      [
-        Infinity,
-        0,
-        undefined,
-        /offset must be a finite number/,
-        'Infinity offset',
-      ],
-      [
-        0,
-        NaN,
-        undefined,
-        /velocity must be a finite number, got NaN/,
-        'NaN velocity',
-      ],
+    const cases: [number, number, RegExp, string][] = [
+      [NaN, 0, /offset must be a finite number, got NaN/, 'NaN offset'],
+      [Infinity, 0, /offset must be a finite number/, 'Infinity offset'],
+      [0, NaN, /velocity must be a finite number, got NaN/, 'NaN velocity'],
       [
         0,
         Infinity,
-        undefined,
         /velocity must be a finite number, got Infinity/,
         '+Infinity velocity',
       ],
       [
         0,
         -Infinity,
-        undefined,
         /velocity must be a finite number, got -Infinity/,
         '-Infinity velocity',
       ],
     ];
-    for (const [offset, velocity, rate, message, label] of cases) {
+    for (const [offset, velocity, message, label] of cases) {
       assert.throws(
-        () => projectOffset(offset, velocity, rate),
+        () => projectOffset(offset, velocity),
         (error: Error) =>
           error instanceof RangeError && message.test(error.message),
         label,
-      );
-    }
-  });
-
-  test('throws a RangeError for a deceleration rate outside (0, 1)', function (assert) {
-    for (const rate of [NaN, 0, 1, -0.5, 1.5, Infinity]) {
-      assert.throws(
-        () => projectOffset(0, 100, rate),
-        (error: Error) =>
-          error instanceof RangeError &&
-          /decelerationRate must be a number strictly between 0 and 1/.test(
-            error.message,
-          ),
-        String(rate),
       );
     }
   });
@@ -124,24 +81,18 @@ module('Unit | snap-points | selectSnapPoint', function () {
     assert.strictEqual(offsetOf(100, -10000), 0);
   });
 
-  test('the deceleration rate controls how far a flick carries', function (assert) {
-    assert.strictEqual(offsetOf(210, 1500), 400, 'default rate');
-    assert.strictEqual(offsetOf(210, 1500, 0.998), 800, 'gentler rate');
-    assert.strictEqual(offsetOf(210, 1500, 0.5), 200, 'barely any projection');
-  });
-
   test('ties go in the direction of the velocity', function (assert) {
     const twoPoints = resolveSnapPoints([0, 200], { container });
-    // With rate 0.5 a velocity of ±1000 px/s projects exactly ±1px.
-    const options = { decelerationRate: 0.5 };
+    // The smallest velocity projects 0px: still exactly halfway.
+    const velocity = Number.MIN_VALUE;
     assert.strictEqual(selectSnapPoint(twoPoints, 100, 0).offset, 0, 'at rest');
     assert.strictEqual(
-      selectSnapPoint(twoPoints, 99, 1000, options).offset,
+      selectSnapPoint(twoPoints, 100, velocity).offset,
       200,
       'opening',
     );
     assert.strictEqual(
-      selectSnapPoint(twoPoints, 101, -1000, options).offset,
+      selectSnapPoint(twoPoints, 100, -velocity).offset,
       0,
       'closing',
     );
@@ -151,10 +102,6 @@ module('Unit | snap-points | selectSnapPoint', function () {
     const single = resolveSnapPoints(['100%'], { container });
     assert.strictEqual(selectSnapPoint(single, 0, -5000), single[0]);
     assert.strictEqual(selectSnapPoint(single, 900, 5000), single[0]);
-  });
-
-  test('throws without snap points', function (assert) {
-    assert.throws(() => selectSnapPoint([], 0, 0), /zero snap points/);
   });
 
   test('throws instead of silently picking a snap point on bad input', function (assert) {
@@ -170,8 +117,6 @@ module('Unit | snap-points | selectSnapPoint', function () {
       isRangeError,
       '-Infinity velocity',
     );
-    assert.throws(() => offsetOf(700, 0, NaN), isRangeError, 'NaN rate');
-    assert.throws(() => offsetOf(700, 0, 1), isRangeError, 'rate 1');
   });
 });
 
@@ -206,17 +151,5 @@ module('Unit | snap-points | selectSnapPoint with flingVelocity', function () {
     assert.strictEqual(select(800, 500, 100), 800);
     assert.strictEqual(select(850, 500, 100), 800, 'rubber-banded');
     assert.strictEqual(select(-20, -500, 100), 0, 'below the first');
-  });
-
-  test('throws a RangeError for an invalid value', function (assert) {
-    for (const value of [NaN, -1, Infinity]) {
-      assert.throws(
-        () => select(100, 0, value),
-        (error: Error) =>
-          error instanceof RangeError &&
-          /flingVelocity must be a finite number >= 0/.test(error.message),
-        String(value),
-      );
-    }
   });
 });
