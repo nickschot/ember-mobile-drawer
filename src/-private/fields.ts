@@ -65,17 +65,12 @@ export function isTypingField(element: Element): boolean {
   );
 }
 
+/** Whether `element` contains an `isTypingField` field. */
 export function containsTypingField(element: HTMLElement): boolean {
   for (const field of element.querySelectorAll<HTMLElement>(
     'input, textarea, [contenteditable]',
   )) {
-    if (
-      field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement
-        ? isWritableTextControl(field)
-        : field.isContentEditable
-    ) {
-      return true;
-    }
+    if (isTypingField(field)) return true;
   }
   return false;
 }

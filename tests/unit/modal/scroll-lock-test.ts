@@ -105,6 +105,126 @@ module('Unit | modal | scroll-lock (iOS overflow lock)', function (hooks) {
     release();
   });
 
+  /** A horizontal scroller in `tray`, 50px wide with 200px of content. */
+  function horizontalScroller(direction: 'ltr' | 'rtl'): {
+    row: HTMLElement;
+    item: HTMLElement;
+  } {
+    const row = document.createElement('div');
+    row.dir = direction;
+    row.style.cssText = 'overflow-x: auto; overflow-y: hidden; width: 50px;';
+    const item = document.createElement('div');
+    item.style.cssText = 'width: 200px; height: 20px;';
+    row.append(item);
+    tray.append(row);
+    return { row, item };
+  }
+
+  test('horizontal swipes, left-to-right', function (assert) {
+    const { row, item } = horizontalScroller('ltr');
+    const release = lockOverflow();
+    row.scrollLeft = 0;
+    assert.true(swipe(item, 0, 20), 'at the start, finger right');
+    assert.false(swipe(item, 0, -20), 'at the start, finger left');
+    row.scrollLeft = 75;
+    assert.false(swipe(item, 0, 20), 'in the middle, finger right');
+    assert.false(swipe(item, 0, -20), 'in the middle, finger left');
+    row.scrollLeft = 1000;
+    assert.strictEqual(row.scrollLeft, 150, 'at the end');
+    assert.false(swipe(item, 0, 20), 'at the end, finger right');
+    assert.true(swipe(item, 0, -20), 'at the end, finger left');
+    release();
+  });
+
+  // #161: right-to-left scrollLeft runs from 0 (start, right edge) to -150.
+  test('horizontal swipes, right-to-left', function (assert) {
+    const { row, item } = horizontalScroller('rtl');
+    const release = lockOverflow();
+    row.scrollLeft = 0;
+    assert.false(swipe(item, 0, 20), 'at the start, finger right');
+    assert.true(swipe(item, 0, -20), 'at the start, finger left');
+    row.scrollLeft = -75;
+    assert.false(swipe(item, 0, 20), 'in the middle, finger right');
+    assert.false(swipe(item, 0, -20), 'in the middle, finger left');
+    row.scrollLeft = -1000;
+    assert.strictEqual(row.scrollLeft, -150, 'at the end');
+    assert.true(swipe(item, 0, 20), 'at the end, finger right');
+    assert.false(swipe(item, 0, -20), 'at the end, finger left');
+    release();
+  });
+
+  /**
+   * Focuses `field` in the tray of an overflow lock, scrolls the page, and
+   * returns whether that scroll stays (the keyboard counts as open).
+   */
+  async function scrollStaysWithFocusOn(field: HTMLElement): Promise<boolean> {
+    const spacer = document.createElement('div');
+    spacer.style.height = `${window.innerHeight + 2000}px`;
+    fixture.append(spacer);
+    const scrolled = () =>
+      new Promise<void>((resolve) => {
+        window.addEventListener('scroll', () => setTimeout(resolve, 0), {
+          once: true,
+        });
+      });
+    const start = window.scrollY;
+    window.scrollTo({ top: start + 100, behavior: 'instant' });
+    const y = window.scrollY;
+    const release = lockOverflow();
+    // Added after the lock: else a text field gives the fixed <body>.
+    tray.append(field);
+    field.focus();
+    const event = scrolled();
+    window.scrollTo({ top: y + 300, behavior: 'instant' });
+    await event;
+    const stays = window.scrollY !== y;
+    field.blur();
+    release();
+    window.scrollTo({ top: start, behavior: 'instant' });
+    return stays;
+  }
+
+  function input(type: string, attributes: string[] = []): HTMLInputElement {
+    const element = document.createElement('input');
+    element.type = type;
+    for (const attribute of attributes) element.setAttribute(attribute, '');
+    return element;
+  }
+
+  // #161: only a field that opens a keyboard keeps the page scroll.
+  test('focus on a field without a keyboard does not keep the page scroll', async function (assert) {
+    const fields: [string, HTMLElement][] = [
+      ['checkbox', input('checkbox')],
+      ['radio', input('radio')],
+      ['range', input('range')],
+      ['button', input('button')],
+      ['readonly text', input('text', ['readonly'])],
+      ['readonly textarea', document.createElement('textarea')],
+    ];
+    (fields[5]![1] as HTMLTextAreaElement).readOnly = true;
+    for (const [name, field] of fields) {
+      assert.false(await scrollStaysWithFocusOn(field), name);
+      field.remove();
+    }
+  });
+
+  test('focus on a text field keeps the page scroll', async function (assert) {
+    const editable = document.createElement('div');
+    editable.contentEditable = 'true';
+    editable.textContent = 'Text';
+    const fields: [string, HTMLElement][] = [
+      ['text', input('text')],
+      ['search', input('search')],
+      ['email', input('email')],
+      ['textarea', document.createElement('textarea')],
+      ['contenteditable', editable],
+    ];
+    for (const [name, field] of fields) {
+      assert.true(await scrollStaysWithFocusOn(field), name);
+      field.remove();
+    }
+  });
+
   test('keeps the scroll of a focused field (keyboard), else scrolls back', async function (assert) {
     const spacer = document.createElement('div');
     spacer.style.height = `${window.innerHeight + 2000}px`;
