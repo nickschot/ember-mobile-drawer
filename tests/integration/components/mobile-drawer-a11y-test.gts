@@ -943,6 +943,313 @@ module('Integration | Component | mobile-drawer | a11y', function (hooks) {
       assert.dom('[data-test-active]').hasText('0', 'after the drag it works');
     });
 
+    module('opened by a tap that gave no focus (Safari)', function () {
+      /** A tap that, as in Safari, doesn't focus what it went down on. */
+      const tap = (element: Element) =>
+        element.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            composed: true,
+            pointerType: 'touch',
+          }),
+        );
+
+      const blur = () => (document.activeElement as HTMLElement | null)?.blur();
+
+      test('focus returns to the button the tap went down on', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        blur();
+        assert.strictEqual(active(), document.body);
+
+        tap(el('[data-test-trigger]'));
+        state.active = 2;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-first]'), 'focus moved in');
+
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-trigger]'));
+      });
+
+      test('a tap on an element in a button finds the button', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        blur();
+        const trigger = el('[data-test-trigger]');
+        const label = document.createElement('span');
+        label.textContent = 'Open';
+        trigger.append(label);
+
+        tap(label);
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), trigger);
+        label.remove();
+      });
+
+      test('an element that has focus at the open still wins', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        await focus('[data-test-outside-button]');
+
+        tap(el('[data-test-trigger]'));
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-outside-button]'));
+      });
+
+      /** No target: focus stays on `<body>` or in the closed drawer. */
+      const noTarget = (assert: Assert, message: string) => {
+        const element = active();
+        assert.true(
+          element === document.body ||
+            el('[data-test-drawer]').contains(element),
+          message,
+        );
+      };
+
+      test('an old tap, or one on nothing focusable, gives no target', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        blur();
+
+        tap(el('[data-test-trigger]'));
+        clock.time += 1000;
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        noTarget(assert, 'more than 1 s ago');
+
+        blur();
+        tap(el('[data-test-outside]'));
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        noTarget(assert, 'not on a button');
+
+        // A tap counts for one open only.
+        blur();
+        tap(el('[data-test-trigger]'));
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), el('[data-test-trigger]'), 'used');
+        blur();
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+        noTarget(assert, 'not again');
+      });
+
+      /** Opens and closes the drawer after a tap on `element`. */
+      async function tapOpenClose(state: State, element: Element) {
+        blur();
+        tap(element);
+        state.active = 2;
+        await settle();
+        state.active = 0;
+        await settle();
+      }
+
+      test('an <input type="button"> or a checkbox in a <label> counts', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const container = el('[data-test-container]');
+        const input = Object.assign(document.createElement('input'), {
+          type: 'button',
+          value: 'Open',
+        });
+        const label = document.createElement('label');
+        const checkbox = Object.assign(document.createElement('input'), {
+          type: 'checkbox',
+        });
+        const text = document.createElement('span');
+        text.textContent = 'Show';
+        label.append(checkbox, text);
+        container.prepend(input, label);
+        try {
+          await tapOpenClose(state, input);
+          assert.strictEqual(active(), input, 'the input');
+          await tapOpenClose(state, text);
+          assert.strictEqual(active(), checkbox, 'the control of the label');
+        } finally {
+          input.remove();
+          label.remove();
+        }
+      });
+
+      test('a button in the shadow root of a web component counts', async function (assert) {
+        if (!customElements.get('test-shadow-trigger')) {
+          customElements.define(
+            'test-shadow-trigger',
+            class extends HTMLElement {
+              constructor() {
+                super();
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = 'Open';
+                this.attachShadow({ mode: 'open' }).append(button);
+              }
+            },
+          );
+        }
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const host = document.createElement('test-shadow-trigger');
+        el('[data-test-container]').prepend(host);
+        try {
+          const button = host.shadowRoot!.querySelector('button')!;
+          await tapOpenClose(state, button);
+          assert.strictEqual(active(), host, 'the host has focus');
+          assert.strictEqual(
+            host.shadowRoot!.activeElement,
+            button,
+            'on the button in it',
+          );
+        } finally {
+          host.remove();
+        }
+      });
+
+      test('slotted content of a button in a web component counts', async function (assert) {
+        if (!customElements.get('test-slot-trigger')) {
+          customElements.define(
+            'test-slot-trigger',
+            class extends HTMLElement {
+              constructor() {
+                super();
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.append(document.createElement('slot'));
+                this.attachShadow({ mode: 'open' }).append(button);
+              }
+            },
+          );
+        }
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const host = document.createElement('test-slot-trigger');
+        const label = document.createElement('span');
+        label.textContent = 'Open';
+        host.append(label);
+        el('[data-test-container]').prepend(host);
+        try {
+          // The path: <span>, <slot>, <button>, shadow root, host.
+          await tapOpenClose(state, label);
+          assert.strictEqual(active(), host, 'the host has focus');
+          assert.strictEqual(
+            host.shadowRoot!.activeElement,
+            host.shadowRoot!.querySelector('button'),
+            'on the button that the span is slotted in',
+          );
+        } finally {
+          host.remove();
+        }
+      });
+
+      test('a trigger that is disabled at the close: focus goes near it', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const trigger = el('[data-test-trigger]') as HTMLButtonElement;
+        blur();
+        tap(trigger);
+        state.active = 2;
+        await settle();
+        trigger.disabled = true;
+        state.active = 0;
+        await settle();
+        assert.strictEqual(
+          active(),
+          el('[data-test-page]'),
+          'the first tabbable element in its nearest ancestor',
+        );
+        trigger.disabled = false;
+      });
+
+      test('a trigger that disables itself until the open still counts', async function (assert) {
+        const state = new State();
+        await renderDrawer(state);
+        await settle();
+        const trigger = el('[data-test-trigger]') as HTMLButtonElement;
+        blur();
+        tap(trigger);
+        // E.g. while it loads the content.
+        trigger.disabled = true;
+        state.active = 2;
+        await settle();
+        trigger.disabled = false;
+        state.active = 0;
+        await settle();
+        assert.strictEqual(active(), trigger);
+      });
+
+      test('one document listener while drawers are on the page', async function (assert) {
+        const listening = new Set<EventListenerOrEventListenerObject>();
+        const add = document.addEventListener.bind(document);
+        const remove = document.removeEventListener.bind(document);
+        const capture = (options?: boolean | EventListenerOptions) =>
+          typeof options === 'boolean' ? options : !!options?.capture;
+        document.addEventListener = (
+          type: string,
+          listener: EventListenerOrEventListenerObject,
+          options?: boolean | AddEventListenerOptions,
+        ) => {
+          if (type === 'pointerdown' && capture(options)) {
+            listening.add(listener);
+          }
+          add(type, listener, options);
+        };
+        document.removeEventListener = (
+          type: string,
+          listener: EventListenerOrEventListenerObject,
+          options?: boolean | EventListenerOptions,
+        ) => {
+          if (type === 'pointerdown' && capture(options)) {
+            listening.delete(listener);
+          }
+          remove(type, listener, options);
+        };
+        try {
+          const state = new State();
+          state.secondActive = 2;
+          await renderDrawer(state);
+          await settle();
+          assert.strictEqual(listening.size, 1, 'one for two drawers');
+          state.secondActive = undefined;
+          await settle();
+          assert.strictEqual(listening.size, 1, 'one drawer left');
+          state.shown = false;
+          await settle();
+          assert.strictEqual(listening.size, 0, 'removed with the last');
+          state.shown = true;
+          await settle();
+          assert.strictEqual(listening.size, 1, 'added again');
+        } finally {
+          // @ts-expect-error: back to the method of the prototype.
+          delete document.addEventListener;
+          // @ts-expect-error: back to the method of the prototype.
+          delete document.removeEventListener;
+        }
+      });
+    });
+
     test('focus falls back near the trigger when the trigger is gone', async function (assert) {
       const state = new State();
       await renderDrawer(state);

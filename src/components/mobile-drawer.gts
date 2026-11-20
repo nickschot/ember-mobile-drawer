@@ -219,6 +219,83 @@ function trackInput(drawer: object, shown: boolean): void {
 }
 
 /**
+ * The control that the last pointer went down on while a drawer is on the
+ * page, also a closed one: Safari doesn't focus a button on click, so this is
+ * how a drawer opened by a tap there knows its trigger. Found at the
+ * `pointerdown`, so a trigger that disables itself until the open still
+ * counts. Cleared when an open uses it.
+ */
+let lastPointerDown:
+  { trigger: HTMLElement | SVGElement | undefined; time: number } | undefined;
+
+/** The elements that Safari doesn't focus on click, and `tabindex`. */
+const POINTER_TRIGGER = [
+  'button:not(:disabled)',
+  'input:is([type=button],[type=submit],[type=reset],[type=image],[type=checkbox],[type=radio]):not(:disabled)',
+  'summary',
+  'a[href]',
+  'area[href]',
+  '[tabindex]',
+].join(', ');
+
+/**
+ * The first such element in the event path, which goes into shadow roots and
+ * through slots (a slotted `<span>` in a web component's shadow `<button>`);
+ * for a `<label>`, its control.
+ */
+function pointerTriggerOf(
+  path: readonly EventTarget[],
+): HTMLElement | SVGElement | undefined {
+  for (const node of path) {
+    if (!(node instanceof HTMLElement || node instanceof SVGElement)) {
+      continue;
+    }
+    if (node.matches(POINTER_TRIGGER)) return node;
+    if (node instanceof HTMLLabelElement) {
+      const control = node.control;
+      if (control?.matches(POINTER_TRIGGER)) return control;
+    }
+  }
+  return undefined;
+}
+
+const onPointerDownTarget = (event: PointerEvent): void => {
+  lastPointerDown = {
+    // Into shadow roots and through slots, not only the host.
+    trigger: pointerTriggerOf(event.composedPath()),
+    time: inputTime(),
+  };
+};
+
+function trackPointerDown(listen: boolean): void {
+  if (listen) {
+    document.addEventListener(
+      'pointerdown',
+      onPointerDownTarget,
+      INPUT_LISTENER,
+    );
+  } else {
+    document.removeEventListener(
+      'pointerdown',
+      onPointerDownTarget,
+      INPUT_LISTENER,
+    );
+    lastPointerDown = undefined;
+  }
+}
+
+/**
+ * The control that a pointer went down on less than `INPUT_WINDOW` ago, for
+ * when focus is on `<body>` at the open.
+ */
+function recentPointerTrigger(): HTMLElement | SVGElement | undefined {
+  const record = lastPointerDown;
+  lastPointerDown = undefined;
+  if (!record || inputTime() - record.time >= INPUT_WINDOW) return undefined;
+  return record.trigger?.isConnected ? record.trigger : undefined;
+}
+
+/**
  * The input that gives `element` focus now: the recent input when there is
  * one, the same in every browser (Chrome gives a clicked `readonly` field
  * `:focus-visible`). Else, as for a screen reader or switch access, which
@@ -963,6 +1040,7 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         passive: true,
         signal,
       });
+      if (mountedDrawers.size === 0) trackPointerDown(true);
       mountedDrawers.add(this);
       registerDrawer({
         root,
@@ -1089,7 +1167,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       this.#endSwallowClick();
       this.#syncScrollLock();
       this.onTrayScrollEnd();
-      mountedDrawers.delete(this);
+      if (mountedDrawers.delete(this) && mountedDrawers.size === 0) {
+        trackPointerDown(false);
+      }
       if (this.#root) unregisterDrawer(this.#root);
       MobileDrawer.#syncNested();
       trackInput(this, false);
@@ -1912,8 +1992,15 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
         this.#returnFocus = active;
         this.#returnFocusPath = this.#ancestorsOf(active);
       } else if (!reopened) {
-        this.#returnFocus = undefined;
-        this.#returnFocusPath = [];
+        // Nothing focused, e.g. after a tap on a button in Safari: the
+        // element the tap went down on.
+        const trigger =
+          !active || active === document.body
+            ? recentPointerTrigger()
+            : undefined;
+        const from = trigger && !this.#contains(trigger) ? trigger : undefined;
+        this.#returnFocus = from;
+        this.#returnFocusPath = from ? this.#ancestorsOf(from) : [];
       }
       this.#openedByFocus = this.#focusOpenPending;
       this.#focusOpenPending = false;
@@ -2196,7 +2283,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
     if (!(focusInside || this.#hasFocus() || (wasModal && dropped))) return;
     if (target.isConnected) {
       target.focus();
-      return;
+      // Else, e.g. a trigger that is disabled now, near where it is.
+      const scope = target.getRootNode() as Document | ShadowRoot;
+      if (scope.activeElement === target) return;
     }
     const root = this.#root;
     const ancestor = path.find((element) => element.isConnected);
