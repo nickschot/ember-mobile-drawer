@@ -313,6 +313,60 @@ function applyThemeMedia(condition: string): HTMLStyleElement {
 }
 
 /**
+ * Applies the rules of every @media block with exactly this condition, in
+ * the base styles and the theme, as if it matched: same layer, later in
+ * source order. Chrome in the test runner can't emulate `forced-colors` or
+ * `prefers-contrast` (the screenshots of #167 and #168 use Chrome's
+ * emulation). Remove the returned style element when done.
+ */
+function applyMedia(condition: string): HTMLStyleElement {
+  const found: string[] = [];
+  const visit = (rules: CSSRuleList) => {
+    for (const rule of Array.from(rules)) {
+      if (rule instanceof CSSMediaRule && rule.conditionText === condition) {
+        found.push(...Array.from(rule.cssRules).map((inner) => inner.cssText));
+      } else if (rule instanceof CSSGroupingRule) {
+        visit(rule.cssRules);
+      }
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    visit(sheet.cssRules);
+  }
+  if (found.length === 0) throw new Error(`No @media rule for ${condition}`);
+  return addStyles(`@layer ember-mobile-drawer { ${found.join('\n')} }`);
+}
+
+/** The WCAG contrast ratio of two opaque `rgb()` colours. */
+function contrastRatio(a: string, b: string): number {
+  const luminance = (color: string) => {
+    const [r, g, b] = color
+      .match(/[\d.]+/g)!
+      .slice(0, 3)
+      .map((channel) => {
+        const c = Number(channel) / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      }) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [
+    number,
+    number,
+  ];
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/** A translucent `rgba()` colour over an opaque `rgb()` one, as `rgb()`. */
+function over(top: string, bottom: string): string {
+  const [r, g, b, a = 1] = top.match(/[\d.]+/g)!.map(Number);
+  const under = bottom.match(/[\d.]+/g)!.map(Number);
+  const mix = [r, g, b].map((channel, i) =>
+    Math.round(channel! * a + under[i]! * (1 - a)),
+  );
+  return `rgb(${mix.join(', ')})`;
+}
+
+/**
  * Turns on the theme's transitions, also on a machine with reduced motion,
  * by applying the rules of its `prefers-reduced-motion: no-preference`
  * block. Remove the returned style element when done.
@@ -1498,6 +1552,103 @@ module('Integration | themes/ios.css', function (hooks) {
       style.remove();
     }
   });
+
+  for (const scheme of SCHEMES) {
+    test(`${scheme}: increased contrast gives a grabber bar of at least 3:1 and a 1px edge`, async function (assert) {
+      await renderDrawer({ scheme });
+      const bar = () =>
+        rgb(
+          getComputedStyle(el('[data-test-grabber]'), '::before')
+            .backgroundColor,
+        );
+      // The shadow layer's value, as a computed box-shadow.
+      const probe = document.createElement('div');
+      probe.style.boxShadow = 'var(--mobile-drawer-ios-shadow)';
+      el('[data-test-theme]').append(probe);
+      const edgeLine = () =>
+        getComputedStyle(probe)
+          .boxShadow.split(/,(?![^(]*\))/)[0]!
+          .trim();
+      const tray = () => getComputedStyle(el('[data-test-tray]')).boxShadow;
+      const ink = scheme === 'light' ? '0, 0, 0' : '255, 255, 255';
+
+      // The default matches native iOS: 25% of the text colour.
+      assert.strictEqual(bar(), `rgba(${ink}, 0.25)`, 'default bar');
+      assert.true(tray().endsWith('0.5px inset'), 'default rim: 0.5px');
+      assert.true(edgeLine().endsWith(' 0.5px'), 'default edge line: 0.5px');
+
+      // Reduced transparency alone doesn't change the bar or the rim.
+      const reduced = applyMedia(
+        '(prefers-reduced-transparency: reduce), (prefers-contrast: more)',
+      );
+      try {
+        finishTransitions();
+        assert.strictEqual(bar(), `rgba(${ink}, 0.25)`, 'reduced: bar');
+        assert.true(tray().endsWith('0.5px inset'), 'reduced: rim');
+
+        // Increase Contrast matches both blocks.
+        const contrast = applyMedia('(prefers-contrast: more)');
+        try {
+          finishTransitions();
+          const sheet = rgb(
+            getComputedStyle(el('[data-test-tray]')).backgroundColor,
+          );
+          assert.strictEqual(sheet, SOLID[scheme], 'a solid sheet');
+          assert.strictEqual(bar(), `rgba(${ink}, 0.6)`, 'contrast: bar');
+          const ratio = contrastRatio(over(bar(), sheet), sheet);
+          assert.true(ratio >= 3, `bar ${ratio.toFixed(2)}:1 on the sheet`);
+          assert.strictEqual(
+            tray(),
+            scheme === 'light'
+              ? 'rgba(0, 0, 0, 0) 0px 0px 0px 1px inset'
+              : 'rgba(255, 255, 255, 0.5) 0px 0px 0px 1px inset',
+            'contrast: a 1px rim (none on the white sheet)',
+          );
+          assert.strictEqual(
+            edgeLine(),
+            scheme === 'light'
+              ? 'rgba(0, 0, 0, 0.45) 0px 0px 0px 1px'
+              : 'rgba(0, 0, 0, 0.8) 0px 0px 0px 1px',
+            'contrast: a 1px edge line on the shadow layer',
+          );
+        } finally {
+          contrast.remove();
+        }
+      } finally {
+        reduced.remove();
+      }
+    });
+
+    test(`${scheme}: forced colors draws the grabber bar in CanvasText`, async function (assert) {
+      await renderDrawer({ scheme });
+      const style = applyMedia('(forced-colors: active)');
+      try {
+        const bar = getComputedStyle(el('[data-test-grabber]'), '::before');
+        // CanvasText outside forced colors follows the colour scheme.
+        assert.strictEqual(
+          bar.backgroundColor,
+          scheme === 'light' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)',
+        );
+      } finally {
+        style.remove();
+      }
+    });
+  }
+
+  for (const placement of ['top', 'left', 'right'] as const) {
+    test(`${placement}: forced colors keeps the base outline on the tray`, async function (assert) {
+      await renderDrawer({ placement });
+      const style = applyMedia('(forced-colors: active)');
+      try {
+        const tray = getComputedStyle(el('[data-test-tray]'));
+        assert.strictEqual(tray.outlineStyle, 'solid');
+        assert.strictEqual(tray.outlineWidth, '1px');
+        assert.strictEqual(tray.outlineOffset, '-1px');
+      } finally {
+        style.remove();
+      }
+    });
+  }
 });
 
 class SheetState {
@@ -1690,6 +1841,69 @@ module('Integration | themes/ios.css | with the component', function (hooks) {
       );
     });
   }
+
+  test('bottom: forced colors draws the edge of the floating sheet on the shadow layer', async function (assert) {
+    const state = new SheetState('bottom');
+    const root = await renderSheet(state);
+    state.active = 1;
+    await frames();
+
+    const part = (selector: string) =>
+      root.querySelector<HTMLElement>(selector)!;
+    const tray = part('.mobile-drawer__tray');
+    const sheet = part('.mobile-drawer__sheet');
+    const edge = part('.mobile-drawer__shadow-edge');
+    const body = part('.mobile-drawer__shadow-body');
+    const trayBox = tray.getBoundingClientRect().toJSON() as unknown;
+
+    const style = applyMedia('(forced-colors: active)');
+    try {
+      assert.strictEqual(
+        getComputedStyle(tray).outlineStyle,
+        'none',
+        'not on the tray: the clips cut its sides',
+      );
+      for (const [name, computed] of [
+        ['edge', getComputedStyle(edge, '::before')],
+        ['body', getComputedStyle(body)],
+      ] as const) {
+        assert.strictEqual(computed.outlineStyle, 'solid', `${name}: solid`);
+        assert.strictEqual(computed.outlineWidth, '1px', `${name}: 1px`);
+        assert.strictEqual(
+          computed.outlineColor,
+          'rgb(0, 0, 0)',
+          `${name}: CanvasText`,
+        );
+        assert.strictEqual(
+          computed.outlineOffset,
+          '0px',
+          `${name}: outside the sheet's shape`,
+        );
+      }
+
+      // The body has the sheet's sides and bottom: the outline is just
+      // outside the part of the sheet that shows.
+      const s = sheet.getBoundingClientRect();
+      const b = body.getBoundingClientRect();
+      const t = tray.getBoundingClientRect();
+      assert.true(s.left - root.getBoundingClientRect().left > 0, 'floats');
+      assert.true(Math.abs(b.left - s.left) < 0.5, 'left side');
+      assert.true(Math.abs(b.right - s.right) < 0.5, 'right side');
+      assert.true(Math.abs(b.bottom - s.bottom) < 0.5, 'bottom');
+      assert.true(
+        Math.abs(edge.getBoundingClientRect().bottom - t.top) <
+          Number.parseFloat(getComputedStyle(tray).borderTopLeftRadius) + 0.5,
+        'the edge is at the top of the tray',
+      );
+      assert.deepEqual(
+        tray.getBoundingClientRect().toJSON(),
+        trayBox,
+        'the tray does not change',
+      );
+    } finally {
+      style.remove();
+    }
+  });
 
   /**
    * The shadow layer's boxes, in px relative to the root (the test container

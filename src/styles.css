@@ -455,6 +455,23 @@
   }
 
   /*
+   * Forced colors mode (#167) removes the tray's box-shadow and gives the
+   * tray the page's colour, so the edge is an outline. It is inside the
+   * box (offset -1px): the sheet's overflow doesn't cut it, and the clip of
+   * a bottom sheet without an inset cuts nothing. An outline doesn't change
+   * the layout or the measured sizes. While a bottom sheet floats (an
+   * inset), its clips cut the tray's sides, so only the top edge shows;
+   * a theme can draw the sheet's shape on the shadow layer (the iOS theme
+   * does). Forced colors keeps system colours, so CanvasText stays.
+   */
+  @media (forced-colors: active) {
+    :where(.mobile-drawer__tray) {
+      outline: 1px solid CanvasText;
+      outline-offset: -1px;
+    }
+  }
+
+  /*
    * iOS only (see "iOS Safari 26 bars" in the README): Safari 26 fills the
    * status bar and the toolbar with a colour that it samples from the fixed
    * element at each edge (WebKit's `LocalFrameView::fixedContainerEdges`).

@@ -1064,4 +1064,96 @@ module('Integration | styles.css', function (hooks) {
       }
     });
   }
+
+  /**
+   * The base styles' `forced-colors: active` rule, and the layer it is in.
+   * Chrome in the test runner doesn't turn on forced colors, so the tests
+   * apply its rules unconditionally (the screenshots of #167 use Chrome's
+   * forced colors emulation).
+   */
+  function forcedColorsRule(): { rule: CSSMediaRule; layer?: string } {
+    const visit = (
+      rules: CSSRuleList,
+      layer: string | undefined,
+    ): { rule: CSSMediaRule; layer?: string } | undefined => {
+      for (const rule of Array.from(rules)) {
+        if (
+          rule instanceof CSSMediaRule &&
+          rule.conditionText === '(forced-colors: active)' &&
+          !rule.cssText.includes('mobile-drawer-theme-ios')
+        ) {
+          return { rule, layer };
+        }
+        if (rule instanceof CSSGroupingRule) {
+          const found = visit(
+            rule.cssRules,
+            rule instanceof CSSLayerBlockRule ? rule.name : layer,
+          );
+          if (found) return found;
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      const found = visit(sheet.cssRules, undefined);
+      if (found) return found;
+    }
+    throw new Error('No forced-colors @media rule in the base styles');
+  }
+
+  test('forced colors: the rule is in the layer with zero specificity', async function (assert) {
+    await renderDrawer();
+
+    const { rule, layer } = forcedColorsRule();
+    assert.strictEqual(layer, 'ember-mobile-drawer');
+    for (const inner of Array.from(rule.cssRules)) {
+      assert.true(
+        inner instanceof CSSStyleRule &&
+          inner.selectorText.startsWith(':where('),
+        `${(inner as CSSStyleRule).selectorText} is in :where()`,
+      );
+    }
+
+    const tray = getComputedStyle(el('[data-test-tray]'));
+    assert.strictEqual(tray.outlineStyle, 'none', 'no outline without it');
+  });
+
+  for (const placement of PLACEMENTS) {
+    test(`${placement}: forced colors draws the tray edge with an outline inside the box`, async function (assert) {
+      await renderDrawer(placement);
+      const tray = el('[data-test-tray]');
+      const content = el('[data-test-content-wrapper]');
+      tray.style.transform = 'none';
+      const boxes = () => ({
+        tray: tray.getBoundingClientRect().toJSON() as unknown,
+        content: content.getBoundingClientRect().toJSON() as unknown,
+        scrollHeight: tray.scrollHeight,
+      });
+      const before = boxes();
+
+      const inner = Array.from(forcedColorsRule().rule.cssRules)
+        .map((rule) => rule.cssText)
+        .join('\n');
+      const style = addAppStyles(`@layer ember-mobile-drawer { ${inner} }`);
+
+      try {
+        const computed = getComputedStyle(tray);
+        assert.strictEqual(computed.outlineStyle, 'solid');
+        assert.strictEqual(computed.outlineWidth, '1px');
+        // CanvasText outside forced colors: black in the light scheme.
+        assert.strictEqual(computed.outlineColor, 'rgb(0, 0, 0)');
+        assert.strictEqual(
+          computed.outlineOffset,
+          '-1px',
+          'inside the box, so the sheet and the clip do not cut it',
+        );
+        assert.deepEqual(
+          boxes(),
+          before,
+          'the layout and the measured sizes do not change',
+        );
+      } finally {
+        style.remove();
+      }
+    });
+  }
 });
