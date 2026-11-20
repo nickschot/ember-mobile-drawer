@@ -465,36 +465,80 @@
    * does). Forced colors keeps system colours, so CanvasText stays.
    * - Not while the tray has keyboard focus: the browser's focus ring stays.
    * - A browser paints an element's outline under its positioned children,
-   *   so the header (z-index 1) and app content such as a sticky header
-   *   with a background would cover the edge. The content and the header
-   *   go under the tray's outline with a negative z-index (the header stays
-   *   above the content). The tray isolates them, so they stay above its
-   *   background. `position: relative` makes the content the containing
-   *   block of absolutely positioned elements in it (the tray is that
-   *   otherwise); it adds no offset, so nothing moves.
+   *   so the header (z-index 1, with a background) would cover the edge on
+   *   the leading side. The header's `::before` draws the edge there again:
+   *   a frame around the header, longer than it by the radius and 4px on
+   *   the side away from the leading edge, and clipped to the header. So
+   *   only the leading edge, its rounded corners and the sides show. It is
+   *   absolutely positioned, so nothing moves. App content with a background
+   *   on the leading edge (e.g. a sticky header) can still cover the edge:
+   *   give it a CanvasText border there.
    */
   @media (forced-colors: active) {
-    :where(.mobile-drawer__tray) {
-      isolation: isolate;
-    }
-
     :where(.mobile-drawer__tray:not(:focus-visible)) {
       outline: 1px solid CanvasText;
       outline-offset: -1px;
     }
 
     :where(
-      .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content
-    ) {
-      position: relative;
-      z-index: -2;
+      .mobile-drawer[data-header]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      --_mobile-drawer-header-edge-room: calc(
+        var(--mobile-drawer-radius, 0px) + 4px
+      );
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      box-sizing: border-box;
+      height: calc(100% + var(--_mobile-drawer-header-edge-room));
+      border: 1px solid CanvasText;
+      border-radius: var(--mobile-drawer-radius, 0)
+        var(--mobile-drawer-radius, 0) 0 0;
+      clip-path: inset(0 0 var(--_mobile-drawer-header-edge-room) 0);
+      pointer-events: none;
     }
 
     :where(
-      .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__header
-    ) {
-      position: relative;
-      z-index: -1;
+      .mobile-drawer[data-header][data-placement="top"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      inset: auto 0 0;
+      border-radius: 0 0 var(--mobile-drawer-radius, 0)
+        var(--mobile-drawer-radius, 0);
+      clip-path: inset(var(--_mobile-drawer-header-edge-room) 0 0 0);
+    }
+
+    :where(
+      .mobile-drawer[data-header][data-placement="left"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      inset: 0 0 0 auto;
+      width: calc(100% + var(--_mobile-drawer-header-edge-room));
+      height: auto;
+      border-radius: 0 var(--mobile-drawer-radius, 0)
+        var(--mobile-drawer-radius, 0) 0;
+      clip-path: inset(0 0 0 var(--_mobile-drawer-header-edge-room));
+    }
+
+    :where(
+      .mobile-drawer[data-header][data-placement="right"]
+        > .mobile-drawer__sheet
+        > .mobile-drawer__tray:not(:focus-visible)
+        > .mobile-drawer__header
+    )::before {
+      inset: 0 auto 0 0;
+      width: calc(100% + var(--_mobile-drawer-header-edge-room));
+      height: auto;
+      border-radius: var(--mobile-drawer-radius, 0) 0 0
+        var(--mobile-drawer-radius, 0);
+      clip-path: inset(0 var(--_mobile-drawer-header-edge-room) 0 0);
     }
   }
 
