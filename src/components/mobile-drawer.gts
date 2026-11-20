@@ -23,7 +23,11 @@ import {
   dragSource,
   type PanData,
 } from '../-private/gesture/drag-source.ts';
-import { drawerEnvironment } from '../-private/environment.ts';
+import {
+  drawerEnvironment,
+  type CloseWatcherConstructor,
+  type CloseWatcherLike,
+} from '../-private/environment.ts';
 import {
   lifecycle,
   type LifecycleHooks,
@@ -159,6 +163,74 @@ const CLICK_MATCH = 2;
  * and Tab.
  */
 const modalStack: MobileDrawer[] = [];
+
+/**
+ * One `CloseWatcher` while a modal drawer is open, so the Android back
+ * gesture closes the front one. Only where the browser has it (Chromium).
+ */
+let closeWatcher: CloseWatcherLike | undefined;
+
+function closeWatcherConstructor(): CloseWatcherConstructor | undefined {
+  const { CloseWatcher } = drawerEnvironment;
+  if (CloseWatcher !== undefined) return CloseWatcher ?? undefined;
+  return 'CloseWatcher' in window
+    ? (window as unknown as { CloseWatcher: CloseWatcherConstructor })
+        .CloseWatcher
+    : undefined;
+}
+
+function hasUserActivation(): boolean {
+  const { userActivation } = drawerEnvironment;
+  if (userActivation) return userActivation();
+  return (
+    (navigator as { userActivation?: { isActive: boolean } }).userActivation
+      ?.isActive ?? false
+  );
+}
+
+/**
+ * Creates the watcher when a modal drawer is open, destroys it when none is.
+ * Only `onclose`: `oncancel` needs a user activation. With `renew` and a user
+ * activation, a new watcher replaces the old one, so it comes after the
+ * app's watchers that are newer than the old one (e.g. a `<dialog>` in the
+ * drawer that opened a nested drawer). Without one, the browser would put
+ * the new watcher in the same group as the old one.
+ */
+function syncCloseWatcher(renew = false): void {
+  if (
+    modalStack.length === 0 ||
+    (renew && closeWatcher && hasUserActivation())
+  ) {
+    closeWatcher?.destroy();
+    closeWatcher = undefined;
+    if (modalStack.length === 0) return;
+  }
+  if (closeWatcher) return;
+  const Watcher = closeWatcherConstructor();
+  if (!Watcher) return;
+  let watcher: CloseWatcherLike;
+  try {
+    watcher = new Watcher();
+  } catch {
+    // E.g. `InvalidStateError` in a document that isn't fully active: no
+    // back gesture, the rest of the modal behaviour stays.
+    return;
+  }
+  closeWatcher = watcher;
+  watcher.onclose = () => {
+    // The browser destroyed it.
+    if (closeWatcher === watcher) closeWatcher = undefined;
+    try {
+      // The front one, which is not always the last one that became modal.
+      modalStack[modalStack.length - 1]?.close();
+    } finally {
+      // A new one for the next back gesture: modal drawers stay open, or a
+      // controlled drawer didn't take the close yet. Destroyed when the last
+      // one stops being modal.
+      syncCloseWatcher();
+    }
+  };
+}
 
 const mountedDrawers = new Set<MobileDrawer>();
 
@@ -2004,7 +2076,10 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       if (!this.#spring?.isAnimating && !this.#drag) this.#endStatusBar();
       this.#releaseInert?.();
       this.#releaseInert = undefined;
+      syncCloseWatcher();
     };
+    // After `#releaseModal` is set, so nothing can keep the page inert.
+    syncCloseWatcher(true);
     this.modalActive = true;
 
     if (
@@ -2276,7 +2351,8 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
   /**
    * `defaultPrevented` is left alone, so only the innermost nested drawer
    * closes. Not during a drag: the release decides where it goes, so the
-   * parent never sees a close and a reopen.
+   * parent never sees a close and a reopen. Still cancelled then, or the
+   * `CloseWatcher` would close the drawer.
    */
   #onKeyDown = (event: KeyboardEvent): void => {
     this.#stopMomentum();
@@ -2285,13 +2361,12 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       event.defaultPrevented ||
       event.isComposing ||
       !this.#open ||
-      this.#drag ||
       this.#destroyed
     ) {
       return;
     }
     event.preventDefault();
-    this.close();
+    if (!this.#drag) this.close();
   };
 
   /** Escape with focus outside (e.g. on `<body>`), and the Tab wrap. */
@@ -2304,9 +2379,9 @@ export default class MobileDrawer extends Component<MobileDrawerSignature> {
       return;
     }
     if (event.key === 'Escape') {
-      if (event.isComposing || !this.#open || this.#drag) return;
+      if (event.isComposing || !this.#open) return;
       event.preventDefault();
-      this.close();
+      if (!this.#drag) this.close();
     } else if (
       event.key === 'Tab' &&
       !event.altKey &&
