@@ -8,7 +8,8 @@
  *
  * - Everywhere: `overflow: hidden` on `<html>`, whose value applies to the
  *   viewport (also when the app sets `overflow` on `<html>`), and the body is
- *   padded by the width of a classic scrollbar so the page doesn't shift.
+ *   padded by the width of a classic scrollbar so the page doesn't shift. Not
+ *   when the app keeps that space with `scrollbar-gutter: stable` on `<html>`.
  * - iOS ignores `overflow: hidden` for touch scrolling: `<body>` is fixed at
  *   its scroll position, and touchmoves outside the allowed elements are
  *   cancelled so the viewport doesn't rubber-band.
@@ -179,10 +180,12 @@ function lock(options: LockOptions): Saved {
 
   // Before hiding the overflow, which removes a classic scrollbar.
   const scrollbar = window.innerWidth - html.clientWidth;
-  if (scrollbar > 0) {
-    const padding = parseFloat(getComputedStyle(body).paddingRight) || 0;
-    body.style.paddingRight = `${padding + scrollbar}px`;
-  }
+  // The app keeps the scrollbar's space: pad only if the page gets wider.
+  const gutter =
+    scrollbar > 0 &&
+    getComputedStyle(html).scrollbarGutter.startsWith('stable');
+  const width = gutter ? html.getBoundingClientRect().width : 0;
+  if (scrollbar > 0 && !gutter) padBody(body, scrollbar);
 
   if (
     ios &&
@@ -220,7 +223,18 @@ function lock(options: LockOptions): Saved {
   }
 
   html.style.overflow = 'hidden';
+  if (gutter) {
+    // Chrome doesn't keep the space of a custom scrollbar with overlay
+    // scrollbars (macOS).
+    const grown = html.getBoundingClientRect().width - width;
+    if (grown > 0.5) padBody(body, grown);
+  }
   return result;
+}
+
+function padBody(body: HTMLElement, width: number): void {
+  const padding = parseFloat(getComputedStyle(body).paddingRight) || 0;
+  body.style.paddingRight = `${padding + width}px`;
 }
 
 function unlock(state: Saved): void {
