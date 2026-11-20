@@ -37,13 +37,14 @@ const OPPOSITE: Record<Placement, Side> = {
  * Safe-area insets compute to 0 in desktop Chrome, so their sides are
  * checked on the rule text instead of on computed styles.
  */
-function baseRule(selector: string): CSSStyleRule {
+function baseRule(selector: string, property?: string): CSSStyleRule {
   const wrapped = `:where(${selector})`;
   const visit = (rules: CSSRuleList): CSSStyleRule | undefined => {
     for (const rule of Array.from(rules)) {
       if (
         rule instanceof CSSStyleRule &&
-        rule.selectorText.split(/\s*,\s*/).includes(wrapped)
+        rule.selectorText.split(/\s*,\s*/).includes(wrapped) &&
+        (!property || rule.style.getPropertyValue(property) !== '')
       ) {
         return rule;
       }
@@ -60,16 +61,25 @@ function baseRule(selector: string): CSSStyleRule {
   throw new Error(`No rule found for ${wrapped}`);
 }
 
+/*
+ * Bottom is the default: its tray and content values are in the rules
+ * without a placement (the other placements override them), the ones that
+ * set the tray's `transform` and the content's `padding`.
+ */
 function trayRule(placement: Placement): CSSStyleRule {
-  return baseRule(
-    `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__sheet > .mobile-drawer__tray`,
-  );
+  return placement === 'bottom'
+    ? baseRule('.mobile-drawer__tray', 'transform')
+    : baseRule(
+        `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__sheet > .mobile-drawer__tray`,
+      );
 }
 
 function contentRule(placement: Placement): CSSStyleRule {
-  return baseRule(
-    `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content`,
-  );
+  return placement === 'bottom'
+    ? baseRule('.mobile-drawer__content', 'padding')
+    : baseRule(
+        `.mobile-drawer[data-placement="${placement}"] > .mobile-drawer__sheet > .mobile-drawer__tray > .mobile-drawer__content`,
+      );
 }
 
 /** Adds app CSS to the page for the duration of a test. */

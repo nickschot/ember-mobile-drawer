@@ -287,6 +287,17 @@
   inherits: false;
 }
 
+/*
+ * Private: the floating sheet's bottom radius (see "The floating sheet"),
+ * on the sheet and on the shadow body. It changes with the expand progress,
+ * so it is not inherited: the content isn't styled again when it changes.
+ */
+@property --_mobile-drawer-ios-bottom-radius {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @layer ember-mobile-drawer {
   /* Solid sheet (light; also the fallback without light-dark()). */
   :where(.mobile-drawer-theme-ios) {
@@ -316,6 +327,18 @@
        styles.css), which the grabber strip moves out of. */
     --_mobile-drawer-ios-inset-left: env(safe-area-inset-left, 0px);
     --_mobile-drawer-ios-inset-right: env(safe-area-inset-right, 0px);
+  }
+
+  /* Private: the side padding that the content has in addition to the side
+     safe areas: the inset of a bottom sheet (see "The floating bottom
+     sheet" below), else 0. On every root, so a drawer in another drawer's
+     content gets its own value. */
+  :where(.mobile-drawer-theme-ios .mobile-drawer) {
+    --_mobile-drawer-ios-side-inset: 0px;
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"]) {
+    --_mobile-drawer-ios-side-inset: var(--mobile-drawer-inset, 0px);
   }
 
   @supports (color: light-dark(#000, #fff)) {
@@ -401,12 +424,13 @@
 
   /*
    * Bottom and top sheets: across the full tray width, out of the content's
-   * side padding (the side safe areas, e.g. iPhone landscape), with the same
-   * padding inside, so the bar stays clear of the safe areas. The values are
-   * the base styles' content padding for these placements; an app that
-   * changes that padding must change these too (see the README). Not for
-   * left and right drawers: their content has no padding on one side, so
-   * the margins would make the tray scroll sideways.
+   * side padding (the side safe areas, e.g. iPhone landscape, and the inset
+   * of a bottom sheet), with the same padding inside, so the bar stays clear
+   * of the safe areas. The values are the content padding for these
+   * placements (the base styles' for a top sheet); an app that changes that
+   * padding must change these too (see the README). Not for left and right
+   * drawers: their content has no padding on one side, so the margins would
+   * make the tray scroll sideways.
    */
   :where(
     .mobile-drawer-theme-ios
@@ -416,10 +440,28 @@
       > .mobile-drawer__content
       > .mobile-drawer-theme-ios__grabber
   ) {
-    margin-right: calc(-1 * var(--_mobile-drawer-ios-inset-right));
-    margin-left: calc(-1 * var(--_mobile-drawer-ios-inset-left));
-    padding-right: var(--_mobile-drawer-ios-inset-right);
-    padding-left: var(--_mobile-drawer-ios-inset-left);
+    margin-right: calc(
+      -1 *
+        (
+          var(--_mobile-drawer-ios-inset-right) +
+            var(--_mobile-drawer-ios-side-inset, 0px)
+        )
+    );
+    margin-left: calc(
+      -1 *
+        (
+          var(--_mobile-drawer-ios-inset-left) +
+            var(--_mobile-drawer-ios-side-inset, 0px)
+        )
+    );
+    padding-right: calc(
+      var(--_mobile-drawer-ios-inset-right) +
+        var(--_mobile-drawer-ios-side-inset, 0px)
+    );
+    padding-left: calc(
+      var(--_mobile-drawer-ios-inset-left) +
+        var(--_mobile-drawer-ios-side-inset, 0px)
+    );
   }
 
   /*
@@ -429,9 +471,9 @@
    * at every snap point. A constant padding keeps the content's width, so
    * it isn't laid out again while the sheet expands. At full height the
    * content thus has 8px more side padding than a native sheet. The grabber
-   * strip moves out of this padding too. The header (see "The header"
-   * below) has the same padding. Specificity 0,1,0 for the content and the
-   * header, so it wins over the base padding in either load order.
+   * strip moves out of this padding too (see above). The header (see "The
+   * header" below) has the same padding. Specificity 0,1,0 for the content
+   * and the header, so it wins over the base padding in either load order.
    */
   :where(
       .mobile-drawer-theme-ios
@@ -441,37 +483,12 @@
     )
     > :is(.mobile-drawer__content, .mobile-drawer__header) {
     padding-right: calc(
-      var(--_mobile-drawer-ios-inset-right) + var(--mobile-drawer-inset, 0px)
+      var(--_mobile-drawer-ios-inset-right) +
+        var(--_mobile-drawer-ios-side-inset, 0px)
     );
     padding-left: calc(
-      var(--_mobile-drawer-ios-inset-left) + var(--mobile-drawer-inset, 0px)
-    );
-  }
-
-  :where(
-    .mobile-drawer-theme-ios
-      .mobile-drawer[data-placement="bottom"]
-      > .mobile-drawer__sheet
-      > .mobile-drawer__tray
-      > .mobile-drawer__content
-      > .mobile-drawer-theme-ios__grabber
-  ) {
-    margin-right: calc(
-      -1 *
-        (
-          var(--_mobile-drawer-ios-inset-right) +
-            var(--mobile-drawer-inset, 0px)
-        )
-    );
-    margin-left: calc(
-      -1 *
-        (var(--_mobile-drawer-ios-inset-left) + var(--mobile-drawer-inset, 0px))
-    );
-    padding-right: calc(
-      var(--_mobile-drawer-ios-inset-right) + var(--mobile-drawer-inset, 0px)
-    );
-    padding-left: calc(
-      var(--_mobile-drawer-ios-inset-left) + var(--mobile-drawer-inset, 0px)
+      var(--_mobile-drawer-ios-inset-left) +
+        var(--_mobile-drawer-ios-side-inset, 0px)
     );
   }
 
@@ -501,9 +518,20 @@
    * (inside the relative colour @supports below); on a transparent or
    * translucent strip the tray's own rim shows, and a second one would make
    * it brighter. It uses the theme's rim colour, not an app's
-   * --mobile-drawer-shadow (see the README).
+   * --mobile-drawer-shadow (see the README). The opaque header (see "The
+   * header" below) draws its rim with the same box.
    */
-  :where(.mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber)::after {
+  :where(
+    .mobile-drawer-theme-ios .mobile-drawer-theme-ios__grabber,
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-header][data-at-highest]:is(
+        [data-placement="bottom"],
+        [data-placement="top"]
+      )
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
+  )::after {
     content: "";
     position: absolute;
     inset: 0 0 auto;
@@ -532,7 +560,12 @@
       > .mobile-drawer__sheet
       > .mobile-drawer__tray
       > .mobile-drawer__content
-      > .mobile-drawer-theme-ios__grabber
+      > .mobile-drawer-theme-ios__grabber,
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-header][data-at-highest][data-placement="top"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+      > .mobile-drawer__header
   )::after {
     inset: auto 0 0;
     border-radius: 0 0 var(--mobile-drawer-radius, 0px)
@@ -569,21 +602,6 @@
       }
     }
 
-    :where(.mobile-drawer-theme-ios .mobile-drawer__tray),
-    :where(
-      .mobile-drawer-theme-ios
-        .mobile-drawer:not(
-          [data-placement="top"],
-          [data-placement="left"],
-          [data-placement="right"]
-        )
-        > .mobile-drawer__sheet
-        > .mobile-drawer__glass
-    ) {
-      -webkit-backdrop-filter: blur(30px) saturate(1.8);
-      backdrop-filter: blur(30px) saturate(1.8);
-    }
-
     /*
      * A bottom sheet: the blur is on the glass layer under the tray (see
      * styles.css), not on the tray. Chrome doesn't clip a backdrop-filter
@@ -594,32 +612,33 @@
      * `clip-path`. It is in the sheet, not in the tray: in Safari an
      * ancestor with a `clip-path` is a backdrop root, and a blur in the
      * tray would show nothing. The tray's tint is over the blur, as before.
+     * Top, left and right drawers have the blur on the tray.
      */
     :where(
       .mobile-drawer-theme-ios
-        .mobile-drawer:not(
+        .mobile-drawer:is(
           [data-placement="top"],
           [data-placement="left"],
           [data-placement="right"]
         )
         > .mobile-drawer__sheet
+        > .mobile-drawer__tray,
+      .mobile-drawer-theme-ios
+        .mobile-drawer[data-placement="bottom"]
+        > .mobile-drawer__sheet
         > .mobile-drawer__glass
     ) {
-      display: block;
+      -webkit-backdrop-filter: blur(30px) saturate(1.8);
+      backdrop-filter: blur(30px) saturate(1.8);
     }
 
     :where(
       .mobile-drawer-theme-ios
-        .mobile-drawer:not(
-          [data-placement="top"],
-          [data-placement="left"],
-          [data-placement="right"]
-        )
+        .mobile-drawer[data-placement="bottom"]
         > .mobile-drawer__sheet
-        > .mobile-drawer__tray
+        > .mobile-drawer__glass
     ) {
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
+      display: block;
     }
   }
 
@@ -658,49 +677,41 @@
    * the sheet is at the screen edge, and the corners must be square before
    * it touches the edge. Where the inset is 0 (e.g. an app that sets
    * `--mobile-drawer-inset: 0px`), the radius is 0 too (`min()` with the
-   * inset times 1000).
+   * inset times 1000). The shadow body (see "The shadow" below) has the
+   * same radius.
    */
   :where(
     .mobile-drawer-theme-ios
-      .mobile-drawer:not(
-        [data-placement="top"],
-        [data-placement="left"],
-        [data-placement="right"]
-      )
+      .mobile-drawer[data-placement="bottom"]
+      > .mobile-drawer__sheet,
+    .mobile-drawer-theme-ios .mobile-drawer__shadow-body
+  ) {
+    --_mobile-drawer-ios-bottom-radius: min(
+      calc(
+        var(
+            --mobile-drawer-ios-bottom-radius,
+            var(--mobile-drawer-radius, 0px)
+          ) *
+          min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
+      ),
+      calc(var(--mobile-drawer-inset, 0px) * 1000)
+    );
+  }
+
+  :where(
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-placement="bottom"]
       > .mobile-drawer__sheet
   ) {
-    border-radius: 0 0
-      min(
-        calc(
-          var(
-              --mobile-drawer-ios-bottom-radius,
-              var(--mobile-drawer-radius, 0px)
-            ) *
-            min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
-        ),
-        calc(var(--mobile-drawer-inset, 0px) * 1000)
-      )
-      min(
-        calc(
-          var(
-              --mobile-drawer-ios-bottom-radius,
-              var(--mobile-drawer-radius, 0px)
-            ) *
-            min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
-        ),
-        calc(var(--mobile-drawer-inset, 0px) * 1000)
-      );
+    border-radius: 0 0 var(--_mobile-drawer-ios-bottom-radius)
+      var(--_mobile-drawer-ios-bottom-radius);
   }
 
   /* No bottom radius while the sheet meets the keyboard fill, see
      [data-keyboard] in styles.css. */
   :where(
     .mobile-drawer-theme-ios
-      .mobile-drawer[data-keyboard]:not(
-        [data-placement="top"],
-        [data-placement="left"],
-        [data-placement="right"]
-      )
+      .mobile-drawer[data-keyboard]
       > .mobile-drawer__sheet
   ) {
     border-radius: 0;
@@ -740,14 +751,7 @@
    * inset and the radius change, so the boxes are painted again, as the
    * tray is (its clip changes too).
    */
-  :where(
-      .mobile-drawer-theme-ios
-        .mobile-drawer:not(
-          [data-placement="top"],
-          [data-placement="left"],
-          [data-placement="right"]
-        )
-    )
+  :where(.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"])
     > .mobile-drawer__shadow {
     /* Private: the room around the sheet for the shadow, see above. */
     --_mobile-drawer-ios-shadow-room: 120px;
@@ -823,27 +827,8 @@
         (1 - var(--mobile-drawer-expand-progress))
     );
     /* The sheet's bottom radius, see "The floating sheet". */
-    border-radius: 0 0
-      min(
-        calc(
-          var(
-              --mobile-drawer-ios-bottom-radius,
-              var(--mobile-drawer-radius, 0px)
-            ) *
-            min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
-        ),
-        calc(var(--mobile-drawer-inset, 0px) * 1000)
-      )
-      min(
-        calc(
-          var(
-              --mobile-drawer-ios-bottom-radius,
-              var(--mobile-drawer-radius, 0px)
-            ) *
-            min(1, (1 - var(--mobile-drawer-expand-progress)) * 10)
-        ),
-        calc(var(--mobile-drawer-inset, 0px) * 1000)
-      );
+    border-radius: 0 0 var(--_mobile-drawer-ios-bottom-radius)
+      var(--_mobile-drawer-ios-bottom-radius);
     box-shadow: var(--mobile-drawer-ios-shadow, none);
   }
 
@@ -877,30 +862,35 @@
    * drawers, and only the rim on a bottom sheet, because the shadow layer
    * draws its outer shadow. An app value with an outer shadow on a bottom
    * sheet is clipped while the sheet floats (see styles.css); see the
-   * README. Specificity 0,1,0, so these win over the base tray shadow in
-   * either load order.
+   * README. The theme's value per placement is the private
+   * `--_mobile-drawer-ios-tray-default`, on every tray. The box-shadow rule
+   * has specificity 0,1,0, so it wins over the base tray shadow in either
+   * load order. The nested dim (see "Nested sheets" below) adds to it.
    */
-  :where(.mobile-drawer-theme-ios .mobile-drawer__sheet)
-    > .mobile-drawer__tray {
-    box-shadow: var(
-      --mobile-drawer-shadow,
-      var(--_mobile-drawer-ios-tray-shadow, none)
+  :where(
+    .mobile-drawer-theme-ios .mobile-drawer__sheet > .mobile-drawer__tray
+  ) {
+    --_mobile-drawer-ios-tray-default: var(
+      --_mobile-drawer-ios-tray-shadow,
+      none
     );
   }
 
   :where(
-      .mobile-drawer-theme-ios
-        .mobile-drawer:not(
-          [data-placement="top"],
-          [data-placement="left"],
-          [data-placement="right"]
-        )
-        > .mobile-drawer__sheet
-    )
+    .mobile-drawer-theme-ios
+      .mobile-drawer[data-placement="bottom"]
+      > .mobile-drawer__sheet
+      > .mobile-drawer__tray
+  ) {
+    --_mobile-drawer-ios-tray-default: inset 0 0 0 0.5px
+      var(--_mobile-drawer-ios-rim, transparent);
+  }
+
+  :where(.mobile-drawer-theme-ios .mobile-drawer__sheet)
     > .mobile-drawer__tray {
     box-shadow: var(
       --mobile-drawer-shadow,
-      inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent)
+      var(--_mobile-drawer-ios-tray-default)
     );
   }
 
@@ -978,14 +968,7 @@
      * sheet colour. Mixed with the expand progress. Here with the sheet
      * colour as it is (translucent); with relative colours (below) opaque.
      */
-    :where(
-        .mobile-drawer-theme-ios
-          .mobile-drawer:not(
-            [data-placement="top"],
-            [data-placement="left"],
-            [data-placement="right"]
-          )
-      )
+    :where(.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"])
       > .mobile-drawer__bar-tint {
       background-color: color-mix(
         in srgb,
@@ -1010,14 +993,7 @@
     @supports (
       color: color-mix(in srgb, rgb(from light-dark(red, red) r g b / 1), red)
     ) {
-      :where(
-          .mobile-drawer-theme-ios
-            .mobile-drawer:not(
-              [data-placement="top"],
-              [data-placement="left"],
-              [data-placement="right"]
-            )
-        )
+      :where(.mobile-drawer-theme-ios .mobile-drawer[data-placement="bottom"])
         > .mobile-drawer__bar-tint {
         background-color: color-mix(
           in srgb,
@@ -1153,7 +1129,10 @@
    * background (`--mobile-drawer-ios-nested-dim`, default 12% black), so
    * it doesn't cover the content: a drawer inside the content (in front of
    * this one) doesn't dim. The opaque grabber strip gets it too, so it
-   * doesn't show as a band. Specificity 0,1,0 for the tray, as above.
+   * doesn't show as a band. Specificity 0,1,0 for the tray, as above; the
+   * tray shadow is the one of "The tray shadow" (for a bottom sheet
+   * without an app value only the rim, the shadow layer draws the outer
+   * shadow).
    */
   :where(
       .mobile-drawer-theme-ios
@@ -1162,27 +1141,7 @@
     )
     > .mobile-drawer__tray {
     box-shadow:
-      var(--mobile-drawer-shadow, var(--_mobile-drawer-ios-tray-shadow, none)),
-      inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
-  }
-
-  /* A bottom sheet: without an app value, the rim and the dim, without an
-     outer shadow (the shadow layer draws it, see "The shadow"). */
-  :where(
-      .mobile-drawer-theme-ios
-        .mobile-drawer[data-nested]:not(
-          [data-placement="top"],
-          [data-placement="left"],
-          [data-placement="right"]
-        )
-        > .mobile-drawer__sheet
-    )
-    > .mobile-drawer__tray {
-    box-shadow:
-      var(
-        --mobile-drawer-shadow,
-        inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent)
-      ),
+      var(--mobile-drawer-shadow, var(--_mobile-drawer-ios-tray-default)),
       inset 0 0 0 100vmax var(--mobile-drawer-ios-nested-dim, rgb(0 0 0 / 0.12));
   }
 
@@ -1243,10 +1202,9 @@
       background: rgb(from var(--mobile-drawer-background, Canvas) r g b / 1);
     }
 
-    /* The rim over the opaque header: a box with the tray's radius on the
-       leading corners, taller than the header by the radius (so the radius
-       isn't scaled down), clipped to the header. Bottom and top sheets
-       only, as the grabber strip. */
+    /* The rim over the opaque header: the box of the grabber's rim (see
+       the grabber), clipped to the header. Bottom and top sheets only, as
+       the grabber strip. */
     :where(
       .mobile-drawer-theme-ios
         .mobile-drawer[data-header][data-at-highest]:is(
@@ -1257,15 +1215,8 @@
         > .mobile-drawer__tray
         > .mobile-drawer__header
     )::after {
-      content: "";
-      position: absolute;
-      inset: 0 0 auto;
-      height: calc(100% + var(--mobile-drawer-radius, 0px));
-      border-radius: var(--mobile-drawer-radius, 0px)
-        var(--mobile-drawer-radius, 0px) 0 0;
       box-shadow: inset 0 0 0 0.5px var(--_mobile-drawer-ios-rim, transparent);
       clip-path: inset(0 0 var(--mobile-drawer-radius, 0px) 0);
-      pointer-events: none;
     }
 
     :where(
@@ -1275,9 +1226,6 @@
         > .mobile-drawer__tray
         > .mobile-drawer__header
     )::after {
-      inset: auto 0 0;
-      border-radius: 0 0 var(--mobile-drawer-radius, 0px)
-        var(--mobile-drawer-radius, 0px);
       clip-path: inset(var(--mobile-drawer-radius, 0px) 0 0 0);
     }
   }
@@ -1386,11 +1334,7 @@
     @media (prefers-reduced-motion: no-preference) {
       :where(
           body:has(> .mobile-drawer-theme-ios__page)
-            .mobile-drawer:not(
-              [data-placement="top"],
-              [data-placement="left"],
-              [data-placement="right"]
-            )
+            .mobile-drawer[data-placement="bottom"]
         )
         > .mobile-drawer__bar-tint {
         background-color: color-mix(
